@@ -739,13 +739,17 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
 
   // Generate projection data for all periods
   const delivered = [];
-  const currentDate = new Date();
+  
+  // Gunakan savingsStartDate jika ada, kalau tidak pakai tanggal member dibuat
+  const startDate = member.savingsStartDate 
+    ? new Date(member.savingsStartDate) 
+    : new Date(member.createdAt);
 
   for (let i = 1; i <= product.termDuration; i++) {
-    // Calculate date projection (adding i months to current date)
+    // Calculate date projection dari startDate + (i-1) bulan
     const projectionDate = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth() + i,
+      startDate.getFullYear(),
+      startDate.getMonth() + (i - 1),
       1
     );
     const dateProjection = projectionDate.toLocaleDateString("en-US", {

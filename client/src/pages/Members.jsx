@@ -35,6 +35,7 @@ const Members = () => {
     username: "",
     password: "",
     productId: "",
+    savingsStartDate: "", // Tanggal mulai tabungan
   });
 
   useEffect(() => {
@@ -169,6 +170,7 @@ const Members = () => {
             username: "",
             password: "",
             productId: "",
+            savingsStartDate: "",
           });
         }
       }
@@ -191,6 +193,7 @@ const Members = () => {
       username: member.user.username,
       password: "",
       productId: member.productId || "",
+      savingsStartDate: member.savingsStartDate ? member.savingsStartDate.split('T')[0] : "",
     });
     setShowModal(true);
   };
@@ -223,6 +226,7 @@ const Members = () => {
       username: "",
       password: "",
       productId: "",
+      savingsStartDate: "",
     });
     setShowModal(true);
   };
@@ -724,6 +728,25 @@ const Members = () => {
                     placeholder="Contoh: 1234567890"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    📅 Tanggal Mulai Tabungan (Opsional)
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.savingsStartDate}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        savingsStartDate: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <small className="text-gray-500 mt-1 block">
+                    💡 Kosongkan untuk default bulan saat ini. Isi jika student sudah bayar dari bulan sebelumnya.
+                  </small>
                 </div>
                 <div className="flex justify-end space-x-3">
                   <button

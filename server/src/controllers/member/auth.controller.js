@@ -69,7 +69,9 @@ export const loginMember = asyncHandler(async (req, res) => {
           completeAddress: member.completeAddress,
           productId: member.productId, // Include productId in response
           hasUpgraded: member.hasUpgraded || false,
-          currentUpgradeId: member.currentUpgradeId || null
+          currentUpgradeId: member.currentUpgradeId || null,
+          savingsStartDate: member.savingsStartDate || null,
+          createdAt: member.createdAt,
         },
         token,
       },
@@ -118,7 +120,9 @@ export const getCurrentMember = asyncHandler(async (req, res) => {
           completeAddress: member.completeAddress,
           productId: member.productId, // Include productId
           hasUpgraded: member.hasUpgraded || false,
-          currentUpgradeId: member.currentUpgradeId || null
+          currentUpgradeId: member.currentUpgradeId || null,
+          savingsStartDate: member.savingsStartDate || null,
+          createdAt: member.createdAt,
         },
       },
     });

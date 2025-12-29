@@ -60,6 +60,11 @@ const memberSchema = new Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ProductUpgrade",
     }],
+    // Tanggal mulai tabungan - admin bisa set kapan periode 1 dimulai
+    savingsStartDate: {
+      type: Date,
+      default: null, // null = pakai bulan saat member dibuat
+    },
   },
   {
     timestamps: true,

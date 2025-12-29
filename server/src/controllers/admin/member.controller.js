@@ -103,6 +103,7 @@ const createMember = asyncHandler(async (req, res) => {
     completeAddress,
     accountNumber,
     productId,
+    savingsStartDate, // Tanggal mulai tabungan (opsional)
   } = req.body;
 
   // Validate required fields
@@ -170,6 +171,7 @@ const createMember = asyncHandler(async (req, res) => {
     user: user._id,
     uuid: memberUUID,
     productId: productId || null,
+    savingsStartDate: savingsStartDate ? new Date(savingsStartDate) : null,
   });
 
   await member.save();
@@ -198,6 +200,7 @@ const updateMember = asyncHandler(async (req, res) => {
     completeAddress,
     accountNumber,
     productId,
+    savingsStartDate, // Tanggal mulai tabungan (opsional)
   } = req.body;
 
   const member = await Member.findOne({ uuid });
@@ -230,6 +233,9 @@ const updateMember = asyncHandler(async (req, res) => {
   member.accountNumber = accountNumber !== undefined ? accountNumber : member.accountNumber;
   if (productId !== undefined) {
     member.productId = productId || null;
+  }
+  if (savingsStartDate !== undefined) {
+    member.savingsStartDate = savingsStartDate ? new Date(savingsStartDate) : null;
   }
 
   await member.save();
