@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/index.jsx";
 import Pagination from "../components/Pagination.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import { toast } from "react-toastify";
 
 const Members = () => {
   const navigate = useNavigate();
@@ -11,6 +13,16 @@ const Members = () => {
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
+
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "warning",
+    onConfirm: () => {},
+  });
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   // 🔴 NEW: state untuk UUID student & dropdown
   const [availableUuids, setAvailableUuids] = useState([]);
@@ -138,6 +150,17 @@ const Members = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validation
+    if (!formData.name.trim()) {
+      toast.error("⚠️ Nama anggota wajib diisi");
+      return;
+    }
+    if (!formData.uuid.trim()) {
+      toast.error("⚠️ UUID anggota wajib diisi");
+      return;
+    }
+    
     try {
       if (editingMember) {
         const response = await api.put(
@@ -145,6 +168,7 @@ const Members = () => {
           formData
         );
         if (response.data.success) {
+          toast.success("✅ Data anggota berhasil diperbarui");
           fetchMembers();
           setShowModal(false);
           setEditingMember(null);
@@ -157,6 +181,7 @@ const Members = () => {
         };
         const response = await api.post("/api/admin/members", memberData);
         if (response.data.success) {
+          toast.success("🎉 Anggota baru berhasil ditambahkan");
           fetchMembers();
           setShowModal(false);
           // 🔴 NEW: reset uuid juga
@@ -176,6 +201,7 @@ const Members = () => {
         }
       }
     } catch (err) {
+      toast.error(err.response?.data?.message || "Gagal menyimpan data");
       setError("Gagal menyimpan data");
       console.error("Submit error:", err);
     }
@@ -199,18 +225,30 @@ const Members = () => {
     setShowModal(true);
   };
 
-  const handleDelete = async (uuid) => {
-    if (window.confirm("Apakah Anda yakin ingin menghapus anggota ini?")) {
-      try {
-        const response = await api.delete(`/api/admin/members/${uuid}`);
-        if (response.data.success) {
-          fetchMembers();
+  const handleDelete = (uuid, memberName) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: "Hapus Anggota",
+      message: `Apakah Anda yakin ingin menghapus anggota "${memberName}"? Data simpanan terkait juga akan terpengaruh.`,
+      type: "danger",
+      onConfirm: async () => {
+        setConfirmLoading(true);
+        try {
+          const response = await api.delete(`/api/admin/members/${uuid}`);
+          if (response.data.success) {
+            toast.success("🗑️ Anggota berhasil dihapus");
+            fetchMembers();
+          }
+        } catch (err) {
+          toast.error("Gagal menghapus data");
+          setError("Gagal menghapus data");
+          console.error("Delete error:", err);
+        } finally {
+          setConfirmLoading(false);
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
         }
-      } catch (err) {
-        setError("Gagal menghapus data");
-        console.error("Delete error:", err);
-      }
-    }
+      },
+    });
   };
 
   const handleAddNew = () => {
@@ -541,7 +579,7 @@ const Members = () => {
                       ✏️ Edit
                     </button>
                     <button
-                      onClick={() => handleDelete(member.uuid)}
+                      onClick={() => handleDelete(member.uuid, member.name)}
                       className="text-red-600 hover:text-red-900 transition-colors"
                     >
                       🗑️ Hapus
@@ -817,6 +855,17 @@ const Members = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        type={confirmDialog.type}
+        loading={confirmLoading}
+      />
     </div>
   );
 };

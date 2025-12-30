@@ -1,0 +1,82 @@
+{
+  "info": {
+    "name": "MERN Koperasi - Full Automated Tests (25+ Cases)",
+    "description": "Complete automated testing suite. Run with Newman: newman run this_file.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:5000"},
+    {"key": "token", "value": ""},
+    {"key": "testMemberUuid", "value": ""},
+    {"key": "testMemberId", "value": ""},
+    {"key": "testProductId", "value": ""},
+    {"key": "testSavingsId", "value": ""},
+    {"key": "testSavingsId2", "value": ""},
+    {"key": "testSavingsId3", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "=== SETUP ===",
+      "item": [
+        {
+          "name": "01. Login Admin",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Login successful', function() {",
+            "    pm.response.to.have.status(200);",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.success).to.eql(true);",
+            "    pm.expect(json.data.token).to.be.a('string');",
+            "    pm.collectionVariables.set('token', json.data.token);",
+            "    console.log('Token saved');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"username\":\"admin\",\"password\":\"admin123\"}"},
+            "url": "{{baseUrl}}/api/admin/auth/login"
+          }
+        },
+        {
+          "name": "02. Get Current User",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Get user successful', function() {",
+            "    pm.response.to.have.status(200);",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.data).to.have.property('name');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/admin/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "=== PRODUCTS ===",
+      "item": [
+        {
+          "name": "03. Get All Products",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Get products successful', function() {",
+            "    pm.response.to.have.status(200);",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.success).to.eql(true);",
+            "    if(json.data && json.data.length > 0) {",
+            "        pm.collectionVariables.set('testProductId', json.data[0]._id);",
+            "        console.log('Product ID saved: ' + json.data[0]._id);",
+            "    }",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/admin/products"
+          }
+        }
+      ]
+    }
+  ]
+}

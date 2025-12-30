@@ -133,11 +133,11 @@ const updateSavingsSchema = Joi.object({
     "any.only": "Tipe harus salah satu dari: Setoran, Penarikan",
   }),
   status: Joi.string()
-    .valid("Pending", "Approved", "Rejected")
+    .valid("Pending", "Approved", "Rejected", "Partial")
     .optional()
     .messages({
       "string.base": "Status harus berupa string",
-      "any.only": "Status harus salah satu dari: Pending, Approved, Rejected",
+      "any.only": "Status harus salah satu dari: Pending, Approved, Rejected, Partial",
     }),
   description: Joi.string().max(500).optional().messages({
     "string.base": "Deskripsi harus berupa string",
@@ -158,11 +158,11 @@ const querySavingsSchema = Joi.object({
     "number.max": "Limit maksimal 500",
   }),
   status: Joi.string()
-    .valid("Pending", "Approved", "Rejected")
+    .valid("Pending", "Approved", "Rejected", "Partial")
     .optional()
     .messages({
       "string.base": "Status harus berupa string",
-      "any.only": "Status harus salah satu dari: Pending, Approved, Rejected",
+      "any.only": "Status harus salah satu dari: Pending, Approved, Rejected, Partial",
     }),
   memberId: Joi.string().hex().length(24).optional().messages({
     "string.base": "ID anggota harus berupa string",

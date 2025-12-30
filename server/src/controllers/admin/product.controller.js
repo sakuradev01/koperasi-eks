@@ -35,6 +35,21 @@ const createProduct = asyncHandler(async (req, res) => {
   const { title, depositAmount, returnProfit, termDuration, description } =
     req.body;
 
+  // Validate required fields
+  if (!title || title.trim() === '') {
+    return res.status(400).json({
+      success: false,
+      message: "Nama produk wajib diisi",
+    });
+  }
+
+  if (!depositAmount || depositAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Jumlah setoran harus lebih dari 0",
+    });
+  }
+
   // Check if product with same title already exists
   const existingProduct = await Product.findOne({ title });
   if (existingProduct) {
