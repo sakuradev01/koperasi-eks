@@ -12,9 +12,13 @@ const Reports = () => {
   const [savings, setSavings] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Filter states
-  const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), "yyyy-MM-dd"));
-  const [dateTo, setDateTo] = useState(format(endOfMonth(new Date()), "yyyy-MM-dd"));
+  // Filter states - default 1 tahun terakhir
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return format(d, "yyyy-MM-dd");
+  });
+  const [dateTo, setDateTo] = useState(format(new Date(), "yyyy-MM-dd"));
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterMember, setFilterMember] = useState("all");
   const [filterProduct, setFilterProduct] = useState("all");
@@ -34,21 +38,42 @@ const Reports = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [membersRes, savingsRes, productsRes] = await Promise.all([
-        api.get("/api/admin/members"),
-        api.get("/api/admin/savings?limit=1000"),
-        api.get("/api/admin/products")
-      ]);
+      console.log("Fetching data...");
       
-      if (membersRes.data.success) setMembers(membersRes.data.data || []);
+      // Fetch members
+      const membersRes = await api.get("/api/admin/members");
+      console.log("Members response:", membersRes.data);
+      if (membersRes.data.success) {
+        setMembers(membersRes.data.data || []);
+      }
+      
+      // Fetch savings
+      const savingsRes = await api.get("/api/admin/savings?limit=1000");
+      console.log("Savings response:", savingsRes.data);
       if (savingsRes.data.success) {
-        const savingsData = savingsRes.data.data?.savings || savingsRes.data.data || [];
+        // Handle different response structures
+        let savingsData = [];
+        if (Array.isArray(savingsRes.data.data)) {
+          savingsData = savingsRes.data.data;
+        } else if (savingsRes.data.data?.savings) {
+          savingsData = savingsRes.data.data.savings;
+        } else if (savingsRes.data.savings) {
+          savingsData = savingsRes.data.savings;
+        }
+        console.log("Savings loaded:", savingsData.length);
         setSavings(savingsData);
       }
-      if (productsRes.data.success) setProducts(productsRes.data.data || []);
+      
+      // Fetch products
+      const productsRes = await api.get("/api/admin/products");
+      console.log("Products response:", productsRes.data);
+      if (productsRes.data.success) {
+        setProducts(productsRes.data.data || []);
+      }
     } catch (err) {
       console.error("Fetch error:", err);
-      toast.error("Gagal memuat data");
+      console.error("Error response:", err.response?.data);
+      toast.error("Gagal memuat data: " + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
