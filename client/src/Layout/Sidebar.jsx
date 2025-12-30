@@ -28,6 +28,11 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
       path: "/loan-management",
     },
     {
+      title: "Laporan",
+      icon: "📊",
+      path: "/laporan",
+    },
+    {
       title: "Master Data",
       icon: "📋",
       children: [

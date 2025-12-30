@@ -16,6 +16,7 @@ import Loans from "../pages/Loans.jsx";
 import LoanProducts from "../pages/LoanProducts.jsx";
 import LoanManagement from "../pages/LoanManagement.jsx";
 import Settings from "../pages/Settings.jsx";
+import Reports from "../pages/Reports.jsx";
 import PrivateRoute from "../utils/PrivateRoute.jsx";
 
 const router = createBrowserRouter(
@@ -37,6 +38,7 @@ const router = createBrowserRouter(
         <Route path="/simpanan" element={<Savings />} />
         <Route path="/pinjaman" element={<Loans />} />
         <Route path="/loan-management" element={<LoanManagement />} />
+        <Route path="/laporan" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Route>
