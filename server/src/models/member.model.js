@@ -65,6 +65,20 @@ const memberSchema = new Schema(
       type: Date,
       default: null, // null = pakai bulan saat member dibuat
     },
+    // Status lunas - uang sudah di-TF ke student
+    isCompleted: {
+      type: Boolean,
+      default: false,
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+    completedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   {
     timestamps: true,

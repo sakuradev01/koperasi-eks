@@ -45,6 +45,11 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
         },
       ],
     },
+    {
+      title: "Pengaturan",
+      icon: "⚙️",
+      path: "/settings",
+    },
   ];
 
   const isActive = (path) => location.pathname === path;

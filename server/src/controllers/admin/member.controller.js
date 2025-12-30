@@ -298,6 +298,69 @@ const validateMemberUuid = asyncHandler(async (req, res) => {
   }
 });
 
+// Mark member as completed (uang sudah di-TF ke student)
+const markAsCompleted = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+
+  const member = await Member.findOne({ uuid });
+
+  if (!member) {
+    return res.status(404).json({
+      success: false,
+      message: "Member tidak ditemukan",
+    });
+  }
+
+  if (member.isCompleted) {
+    return res.status(400).json({
+      success: false,
+      message: "Member sudah ditandai lunas sebelumnya",
+    });
+  }
+
+  member.isCompleted = true;
+  member.completedAt = new Date();
+  member.completedBy = req.user._id;
+
+  await member.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Member berhasil ditandai sebagai LUNAS",
+    data: {
+      uuid: member.uuid,
+      name: member.name,
+      isCompleted: member.isCompleted,
+      completedAt: member.completedAt,
+    },
+  });
+});
+
+// Unmark member as completed
+const unmarkAsCompleted = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+
+  const member = await Member.findOne({ uuid });
+
+  if (!member) {
+    return res.status(404).json({
+      success: false,
+      message: "Member tidak ditemukan",
+    });
+  }
+
+  member.isCompleted = false;
+  member.completedAt = null;
+  member.completedBy = null;
+
+  await member.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Status lunas member berhasil dibatalkan",
+  });
+});
+
 export {
   getAllMembers,
   getMemberByUuid,
@@ -305,4 +368,6 @@ export {
   updateMember,
   deleteMember,
   validateMemberUuid,
+  markAsCompleted,
+  unmarkAsCompleted,
 };

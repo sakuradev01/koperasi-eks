@@ -19,7 +19,9 @@ import {
   getMemberByUuid, 
   createMember, 
   updateMember, 
-  deleteMember 
+  deleteMember,
+  markAsCompleted,
+  unmarkAsCompleted
 } from "../controllers/admin/member.controller.js";
 import { 
   getAllSavings, 
@@ -35,6 +37,7 @@ import {
   markAsPartial,
   getSavingsPeriodSummary 
 } from "../controllers/admin/savingsApproval.controller.js";
+import { clearAllData } from "../controllers/admin/system.controller.js";
 import { verifyToken } from "../middlewares/auth.middleware.js";
 import multer from "multer";
 import productUpgradeRoutes from "./admin/productUpgrade.routes.js";
@@ -79,6 +82,8 @@ router.get("/members/:uuid", verifyToken, getMemberByUuid);
 router.post("/members", verifyToken, createMember);
 router.put("/members/:uuid", verifyToken, updateMember);
 router.delete("/members/:uuid", verifyToken, deleteMember);
+router.patch("/members/:uuid/complete", verifyToken, markAsCompleted);
+router.patch("/members/:uuid/uncomplete", verifyToken, unmarkAsCompleted);
 
 // Savings management routes
 router.get("/savings", verifyToken, getAllSavings);
@@ -101,5 +106,8 @@ router.use("/product-upgrade", productUpgradeRoutes);
 router.use("/loans", loanRoutes);
 router.use("/loan-payments", loanPaymentRoutes);
 router.use("/loan-products", loanProductRoutes);
+
+// System routes (danger zone)
+router.post("/system/clear-all", verifyToken, clearAllData);
 
 export default router;

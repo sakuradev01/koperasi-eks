@@ -926,6 +926,54 @@ const MemberDetail = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             🌸 Detail Anggota
           </h1>
+          {member.isCompleted && (
+            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">
+              ✅ LUNAS
+            </span>
+          )}
+        </div>
+        
+        {/* Button Tandai Lunas */}
+        <div className="flex space-x-2">
+          {!member.isCompleted ? (
+            <button
+              onClick={async () => {
+                if (window.confirm("Apakah Anda yakin ingin menandai member ini sebagai LUNAS?\n\nIni menandakan uang tabungan sudah di-transfer ke student.")) {
+                  try {
+                    const response = await api.patch(`/api/admin/members/${member.uuid}/complete`);
+                    if (response.data.success) {
+                      toast.success("Member berhasil ditandai sebagai LUNAS!");
+                      fetchMemberDetail();
+                    }
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || "Gagal menandai lunas");
+                  }
+                }
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm"
+            >
+              ✅ Tandai Lunas
+            </button>
+          ) : (
+            <button
+              onClick={async () => {
+                if (window.confirm("Batalkan status lunas member ini?")) {
+                  try {
+                    const response = await api.patch(`/api/admin/members/${member.uuid}/uncomplete`);
+                    if (response.data.success) {
+                      toast.success("Status lunas berhasil dibatalkan");
+                      fetchMemberDetail();
+                    }
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || "Gagal membatalkan status lunas");
+                  }
+                }
+              }}
+              className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold text-sm"
+            >
+              ↩️ Batalkan Lunas
+            </button>
+          )}
         </div>
       </div>
 

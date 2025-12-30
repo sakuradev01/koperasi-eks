@@ -22,8 +22,9 @@ const Members = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
-  // Search state
+  // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -233,15 +234,27 @@ const Members = () => {
 
   // Search and filter logic with useMemo for performance
   const filteredMembers = useMemo(() => {
-    if (!searchTerm) return members;
+    let result = members;
     
-    const searchLower = searchTerm.toLowerCase();
-    return members.filter(member => {
-      const nameMatch = member.name.toLowerCase().includes(searchLower);
-      const uuidMatch = member.uuid.toLowerCase().includes(searchLower);
-      return nameMatch || uuidMatch;
-    });
-  }, [members, searchTerm]);
+    // Filter by status
+    if (filterStatus === "completed") {
+      result = result.filter(member => member.isCompleted === true);
+    } else if (filterStatus === "not_completed") {
+      result = result.filter(member => !member.isCompleted);
+    }
+    
+    // Filter by search term
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      result = result.filter(member => {
+        const nameMatch = member.name.toLowerCase().includes(searchLower);
+        const uuidMatch = member.uuid.toLowerCase().includes(searchLower);
+        return nameMatch || uuidMatch;
+      });
+    }
+    
+    return result;
+  }, [members, searchTerm, filterStatus]);
 
   // Pagination logic with useMemo for performance
   const paginationData = useMemo(() => {
@@ -322,7 +335,7 @@ const Members = () => {
         </button>
       </div>
 
-      {/* Search Section */}
+      {/* Search & Filter Section */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-pink-100">
         <div className="flex flex-col sm:flex-row gap-4 items-center">
           <div className="flex-1 relative">
@@ -352,15 +365,37 @@ const Members = () => {
             </div>
           </div>
           
+          {/* Filter Status Lunas */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 whitespace-nowrap">Status:</label>
+            <select
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
+            >
+              <option value="all">📋 Semua</option>
+              <option value="completed">✅ Lunas</option>
+              <option value="not_completed">⏳ Belum Lunas</option>
+            </select>
+          </div>
+          
           {/* Search Results Info */}
           <div className="text-sm text-gray-600">
-            {searchTerm ? (
-              <span className="flex items-center">
+            {searchTerm || filterStatus !== "all" ? (
+              <span className="flex items-center flex-wrap gap-1">
                 <span className="font-medium text-pink-600">{filteredMembers.length}</span>
-                <span className="ml-1">dari {members.length} anggota ditemukan</span>
+                <span>dari {members.length} anggota</span>
                 {searchTerm && (
-                  <span className="ml-2 px-2 py-1 bg-pink-100 text-pink-800 rounded-full text-xs">
+                  <span className="px-2 py-1 bg-pink-100 text-pink-800 rounded-full text-xs">
                     "{searchTerm}"
+                  </span>
+                )}
+                {filterStatus !== "all" && (
+                  <span className={`px-2 py-1 rounded-full text-xs ${filterStatus === "completed" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                    {filterStatus === "completed" ? "✅ Lunas" : "⏳ Belum Lunas"}
                   </span>
                 )}
               </span>
@@ -402,6 +437,9 @@ const Members = () => {
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                 Total
+              </th>
+              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
+                Status
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                 Aksi
@@ -482,6 +520,17 @@ const Members = () => {
                   <span className={`${member.totalSavings > 0 ? 'text-green-600' : 'text-gray-400'}`}>
                     {member.totalSavings ? `Rp ${member.totalSavings.toLocaleString('id-ID')}` : "Rp 0"}
                   </span>
+                </td>
+                <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
+                  {member.isCompleted ? (
+                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-semibold">
+                      ✅ Lunas
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-semibold">
+                      ⏳ Belum
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                   <div className="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
