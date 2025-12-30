@@ -47,22 +47,39 @@ const Reports = () => {
         setMembers(membersRes.data.data || []);
       }
       
-      // Fetch savings
-      const savingsRes = await api.get("/api/admin/savings?limit=1000");
-      console.log("Savings response:", savingsRes.data);
-      if (savingsRes.data.success) {
-        // Handle different response structures
-        let savingsData = [];
-        if (Array.isArray(savingsRes.data.data)) {
-          savingsData = savingsRes.data.data;
-        } else if (savingsRes.data.data?.savings) {
-          savingsData = savingsRes.data.data.savings;
-        } else if (savingsRes.data.savings) {
-          savingsData = savingsRes.data.savings;
+      // Fetch savings - dengan pagination untuk ambil semua data
+      let allSavings = [];
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const savingsRes = await api.get(`/api/admin/savings?limit=100&page=${page}`);
+        console.log(`Savings page ${page}:`, savingsRes.data);
+        
+        if (savingsRes.data.success) {
+          let savingsData = [];
+          if (Array.isArray(savingsRes.data.data)) {
+            savingsData = savingsRes.data.data;
+          } else if (savingsRes.data.data?.savings) {
+            savingsData = savingsRes.data.data.savings;
+          }
+          
+          allSavings = [...allSavings, ...savingsData];
+          
+          // Check if there's more data
+          const total = savingsRes.data.data?.pagination?.totalItems || savingsRes.data.pagination?.totalItems || 0;
+          hasMore = allSavings.length < total && savingsData.length > 0;
+          page++;
+        } else {
+          hasMore = false;
         }
-        console.log("Savings loaded:", savingsData.length);
-        setSavings(savingsData);
+        
+        // Safety limit - max 10 pages (1000 records)
+        if (page > 10) hasMore = false;
       }
+      
+      console.log("Total savings loaded:", allSavings.length);
+      setSavings(allSavings);
       
       // Fetch products
       const productsRes = await api.get("/api/admin/products");

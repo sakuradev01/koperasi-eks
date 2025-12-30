@@ -151,11 +151,11 @@ const querySavingsSchema = Joi.object({
     "number.integer": "Halaman harus berupa bilangan bulat",
     "number.min": "Halaman minimal 1",
   }),
-  limit: Joi.number().integer().min(1).max(100).default(10).messages({
+  limit: Joi.number().integer().min(1).max(500).default(10).messages({
     "number.base": "Limit harus berupa angka",
     "number.integer": "Limit harus berupa bilangan bulat",
     "number.min": "Limit minimal 1",
-    "number.max": "Limit maksimal 100",
+    "number.max": "Limit maksimal 500",
   }),
   status: Joi.string()
     .valid("Pending", "Approved", "Rejected")
