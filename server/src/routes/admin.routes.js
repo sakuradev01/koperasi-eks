@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import { 
   loginUser, 
   registerUser, 
@@ -45,9 +46,15 @@ import loanRoutes from "./loan.routes.js";
 import loanPaymentRoutes from "./loanPayment.routes.js";
 import loanProductRoutes from "./loanProduct.routes.js";
 
+// Ensure upload directory exists
+const uploadDir = "uploads/simpanan";
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/simpanan/')
+    cb(null, uploadDir + '/')
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
