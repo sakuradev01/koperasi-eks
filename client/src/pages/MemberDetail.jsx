@@ -1800,8 +1800,105 @@ const MemberDetail = () => {
                       <p className="font-semibold">{upgradeCalculation.remainingPeriods} periode</p>
                     </div>
                     
+                    {/* DETAIL PERHITUNGAN KOMPENSASI - untuk Finance */}
+                    <div className="border-t pt-3">
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <p className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                          📊 Detail Perhitungan Kompensasi
+                        </p>
+                        
+                        {upgradeCalculation.compensationPerMonth > 0 ? (
+                          <div className="space-y-4 text-sm">
+                            {/* Step 1: Selisih Setoran */}
+                            <div className="bg-gray-50 p-3 rounded border-l-4 border-blue-400">
+                              <p className="font-semibold text-gray-700 mb-1">1️⃣ Selisih Setoran per Bulan</p>
+                              <div className="font-mono text-xs bg-white p-2 rounded">
+                                <p>Setoran Baru - Setoran Lama</p>
+                                <p className="text-blue-600">
+                                  = {formatCurrency(upgradeCalculation.newMonthlyDeposit)} - {formatCurrency(upgradeCalculation.oldMonthlyDeposit)}
+                                </p>
+                                <p className="font-bold text-green-600">
+                                  = {formatCurrency(upgradeCalculation.newMonthlyDeposit - upgradeCalculation.oldMonthlyDeposit)}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Step 2: Total Kekurangan */}
+                            <div className="bg-gray-50 p-3 rounded border-l-4 border-orange-400">
+                              <p className="font-semibold text-gray-700 mb-1">2️⃣ Total Kekurangan dari Periode Lama</p>
+                              <div className="font-mono text-xs bg-white p-2 rounded">
+                                <p>Selisih × Periode Lunas</p>
+                                <p className="text-blue-600">
+                                  = {formatCurrency(upgradeCalculation.newMonthlyDeposit - upgradeCalculation.oldMonthlyDeposit)} × {upgradeCalculation.completedPeriodsAtUpgrade}
+                                </p>
+                                <p className="font-bold text-green-600">
+                                  = {formatCurrency((upgradeCalculation.newMonthlyDeposit - upgradeCalculation.oldMonthlyDeposit) * upgradeCalculation.completedPeriodsAtUpgrade)}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Step 3: Kompensasi per Bulan */}
+                            <div className="bg-gray-50 p-3 rounded border-l-4 border-purple-400">
+                              <p className="font-semibold text-gray-700 mb-1">3️⃣ Kompensasi per Bulan</p>
+                              <div className="font-mono text-xs bg-white p-2 rounded">
+                                <p>Total Kekurangan ÷ Sisa Periode</p>
+                                <p className="text-blue-600">
+                                  = {formatCurrency((upgradeCalculation.newMonthlyDeposit - upgradeCalculation.oldMonthlyDeposit) * upgradeCalculation.completedPeriodsAtUpgrade)} ÷ {upgradeCalculation.remainingPeriods}
+                                </p>
+                                <p className="font-bold text-green-600">
+                                  = {formatCurrency(upgradeCalculation.compensationPerMonth)}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Step 4: Total Pembayaran Baru */}
+                            <div className="bg-green-50 p-3 rounded border-l-4 border-green-500">
+                              <p className="font-semibold text-gray-700 mb-1">4️⃣ Total Pembayaran Baru per Bulan</p>
+                              <div className="font-mono text-xs bg-white p-2 rounded">
+                                <p>Setoran Baru + Kompensasi</p>
+                                <p className="text-blue-600">
+                                  = {formatCurrency(upgradeCalculation.newMonthlyDeposit)} + {formatCurrency(upgradeCalculation.compensationPerMonth)}
+                                </p>
+                                <p className="font-bold text-green-700 text-base">
+                                  = {formatCurrency(upgradeCalculation.newPaymentWithCompensation)}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Summary Box */}
+                            <div className="bg-blue-100 p-3 rounded-lg mt-3">
+                              <p className="text-xs text-blue-800">
+                                <strong>📝 Ringkasan:</strong> Anggota sudah bayar {upgradeCalculation.completedPeriodsAtUpgrade} periode dengan setoran {formatCurrency(upgradeCalculation.oldMonthlyDeposit)}/bulan. 
+                                Karena upgrade ke produk dengan setoran {formatCurrency(upgradeCalculation.newMonthlyDeposit)}/bulan, 
+                                ada kekurangan {formatCurrency((upgradeCalculation.newMonthlyDeposit - upgradeCalculation.oldMonthlyDeposit) * upgradeCalculation.completedPeriodsAtUpgrade)} yang harus dicicil 
+                                selama {upgradeCalculation.remainingPeriods} periode sisa.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 text-sm">
+                            <div className="bg-orange-50 p-3 rounded border-l-4 border-orange-400">
+                              <p className="font-semibold text-orange-800 mb-2">⚠️ Tidak Ada Kompensasi</p>
+                              <div className="font-mono text-xs bg-white p-2 rounded">
+                                <p>Setoran Lama: {formatCurrency(upgradeCalculation.oldMonthlyDeposit)}</p>
+                                <p>Setoran Baru: {formatCurrency(upgradeCalculation.newMonthlyDeposit)}</p>
+                                <p className="mt-2 text-orange-700">
+                                  {upgradeCalculation.oldMonthlyDeposit >= upgradeCalculation.newMonthlyDeposit 
+                                    ? "Produk baru memiliki setoran lebih kecil/sama, tidak perlu kompensasi."
+                                    : upgradeCalculation.completedPeriodsAtUpgrade === 0
+                                      ? "Belum ada periode yang lunas, tidak ada kekurangan yang perlu dikompensasi."
+                                      : "Tidak ada kompensasi yang diperlukan."
+                                  }
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
                     <div className="border-t pt-3 bg-blue-50 -m-4 mt-3 p-4 rounded-b-lg">
-                      <p className="text-sm text-blue-800 font-semibold">Hasil Perhitungan:</p>
+                      <p className="text-sm text-blue-800 font-semibold">💰 Hasil Akhir:</p>
                       <div className="mt-2 space-y-1">
                         {upgradeCalculation.compensationPerMonth > 0 ? (
                           <>
