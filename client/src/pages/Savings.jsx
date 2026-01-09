@@ -14,6 +14,7 @@ const Savings = () => {
   const [members, setMembers] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submitLoading, setSubmitLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
@@ -64,6 +65,9 @@ const Savings = () => {
   const [rejectSavingsId, setRejectSavingsId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectLoading, setRejectLoading] = useState(false);
+
+  // Existing proof file state (for edit mode)
+  const [existingProofFile, setExistingProofFile] = useState(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -352,6 +356,10 @@ const Savings = () => {
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Prevent double submit
+    if (submitLoading) return;
+    setSubmitLoading(true);
 
     // Debug: log form data before sending
     console.log("Form data being submitted:", formData);
@@ -400,13 +408,13 @@ const Savings = () => {
         await axios.put(`${API_URL}/api/admin/savings/${editingId}`, formDataToSend, {
           headers: headers,
         });
-        toast.success("Data simpanan berhasil diperbarui");
+        toast.success("✅ Data simpanan berhasil diperbarui");
       } else {
         // Create new savings
         await axios.post(`${API_URL}/api/admin/savings`, formDataToSend, {
           headers: headers,
         });
-        toast.success("Data simpanan berhasil ditambahkan");
+        toast.success("✅ Data simpanan berhasil ditambahkan");
       }
 
       setShowModal(false);
@@ -416,7 +424,44 @@ const Savings = () => {
     } catch (error) {
       console.error("Submit error:", error);
       console.error("Error response:", error.response?.data);
-      toast.error(error.response?.data?.message || error.message || "Gagal menyimpan data");
+      
+      // Build detailed error message
+      let errorMessage = "Gagal menyimpan data";
+      const errorData = error.response?.data;
+      
+      if (errorData) {
+        // Check for specific error messages from backend
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+        
+        // Check for validation errors
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          const validationErrors = errorData.errors.map(e => e.message || e).join(", ");
+          errorMessage = `Validasi gagal: ${validationErrors}`;
+        }
+        
+        // Check for specific field errors
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      // Show detailed toast with icon
+      toast.error(
+        <div>
+          <strong>❌ {editingId ? 'Gagal Update' : 'Gagal Simpan'}</strong>
+          <p className="text-sm mt-1">{errorMessage}</p>
+          {error.response?.status && (
+            <p className="text-xs text-gray-400 mt-1">Status: {error.response.status}</p>
+          )}
+        </div>,
+        { autoClose: 5000 }
+      );
+    } finally {
+      setSubmitLoading(false);
     }
   };
 
@@ -437,6 +482,8 @@ const Savings = () => {
     });
     setLastPeriod(0);
     setOriginalSelection({ memberId: "", productId: "" });
+    setExistingProofFile(null);
+    setEditingId(null);
   };
 
   // Handle file upload
@@ -549,6 +596,8 @@ const Savings = () => {
       status: saving.status || "Pending",
       proofFile: null,
     });
+    // Store existing proof file for preview
+    setExistingProofFile(saving.proofFile || null);
     setOriginalSelection({
       memberId: saving.memberId?._id || saving.memberId || "",
       productId: saving.productId?._id || saving.productId || "",
@@ -1612,6 +1661,57 @@ const Savings = () => {
                   <label className="block text-sm font-medium text-gray-700">
                     Bukti Pembayaran
                   </label>
+                  
+                  {/* Show existing proof file preview when editing */}
+                  {editingId && existingProofFile && !formData.proofFile && (
+                    <div className="mt-2 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <span className="text-blue-600 text-lg">📎</span>
+                          <div>
+                            <p className="text-sm font-medium text-blue-800">Bukti yang sudah ada:</p>
+                            <p className="text-xs text-blue-600 truncate max-w-xs">{existingProofFile}</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}`, '_blank')}
+                          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        >
+                          👁️ Lihat
+                        </button>
+                      </div>
+                      {/* Image preview */}
+                      <div className="mt-2">
+                        <img 
+                          src={`${API_URL}/uploads/simpanan/${existingProofFile}`}
+                          alt="Bukti pembayaran"
+                          className="max-h-32 rounded border border-blue-300 cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}`, '_blank')}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-blue-600 mt-2 italic">
+                        💡 Upload file baru di bawah untuk mengganti bukti ini
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Show new file preview if selected */}
+                  {formData.proofFile && (
+                    <div className="mt-2 mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-green-600 text-lg">✅</span>
+                        <div>
+                          <p className="text-sm font-medium text-green-800">File baru dipilih:</p>
+                          <p className="text-xs text-green-600 truncate max-w-xs">{formData.proofFile.name}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <input
                     type="file"
                     onChange={handleFileChange}
@@ -1630,15 +1730,27 @@ const Savings = () => {
                       setShowModal(false);
                       resetForm();
                     }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    disabled={submitLoading}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                    disabled={submitLoading}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Simpan
+                    {submitLoading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        {editingId ? 'Menyimpan...' : 'Menambahkan...'}
+                      </>
+                    ) : (
+                      editingId ? '💾 Update' : '➕ Simpan'
+                    )}
                   </button>
                 </div>
               </form>
