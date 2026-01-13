@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, isBefore, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 import api from "../api/index.jsx";
 import Pagination from "../components/Pagination.jsx";
@@ -140,6 +140,11 @@ const Reports = () => {
       ? new Date(member.savingsStartDate) 
       : new Date(member.createdAt);
     
+    // Get current date for comparison
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
     for (let period = 1; period <= totalPeriods; period++) {
       // Adjust deposit amount based on upgrade
       let requiredAmount = depositAmount;
@@ -155,22 +160,37 @@ const Reports = () => {
       const periodSavings = memberSavings.filter(s => s.installmentPeriod === period && s.status === "Approved");
       const periodTotal = periodSavings.reduce((sum, s) => sum + s.amount, 0);
       
-      // Calculate due date for this period
+      // Calculate due date for this period (period 1 = startDate month)
       const dueDate = new Date(startDate);
       dueDate.setMonth(dueDate.getMonth() + period - 1);
+      const dueMonth = dueDate.getMonth();
+      const dueYear = dueDate.getFullYear();
       
-      const isOverdue = isBefore(dueDate, new Date()) && periodTotal < requiredAmount;
+      // Check if this period is in the current month
+      const isCurrentMonth = dueMonth === currentMonth && dueYear === currentYear;
+      
+      // Check if this period is overdue (past months, not current month)
+      const isOverdue = (dueYear < currentYear || (dueYear === currentYear && dueMonth < currentMonth)) && periodTotal < requiredAmount;
+      
+      // Check if this period is partial (current month, not yet paid full)
+      const isPartial = isCurrentMonth && periodTotal < requiredAmount;
       
       let status = "unpaid";
       if (periodTotal >= requiredAmount) {
         status = "paid";
         paidPeriods++;
-      } else if (periodTotal > 0) {
-        status = "partial";
-        partialPeriods++;
       } else if (isOverdue) {
+        // Overdue: past months that haven't been paid
         status = "overdue";
         overduePeriods++;
+      } else if (isPartial) {
+        // Partial: current month not yet paid
+        status = "partial";
+        partialPeriods++;
+      } else if (periodTotal > 0) {
+        // Has some payment but not full (for future periods)
+        status = "partial";
+        partialPeriods++;
       }
       
       totalPaid += periodTotal;
@@ -182,7 +202,9 @@ const Reports = () => {
         paid: periodTotal,
         remaining: Math.max(0, requiredAmount - periodTotal),
         status,
-        isOverdue
+        isOverdue,
+        isPartial,
+        isCurrentMonth
       });
     }
     
@@ -264,6 +286,9 @@ const Reports = () => {
       result = result.filter(m => !m.isCompleted);
     } else if (filterStatus === "has_overdue") {
       result = result.filter(m => m.paymentStatus.overduePeriods > 0);
+    } else if (filterStatus === "has_partial") {
+      // Partial: bulan ini belum bayar (tapi tidak ada overdue)
+      result = result.filter(m => m.paymentStatus.partialPeriods > 0 && m.paymentStatus.overduePeriods === 0);
     } else if (filterStatus === "all_paid") {
       result = result.filter(m => m.paymentStatus.unpaidPeriods === 0 && m.paymentStatus.partialPeriods === 0);
     }
@@ -288,13 +313,17 @@ const Reports = () => {
       .filter(s => s.status === "Pending")
       .reduce((sum, s) => sum + s.amount, 0);
     
-    const partialSavings = savings
+    const partialSavingsCount = savings
       .filter(s => s.status === "Partial" || s.paymentType === "Partial")
       .length;
     
     const pendingCount = savings.filter(s => s.status === "Pending").length;
     
     const membersWithOverdue = memberReport.filter(m => m.paymentStatus.overduePeriods > 0).length;
+    // Partial: anggota yang di bulan ini belum bayar (tapi tidak overdue)
+    const membersWithPartial = memberReport.filter(m => 
+      m.paymentStatus.partialPeriods > 0 && m.paymentStatus.overduePeriods === 0
+    ).length;
     const membersAllPaid = memberReport.filter(m => 
       m.paymentStatus.unpaidPeriods === 0 && m.paymentStatus.partialPeriods === 0 && m.product
     ).length;
@@ -312,8 +341,9 @@ const Reports = () => {
       netSavings: totalSavingsAmount - totalWithdrawals,
       pendingSavings,
       pendingCount,
-      partialSavings,
+      partialSavingsCount,
       membersWithOverdue,
+      membersWithPartial,
       membersAllPaid,
       filteredTotal,
       filteredCount: filteredSavings.length
@@ -358,6 +388,7 @@ const Reports = () => {
       ["Total Penarikan", formatCurrency(summaryStats.totalWithdrawals)],
       ["Saldo Bersih", formatCurrency(summaryStats.netSavings)],
       ["Anggota Overdue", summaryStats.membersWithOverdue.toString()],
+      ["Anggota Partial (Bulan Ini)", summaryStats.membersWithPartial.toString()],
     ];
     
     doc.autoTable({
@@ -398,22 +429,29 @@ const Reports = () => {
       doc.setFont("helvetica", "bold");
       doc.text("DAFTAR ANGGOTA", 14, doc.lastAutoTable.finalY + 15);
       
-      const tableData = memberReport.slice(0, 50).map(m => [
-        m.uuid,
-        m.name,
-        m.product?.title || "-",
-        formatCurrency(m.paymentStatus.totalPaid),
-        `${m.paymentStatus.paidPeriods}/${m.product?.termDuration || 0}`,
-        m.isCompleted ? "Lunas" : (m.paymentStatus.overduePeriods > 0 ? "Overdue" : "Aktif")
-      ]);
+      const tableData = memberReport.slice(0, 50).map(m => {
+        const status = m.isCompleted ? "Lunas" : 
+                       m.paymentStatus.overduePeriods > 0 ? "Overdue" : 
+                       m.paymentStatus.partialPeriods > 0 ? "Partial" : "Aktif";
+        return [
+          m.uuid,
+          m.name,
+          m.product?.title || "-",
+          formatCurrency(m.paymentStatus.totalPaid),
+          `${m.paymentStatus.paidPeriods}/${m.product?.termDuration || 0}`,
+          m.paymentStatus.overduePeriods > 0 ? `${m.paymentStatus.overduePeriods}` : "-",
+          m.paymentStatus.partialPeriods > 0 ? `${m.paymentStatus.partialPeriods}` : "-",
+          status
+        ];
+      });
       
       doc.autoTable({
         startY: doc.lastAutoTable.finalY + 20,
-        head: [["UUID", "Nama", "Produk", "Total Bayar", "Progress", "Status"]],
+        head: [["UUID", "Nama", "Produk", "Total Bayar", "Progress", "Overdue", "Partial", "Status"]],
         body: tableData,
         theme: "striped",
         headStyles: { fillColor: [236, 72, 153] },
-        styles: { fontSize: 8 }
+        styles: { fontSize: 7 }
       });
     }
     
@@ -438,8 +476,11 @@ const Reports = () => {
         csvContent += `"${s.description || "-"}"\n`;
       });
     } else {
-      csvContent = "UUID,Nama,Produk,Total Bayar,Total Wajib,Periode Lunas,Periode Overdue,Status\n";
+      csvContent = "UUID,Nama,Produk,Total Bayar,Total Wajib,Periode Lunas,Periode Overdue,Periode Partial,Status\n";
       memberReport.forEach(m => {
+        const status = m.isCompleted ? "Lunas" : 
+                       m.paymentStatus.overduePeriods > 0 ? "Overdue" : 
+                       m.paymentStatus.partialPeriods > 0 ? "Partial" : "Aktif";
         csvContent += `${m.uuid},`;
         csvContent += `"${m.name}",`;
         csvContent += `"${m.product?.title || "-"}",`;
@@ -447,7 +488,8 @@ const Reports = () => {
         csvContent += `${m.paymentStatus.totalRequired},`;
         csvContent += `${m.paymentStatus.paidPeriods},`;
         csvContent += `${m.paymentStatus.overduePeriods},`;
-        csvContent += `${m.isCompleted ? "Lunas" : "Aktif"}\n`;
+        csvContent += `${m.paymentStatus.partialPeriods},`;
+        csvContent += `${status}\n`;
       });
     }
     
@@ -523,8 +565,8 @@ const Reports = () => {
           <p className="text-xl font-bold text-yellow-600">{summaryStats.pendingCount}</p>
         </div>
         <div className="bg-white rounded-lg shadow-sm p-3 border border-orange-100">
-          <p className="text-xs text-gray-500">Partial</p>
-          <p className="text-xl font-bold text-orange-600">{summaryStats.partialSavings}</p>
+          <p className="text-xs text-gray-500">Partial (Bulan Ini)</p>
+          <p className="text-xl font-bold text-orange-600">{summaryStats.membersWithPartial}</p>
         </div>
         <div className="bg-white rounded-lg shadow-sm p-3 border border-red-100">
           <p className="text-xs text-gray-500">Overdue</p>
@@ -577,6 +619,7 @@ const Reports = () => {
                   <option value="completed">✅ Lunas (TF)</option>
                   <option value="not_completed">⏳ Belum Lunas</option>
                   <option value="has_overdue">🔴 Ada Overdue</option>
+                  <option value="has_partial">🟠 Partial (Bulan Ini)</option>
                   <option value="all_paid">💚 Semua Periode Lunas</option>
                 </>
               )}
@@ -661,6 +704,16 @@ const Reports = () => {
         >
           ⏳ Pending ({summaryStats.pendingCount})
         </button>
+        <button
+          onClick={() => { setActiveTab("members"); setCurrentPage(1); setFilterStatus("has_partial"); }}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === "members" && filterStatus === "has_partial"
+              ? "bg-orange-500 text-white" 
+              : "bg-orange-100 text-orange-700 hover:bg-orange-200"
+          }`}
+        >
+          🟠 Partial ({summaryStats.membersWithPartial})
+        </button>
       </div>
 
       {/* Data Table */}
@@ -726,13 +779,14 @@ const Reports = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase">Total Bayar</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase">Progress</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase">Overdue</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase">Partial</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {paginatedData.currentData.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
                       Tidak ada data anggota
                     </td>
                   </tr>
@@ -766,13 +820,30 @@ const Reports = () => {
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm">
+                        {m.paymentStatus.partialPeriods > 0 ? (
+                          <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-semibold">
+                            🟠 {m.paymentStatus.partialPeriods} periode
+                          </span>
+                        ) : (
+                          <span className="text-green-600 text-xs">✅ Tidak ada</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
                         {m.isCompleted ? (
                           <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-semibold">
                             ✅ Lunas
                           </span>
+                        ) : m.paymentStatus.overduePeriods > 0 ? (
+                          <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-semibold">
+                            🔴 Overdue
+                          </span>
+                        ) : m.paymentStatus.partialPeriods > 0 ? (
+                          <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-semibold">
+                            🟠 Partial
+                          </span>
                         ) : (
-                          <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-semibold">
-                            ⏳ Aktif
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold">
+                            💙 Aktif
                           </span>
                         )}
                       </td>
