@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { format } from "date-fns";
@@ -68,6 +68,11 @@ const Savings = () => {
 
   // Existing proof file state (for edit mode)
   const [existingProofFile, setExistingProofFile] = useState(null);
+
+  // Searchable member dropdown state
+  const [memberSearchTerm, setMemberSearchTerm] = useState("");
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  const memberDropdownRef = useRef(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -484,6 +489,9 @@ const Savings = () => {
     setOriginalSelection({ memberId: "", productId: "" });
     setExistingProofFile(null);
     setEditingId(null);
+    // Reset member search
+    setMemberSearchTerm("");
+    setShowMemberDropdown(false);
   };
 
   // Handle file upload
@@ -689,6 +697,36 @@ const Savings = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterStatus, filterProduct, filterMember, sortOrder]);
+
+  // Close member dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (memberDropdownRef.current && !memberDropdownRef.current.contains(event.target)) {
+        setShowMemberDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Filter members based on search term
+  const filteredMembers = members.filter((member) => {
+    if (!memberSearchTerm) return true;
+    const searchLower = memberSearchTerm.toLowerCase();
+    return (
+      member.name?.toLowerCase().includes(searchLower) ||
+      member.uuid?.toLowerCase().includes(searchLower) ||
+      member.product?.title?.toLowerCase().includes(searchLower)
+    );
+  });
+
+  // Get selected member display text
+  const getSelectedMemberText = () => {
+    if (!formData.memberId) return "";
+    const member = members.find(m => m._id === formData.memberId);
+    if (!member) return "";
+    return `${member.uuid} - ${member.name} ${member.product ? `(${member.product.title})` : '(Belum pilih produk)'}`;
+  };
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
@@ -1183,21 +1221,99 @@ const Savings = () => {
                   <label className="block text-sm font-medium text-gray-700">
                     Anggota
                   </label>
-                  <select
+                  {/* Searchable Member Dropdown */}
+                  <div className="relative mt-1" ref={memberDropdownRef}>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={showMemberDropdown ? memberSearchTerm : getSelectedMemberText()}
+                        onChange={(e) => {
+                          setMemberSearchTerm(e.target.value);
+                          if (!showMemberDropdown) setShowMemberDropdown(true);
+                        }}
+                        onFocus={() => {
+                          setShowMemberDropdown(true);
+                          setMemberSearchTerm("");
+                        }}
+                        placeholder="🔍 Ketik nama atau UUID anggota..."
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 pr-10"
+                        autoComplete="off"
+                      />
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-2">
+                        {formData.memberId && !showMemberDropdown ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFormData({ ...formData, memberId: "" });
+                              setMemberSearchTerm("");
+                            }}
+                            className="text-gray-400 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <span className="text-gray-400 pointer-events-none">▼</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Dropdown List */}
+                    {showMemberDropdown && (
+                      <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                        {filteredMembers.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                            {memberSearchTerm ? `Tidak ada anggota "${memberSearchTerm}"` : "Tidak ada anggota"}
+                          </div>
+                        ) : (
+                          filteredMembers.map((member) => (
+                            <div
+                              key={member._id}
+                              onClick={() => {
+                                setFormData({ ...formData, memberId: member._id });
+                                setShowMemberDropdown(false);
+                                setMemberSearchTerm("");
+                              }}
+                              className={`px-4 py-2 cursor-pointer hover:bg-pink-50 transition-colors ${
+                                formData.memberId === member._id ? 'bg-pink-100 text-pink-800' : ''
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <span className="font-medium text-gray-900">{member.name}</span>
+                                  <span className="ml-2 text-xs text-gray-500">{member.uuid}</span>
+                                </div>
+                                {member.product && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                    {member.product.title}
+                                  </span>
+                                )}
+                              </div>
+                              {!member.product && (
+                                <span className="text-xs text-orange-500">Belum pilih produk</span>
+                              )}
+                            </div>
+                          ))
+                        )}
+                        {filteredMembers.length > 0 && (
+                          <div className="px-4 py-2 text-xs text-gray-400 border-t bg-gray-50">
+                            {filteredMembers.length} anggota ditemukan
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {/* Hidden input for form validation */}
+                  <input
+                    type="hidden"
                     value={formData.memberId}
-                    onChange={(e) =>
-                      setFormData({ ...formData, memberId: e.target.value })
-                    }
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                     required
-                  >
-                    <option value="">Pilih Anggota</option>
-                    {members.map((member) => (
-                      <option key={member._id} value={member._id}>
-                        {member.uuid} - {member.name} {member.product ? `(${member.product.title})` : '(Belum pilih produk)'}
-                      </option>
-                    ))}
-                  </select>
+                  />
+                  {!formData.memberId && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      💡 Ketik untuk mencari anggota berdasarkan nama atau UUID
+                    </p>
+                  )}
                 </div>
 
                 <div>
