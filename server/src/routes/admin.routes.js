@@ -96,7 +96,7 @@ router.patch("/members/:uuid/uncomplete", verifyToken, unmarkAsCompleted);
 router.get("/savings", verifyToken, getAllSavings);
 router.get("/savings/:id", verifyToken, getSavingsById);
 router.post("/savings", verifyToken, upload.single('proofFile'), createSavings);
-router.put("/savings/:id", verifyToken, updateSavings);
+router.put("/savings/:id", verifyToken, upload.single('proofFile'), updateSavings);
 router.delete("/savings/:id", verifyToken, deleteSavings);
 router.get("/savings/check-period/:memberId/:productId", verifyToken, getLastInstallmentPeriod);
 

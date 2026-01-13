@@ -1791,19 +1791,19 @@ const Savings = () => {
                         </div>
                         <button
                           type="button"
-                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}`, '_blank')}
+                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}?t=${Date.now()}`, '_blank')}
                           className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                         >
                           👁️ Lihat
                         </button>
                       </div>
-                      {/* Image preview */}
+                      {/* Image preview with cache-busting */}
                       <div className="mt-2">
                         <img 
-                          src={`${API_URL}/uploads/simpanan/${existingProofFile}`}
+                          src={`${API_URL}/uploads/simpanan/${existingProofFile}?t=${Date.now()}`}
                           alt="Bukti pembayaran"
                           className="max-h-32 rounded border border-blue-300 cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}`, '_blank')}
+                          onClick={() => window.open(`${API_URL}/uploads/simpanan/${existingProofFile}?t=${Date.now()}`, '_blank')}
                           onError={(e) => {
                             e.target.style.display = 'none';
                           }}

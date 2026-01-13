@@ -220,7 +220,7 @@ const updateSavings = asyncHandler(async (req, res) => {
 
   // Handle file upload jika ada
   if (req.file) {
-    updateData.proofFile = req.file.path;
+    updateData.proofFile = req.file.filename; // Only store filename, not full path (consistent with create)
   }
 
   // Validasi member dan product jika diupdate
