@@ -753,6 +753,11 @@ const MemberDetail = () => {
     const upgradeInfo = member.upgradeInfo || member.currentUpgradeId;
     const hasUpgraded = member.hasUpgraded;
     
+    // Get savings start date (use savingsStartDate if set, otherwise use member createdAt)
+    const startDate = member.savingsStartDate 
+      ? new Date(member.savingsStartDate) 
+      : new Date(member.createdAt);
+    
     // Debug log upgrade info
     console.log('=== UPGRADE DEBUG ===');
     console.log('hasUpgraded:', hasUpgraded);
@@ -760,6 +765,7 @@ const MemberDetail = () => {
     console.log('member.currentUpgradeId:', member.currentUpgradeId);
     console.log('member.upgradeInfo:', member.upgradeInfo);
     console.log('currentProductDeposit:', member.product.depositAmount);
+    console.log('savingsStartDate:', startDate);
     if (upgradeInfo) {
       console.log('completedPeriodsAtUpgrade:', upgradeInfo.completedPeriodsAtUpgrade);
       console.log('oldMonthlyDeposit:', upgradeInfo.oldMonthlyDeposit);
@@ -807,6 +813,11 @@ const MemberDetail = () => {
         }
       }
       
+      // Calculate the month for this period
+      // Period 1 = startDate month, Period 2 = startDate + 1 month, etc.
+      const periodDate = new Date(startDate.getFullYear(), startDate.getMonth() + (period - 1), 1);
+      const monthName = periodDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+      
       // SMART STATUS DETECTION for upgraded members
       // If period was completed before upgrade, check against OLD target
       let transactions = [];
@@ -836,6 +847,7 @@ const MemberDetail = () => {
       
       periodStatus.push({
         period,
+        monthName, // Added month name
         status,
         totalPaid,
         requiredAmount,
@@ -1419,6 +1431,9 @@ const MemberDetail = () => {
                             Periode
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
+                            Bulan
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                             Tanggal Upload
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
@@ -1451,6 +1466,11 @@ const MemberDetail = () => {
                             <tr key={period.period} className="hover:bg-pink-50">
                               <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                                 Periode {period.period}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-medium">
+                                  📅 {period.monthName}
+                                </span>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 {(() => {
