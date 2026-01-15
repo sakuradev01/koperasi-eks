@@ -66,6 +66,10 @@ const Savings = () => {
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectLoading, setRejectLoading] = useState(false);
 
+  // Proof modal state (view proof before action)
+  const [showProofModal, setShowProofModal] = useState(false);
+  const [selectedSaving, setSelectedSaving] = useState(null);
+
   // Existing proof file state (for edit mode)
   const [existingProofFile, setExistingProofFile] = useState(null);
 
@@ -556,6 +560,18 @@ const Savings = () => {
     });
   };
 
+  // Open proof modal (view proof before action)
+  const openProofModal = (saving) => {
+    setSelectedSaving(saving);
+    setShowProofModal(true);
+  };
+
+  // Close proof modal
+  const closeProofModal = () => {
+    setSelectedSaving(null);
+    setShowProofModal(false);
+  };
+
   const handleReject = (id) => {
     setRejectSavingsId(id);
     setRejectionReason("");
@@ -951,10 +967,10 @@ const Savings = () => {
                   <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {saving.proofFile ? (
                       <button
-                        onClick={() => window.open(`${API_URL}/uploads/simpanan/${saving.proofFile}`, '_blank')}
-                        className="text-blue-600 hover:text-blue-800 underline"
+                        onClick={() => openProofModal(saving)}
+                        className="text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
                       >
-                        Lihat Bukti
+                        <span>👁️</span> Lihat Bukti
                       </button>
                     ) : (
                       <span className="text-gray-400">-</span>
@@ -988,22 +1004,19 @@ const Savings = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex items-center space-x-1">
                       {saving.status === "Pending" && (
-                        <>
+                        saving.proofFile ? (
                           <button
-                            onClick={() => handleApprove(saving._id)}
-                            className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200"
-                            title="Setujui"
+                            onClick={() => openProofModal(saving)}
+                            className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center gap-1"
+                            title="Lihat bukti & Aksi"
                           >
-                            ✓
+                            👁️ Review
                           </button>
-                          <button
-                            onClick={() => handleReject(saving._id)}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200"
-                            title="Tolak"
-                          >
-                            ✗
-                          </button>
-                        </>
+                        ) : (
+                          <span className="text-xs text-yellow-600" title="Bukti belum diupload">
+                            ⚠️ No Proof
+                          </span>
+                        )
                       )}
                       <button
                         onClick={() => handleEdit(saving)}
@@ -1950,6 +1963,149 @@ const Savings = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Proof Modal - View proof before action */}
+      {showProofModal && selectedSaving && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-pink-500 to-rose-500 px-6 py-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-bold text-white">📋 Review Pembayaran</h3>
+                <p className="text-pink-100 text-sm">
+                  {selectedSaving.memberId?.name || 'Unknown'} - Periode {selectedSaving.installmentPeriod}
+                </p>
+              </div>
+              <button
+                onClick={closeProofModal}
+                className="text-white hover:text-pink-200 text-2xl font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+              {/* Transaction Info */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
+                <div>
+                  <p className="text-xs text-gray-500">Anggota</p>
+                  <p className="font-semibold text-gray-800">{selectedSaving.memberId?.name || '-'}</p>
+                  <p className="text-xs text-gray-400">{selectedSaving.memberId?.uuid || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Produk</p>
+                  <p className="font-semibold text-gray-800">{selectedSaving.productId?.title || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Jumlah</p>
+                  <p className="font-semibold text-green-600">{formatCurrency(selectedSaving.amount)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Tanggal Bayar</p>
+                  <p className="font-semibold text-gray-800">
+                    {selectedSaving.paymentDate 
+                      ? format(new Date(selectedSaving.paymentDate), "dd MMM yyyy", { locale: id })
+                      : '-'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Proof Image */}
+              <div className="mb-6">
+                <p className="text-sm font-medium text-gray-700 mb-2">📷 Bukti Pembayaran:</p>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50">
+                  {selectedSaving.proofFile ? (
+                    <img
+                      src={`${API_URL}/uploads/simpanan/${selectedSaving.proofFile}`}
+                      alt="Bukti Pembayaran"
+                      className="max-w-full h-auto max-h-96 mx-auto rounded-lg shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => window.open(`${API_URL}/uploads/simpanan/${selectedSaving.proofFile}`, '_blank')}
+                    />
+                  ) : (
+                    <div className="text-center py-12 text-gray-400">
+                      <span className="text-4xl">📭</span>
+                      <p className="mt-2">Tidak ada bukti pembayaran</p>
+                    </div>
+                  )}
+                </div>
+                {selectedSaving.proofFile && (
+                  <p className="text-xs text-gray-400 mt-2 text-center">
+                    Klik gambar untuk membuka di tab baru
+                  </p>
+                )}
+              </div>
+
+              {/* Description */}
+              {selectedSaving.description && (
+                <div className="mb-6">
+                  <p className="text-sm font-medium text-gray-700 mb-1">📝 Keterangan:</p>
+                  <p className="text-gray-600 bg-gray-50 p-3 rounded-lg">{selectedSaving.description}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer - Action Buttons */}
+            {selectedSaving.status === 'Pending' && (
+              <div className="border-t border-gray-200 px-6 py-4 bg-gray-50">
+                <p className="text-sm text-gray-600 mb-3 text-center">
+                  ⚠️ Pastikan bukti pembayaran sudah benar sebelum mengambil aksi
+                </p>
+                <div className="flex flex-wrap gap-3 justify-center">
+                  <button
+                    onClick={() => {
+                      closeProofModal();
+                      handleApprove(selectedSaving._id);
+                    }}
+                    className="px-6 py-2.5 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors flex items-center gap-2 shadow-md"
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    onClick={() => {
+                      closeProofModal();
+                      handleReject(selectedSaving._id);
+                    }}
+                    className="px-6 py-2.5 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors flex items-center gap-2 shadow-md"
+                  >
+                    ✕ Reject
+                  </button>
+                  <button
+                    onClick={() => {
+                      closeProofModal();
+                      handleEdit(selectedSaving);
+                    }}
+                    className="px-6 py-2.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-md"
+                  >
+                    ✎ Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      closeProofModal();
+                      handleDelete(selectedSaving._id);
+                    }}
+                    className="px-6 py-2.5 bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-colors flex items-center gap-2 shadow-md"
+                  >
+                    🗑 Hapus
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Close button for non-pending status */}
+            {selectedSaving.status !== 'Pending' && (
+              <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex justify-center">
+                <button
+                  onClick={closeProofModal}
+                  className="px-8 py-2.5 bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-colors"
+                >
+                  Tutup
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

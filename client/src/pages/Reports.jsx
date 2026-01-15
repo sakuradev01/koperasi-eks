@@ -695,6 +695,16 @@ const Reports = () => {
           🔴 Overdue ({summaryStats.membersWithOverdue})
         </button>
         <button
+          onClick={() => { setActiveTab("members"); setCurrentPage(1); setFilterStatus("has_partial"); }}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === "members" && filterStatus === "has_partial"
+              ? "bg-orange-500 text-white" 
+              : "bg-orange-100 text-orange-700 hover:bg-orange-200"
+          }`}
+        >
+          🟠 Partial ({summaryStats.membersWithPartial})
+        </button>
+        <button
           onClick={() => { setActiveTab("savings"); setCurrentPage(1); setFilterStatus("Pending"); }}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             activeTab === "savings" && filterStatus === "Pending"
