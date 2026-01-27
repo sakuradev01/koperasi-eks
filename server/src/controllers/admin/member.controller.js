@@ -1,6 +1,12 @@
 import { Member } from "../../models/member.model.js";
 import { User } from "../../models/user.model.js";
 import { Savings } from "../../models/savings.model.js";
+import { Loan } from "../../models/loan.model.js";
+import { LoanPayment } from "../../models/loanPayment.model.js";
+import { ProductUpgrade } from "../../models/productUpgrade.model.js";
+import mongoose from "mongoose";
+import fs from "fs/promises";
+import path from "path";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
 // Get all members
@@ -252,7 +258,7 @@ const updateMember = asyncHandler(async (req, res) => {
   });
 });
 
-// Delete member
+// Delete member (cascade delete related data)
 const deleteMember = asyncHandler(async (req, res) => {
   const { uuid } = req.params;
 
@@ -265,15 +271,76 @@ const deleteMember = asyncHandler(async (req, res) => {
     });
   }
 
-  // Delete associated user
-  await User.findByIdAndDelete(member.user);
+  const session = await mongoose.startSession();
 
-  // Delete member
-  await Member.findByIdAndDelete(member._id);
+  // Collect proof files to delete after DB commit
+  const savingsProofFiles = [];
+  const loanPaymentProofFiles = [];
+
+  const safeUnlink = async (filePath) => {
+    if (!filePath) return;
+    try {
+      await fs.unlink(filePath);
+    } catch (err) {
+      // Ignore missing files
+      if (err && err.code !== "ENOENT") {
+        console.warn("Failed to delete file:", filePath, err.message);
+      }
+    }
+  };
+
+  try {
+    await session.withTransaction(async () => {
+      // 1) Collect file names before deleting documents
+      const savingsDocs = await Savings.find({ memberId: member._id }, "proofFile")
+        .session(session)
+        .lean();
+      for (const s of savingsDocs) {
+        if (s.proofFile) savingsProofFiles.push(s.proofFile);
+      }
+
+      const paymentDocs = await LoanPayment.find({ memberId: member._id }, "proofFile")
+        .session(session)
+        .lean();
+      for (const p of paymentDocs) {
+        if (p.proofFile) loanPaymentProofFiles.push(p.proofFile);
+      }
+
+      // 2) Delete all related documents
+      await LoanPayment.deleteMany({ memberId: member._id }).session(session);
+      await Loan.deleteMany({ memberId: member._id }).session(session);
+      await Savings.deleteMany({ memberId: member._id }).session(session);
+      await ProductUpgrade.deleteMany({ memberId: member._id }).session(session);
+
+      // 3) Delete associated user + member
+      await User.deleteOne({ _id: member.user }).session(session);
+      await Member.deleteOne({ _id: member._id }).session(session);
+    });
+  } finally {
+    session.endSession();
+  }
+
+  // Delete files outside transaction
+  await Promise.all(
+    savingsProofFiles.map((filename) => {
+      // savings controller stores only filename, in uploads/simpanan
+      const filePath = path.join(process.cwd(), "uploads", "simpanan", filename);
+      return safeUnlink(filePath);
+    })
+  );
+
+  await Promise.all(
+    loanPaymentProofFiles.map((proofPath) => {
+      // loan payment stores a URL-like path: /uploads/pinjaman/{filename}
+      const normalized = String(proofPath).replace(/^\//, "");
+      const filePath = path.join(process.cwd(), "public", normalized);
+      return safeUnlink(filePath);
+    })
+  );
 
   res.status(200).json({
     success: true,
-    message: "Member berhasil dihapus",
+    message: "Member berhasil dihapus (termasuk transaksi terkait)",
   });
 });
 

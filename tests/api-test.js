@@ -343,6 +343,39 @@ async function runTests() {
     if (!res.data.success) throw new Error('Failed');
   });
 
+  await test('28a. Verify cascade delete (savings)', async () => {
+    if (!testMemberId) {
+      console.log('   Skipped - no memberId');
+      return;
+    }
+    const res = await api.get(`/api/admin/savings?memberId=${testMemberId}`);
+    if (!res.data.success) throw new Error('Failed');
+    const count = Array.isArray(res.data.data) ? res.data.data.length : (res.data.data?.savings?.length || 0);
+    if (count !== 0) throw new Error(`Expected 0 savings, got ${count}`);
+  });
+
+  await test('28b. Verify cascade delete (loan payments)', async () => {
+    if (!testMemberId) {
+      console.log('   Skipped - no memberId');
+      return;
+    }
+    const res = await api.get(`/api/admin/loan-payments?memberId=${testMemberId}`);
+    if (!res.data.success) throw new Error('Failed');
+    const count = Array.isArray(res.data.data) ? res.data.data.length : (res.data.data?.payments?.length || 0);
+    if (count !== 0) throw new Error(`Expected 0 loan payments, got ${count}`);
+  });
+
+  await test('28c. Verify cascade delete (loans)', async () => {
+    if (!testMemberId) {
+      console.log('   Skipped - no memberId');
+      return;
+    }
+    const res = await api.get(`/api/admin/loans?memberId=${testMemberId}`);
+    if (!res.data.success) throw new Error('Failed');
+    const count = Array.isArray(res.data.data) ? res.data.data.length : (res.data.data?.loans?.length || 0);
+    if (count !== 0) throw new Error(`Expected 0 loans, got ${count}`);
+  });
+
   await test('29. Logout', async () => {
     const res = await api.post('/api/admin/auth/logout');
     if (!res.data.success) throw new Error('Failed');
