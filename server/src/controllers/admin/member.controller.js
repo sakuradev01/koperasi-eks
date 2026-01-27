@@ -6,7 +6,6 @@ import { LoanPayment } from "../../models/loanPayment.model.js";
 import { ProductUpgrade } from "../../models/productUpgrade.model.js";
 import mongoose from "mongoose";
 import fs from "fs/promises";
-import path from "path";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
@@ -290,33 +289,51 @@ const deleteMember = asyncHandler(async (req, res) => {
     }
   };
 
+  const collectProofFiles = async (qryOpts = {}) => {
+    const savingsDocs = await Savings.find({ memberId: member._id }, "proofFile", qryOpts).lean();
+    for (const s of savingsDocs) {
+      if (s.proofFile) savingsProofFiles.push(s.proofFile);
+    }
+
+    const paymentDocs = await LoanPayment.find({ memberId: member._id }, "proofFile", qryOpts).lean();
+    for (const p of paymentDocs) {
+      if (p.proofFile) loanPaymentProofFiles.push(p.proofFile);
+    }
+  };
+
   try {
+    // Prefer transaction when Mongo supports it (replica set / mongos)
     await session.withTransaction(async () => {
-      // 1) Collect file names before deleting documents
-      const savingsDocs = await Savings.find({ memberId: member._id }, "proofFile")
-        .session(session)
-        .lean();
-      for (const s of savingsDocs) {
-        if (s.proofFile) savingsProofFiles.push(s.proofFile);
-      }
+      await collectProofFiles({ session });
 
-      const paymentDocs = await LoanPayment.find({ memberId: member._id }, "proofFile")
-        .session(session)
-        .lean();
-      for (const p of paymentDocs) {
-        if (p.proofFile) loanPaymentProofFiles.push(p.proofFile);
-      }
-
-      // 2) Delete all related documents
       await LoanPayment.deleteMany({ memberId: member._id }).session(session);
       await Loan.deleteMany({ memberId: member._id }).session(session);
       await Savings.deleteMany({ memberId: member._id }).session(session);
       await ProductUpgrade.deleteMany({ memberId: member._id }).session(session);
 
-      // 3) Delete associated user + member
       await User.deleteOne({ _id: member.user }).session(session);
       await Member.deleteOne({ _id: member._id }).session(session);
     });
+  } catch (err) {
+    // Fallback: standalone MongoDB doesn't support transactions
+    const msg = String(err?.message || "");
+    const isTxnUnsupported = msg.includes("Transaction numbers are only allowed") || msg.includes("replica set") || msg.includes("mongos");
+
+    if (!isTxnUnsupported) throw err;
+
+    console.warn("Mongo transactions not supported; falling back to non-transaction delete:", msg);
+
+    // Collect proof files first
+    await collectProofFiles();
+
+    // Best-effort deletes (order matters less without transaction)
+    await LoanPayment.deleteMany({ memberId: member._id });
+    await Loan.deleteMany({ memberId: member._id });
+    await Savings.deleteMany({ memberId: member._id });
+    await ProductUpgrade.deleteMany({ memberId: member._id });
+
+    await User.deleteOne({ _id: member.user });
+    await Member.deleteOne({ _id: member._id });
   } finally {
     session.endSession();
   }
