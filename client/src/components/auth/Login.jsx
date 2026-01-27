@@ -170,23 +170,6 @@ const Login = () => {
             </Button>
           </form>
 
-          {/* Admin Info */}
-          <div className="mt-6 p-3 sm:p-4 bg-gradient-to-r from-pink-50 to-rose-50 rounded-lg border border-pink-100">
-            <div className="text-center">
-              <p className="text-xs sm:text-sm text-pink-700 font-medium mb-2">
-                🌸 Akun Demo Administrator
-              </p>
-              <div className="space-y-1">
-                <p className="text-xs sm:text-sm text-pink-600">
-                  Username: <code className="bg-pink-100 px-2 py-1 rounded text-pink-800 font-mono">admin</code>
-                </p>
-                <p className="text-xs sm:text-sm text-pink-600">
-                  Password: <code className="bg-pink-100 px-2 py-1 rounded text-pink-800 font-mono">admin123</code>
-                </p>
-              </div>
-            </div>
-          </div>
-          
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-gray-500">
