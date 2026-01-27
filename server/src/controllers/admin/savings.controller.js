@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ApiError } from "../../utils/ApiError.js";
+import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import {
   createSavingsSchema,
   updateSavingsSchema,
@@ -295,11 +296,10 @@ const deleteSavings = asyncHandler(async (req, res) => {
   // Delete proof file if exists
   if (savings.proofFile) {
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const filePath = path.join(process.cwd(), 'uploads', 'simpanan', savings.proofFile);
-      
-      if (fs.existsSync(filePath)) {
+      const fs = await import("fs");
+      const filePath = resolveUploadedFilePath(savings.proofFile, { defaultSubdir: "simpanan" });
+
+      if (filePath && fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         console.log(`File bukti deleted: ${filePath}`);
       }

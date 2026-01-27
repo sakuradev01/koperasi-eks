@@ -17,16 +17,16 @@ import loanRoutes from "./member/loan.routes.js";
 
 const router = express.Router();
 
+import path from "path";
+import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";
+
 // Ensure upload directory exists
-const uploadDir = "uploads/simpanan";
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const { simpanan: simpananDir } = ensureUploadsSubdirs();
 
 // Configure multer for file uploads (same as admin savings)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, uploadDir + "/");
+    cb(null, simpananDir + path.sep);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);

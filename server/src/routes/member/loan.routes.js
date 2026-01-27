@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import path from "path";
+import { ensureUploadsSubdirs } from "../../utils/uploadsDir.js";
 import {
   getAvailableLoanProducts,
   getMemberLoans,
@@ -15,9 +16,10 @@ import { verifyMemberToken } from "../../middlewares/memberAuth.middleware.js";
 const router = express.Router();
 
 // Configure multer for file uploads
+const { pinjaman: pinjamanDir } = ensureUploadsSubdirs();
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/pinjaman");
+    cb(null, pinjamanDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);

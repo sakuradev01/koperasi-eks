@@ -7,6 +7,7 @@ import { ProductUpgrade } from "../../models/productUpgrade.model.js";
 import mongoose from "mongoose";
 import fs from "fs/promises";
 import path from "path";
+import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
 // Get all members
@@ -323,17 +324,16 @@ const deleteMember = asyncHandler(async (req, res) => {
   // Delete files outside transaction
   await Promise.all(
     savingsProofFiles.map((filename) => {
-      // savings controller stores only filename, in uploads/simpanan
-      const filePath = path.join(process.cwd(), "uploads", "simpanan", filename);
+      // savings controller stores only filename
+      const filePath = resolveUploadedFilePath(filename, { defaultSubdir: "simpanan" });
       return safeUnlink(filePath);
-    })
+    }),
   );
 
   await Promise.all(
     loanPaymentProofFiles.map((proofPath) => {
       // loan payment stores a URL-like path: /uploads/pinjaman/{filename}
-      const normalized = String(proofPath).replace(/^\//, "");
-      const filePath = path.join(process.cwd(), "public", normalized);
+      const filePath = resolveUploadedFilePath(proofPath);
       return safeUnlink(filePath);
     })
   );

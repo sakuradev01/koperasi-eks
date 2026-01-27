@@ -41,10 +41,21 @@ jobs:
 
             echo "📦 Backend"
             cd "$APP_DIR/server"
+
+            # Persistent uploads directory on host
+            UPLOADS_HOST_DIR="$APP_DIR/server/uploads"
+            mkdir -p "$UPLOADS_HOST_DIR/simpanan" "$UPLOADS_HOST_DIR/pinjaman"
+
             podman build --pull-always --no-cache -t koperasi-api:latest .
             podman stop api || true
             podman rm api || true
-            podman run -d --name api --network host --env-file .env koperasi-api
+
+            # Mount uploads volume so files survive container recreation
+            podman run -d --name api --network host \
+              --env-file .env \
+              -e UPLOADS_DIR="/data/uploads" \
+              -v "$UPLOADS_HOST_DIR:/data/uploads:Z" \
+              koperasi-api
 
             echo "⚛ Frontend"
             cd "$APP_DIR/client"

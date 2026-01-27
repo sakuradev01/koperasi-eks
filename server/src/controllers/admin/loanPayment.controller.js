@@ -4,6 +4,7 @@ import { Member } from "../../models/member.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import fs from "fs/promises";
 import path from "path";
+import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 
 // Create loan payment
 const createPayment = asyncHandler(async (req, res) => {
@@ -186,11 +187,14 @@ const rejectPayment = asyncHandler(async (req, res) => {
 
   // Delete proof file if exists
   if (payment.proofFile) {
-    const filePath = path.join(process.cwd(), "public", payment.proofFile);
-    try {
-      await fs.unlink(filePath);
-    } catch (error) {
-      console.error("Error deleting proof file:", error);
+    const filePath = resolveUploadedFilePath(payment.proofFile);
+    if (filePath) {
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        // Don't fail the request if file is already gone
+        console.error("Error deleting proof file:", error);
+      }
     }
   }
 
@@ -489,9 +493,8 @@ const deletePayment = asyncHandler(async (req, res) => {
 
   // Delete proof file if exists
   if (payment.proofFile) {
-    try {
-      const filePath = path.join(process.cwd(), payment.proofFile.replace(/^\//, ''));
-      // Check if file exists before trying to delete
+    const filePath = resolveUploadedFilePath(payment.proofFile);
+    if (filePath) {
       try {
         await fs.access(filePath);
         await fs.unlink(filePath);
@@ -499,9 +502,6 @@ const deletePayment = asyncHandler(async (req, res) => {
       } catch (accessErr) {
         console.log("Proof file not found or already deleted:", filePath);
       }
-    } catch (err) {
-      console.error("Error deleting proof file:", err);
-      // Continue even if file deletion fails
     }
   }
 

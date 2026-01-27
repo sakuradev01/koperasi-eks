@@ -6,6 +6,7 @@ import { LoanPayment } from "../../models/loanPayment.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import fs from "fs";
 import path from "path";
+import { getUploadsDir } from "../../utils/uploadsDir.js";
 
 // Clear all data (members, savings, loans, uploaded files)
 const clearAllData = asyncHandler(async (req, res) => {
@@ -43,7 +44,7 @@ const clearAllData = asyncHandler(async (req, res) => {
     });
 
     // 7. Clear uploaded files
-    const uploadsDir = path.join(process.cwd(), "uploads");
+    const uploadsDir = getUploadsDir();
     let deletedFiles = 0;
 
     const clearDirectory = (dirPath) => {

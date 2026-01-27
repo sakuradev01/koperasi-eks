@@ -13,19 +13,18 @@ import {
 } from "../controllers/savings.controller.js";
 import { verifyToken } from "../middlewares/auth.middleware.js";
 import multer from "multer";
+import path from "path";
+import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";
 
 const router = express.Router();
 
 // Ensure upload directory exists
-const uploadDir = "uploads/simpanan";
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const { simpanan: simpananDir } = ensureUploadsSubdirs();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, uploadDir + "/");
+    cb(null, simpananDir + path.sep);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
