@@ -1844,11 +1844,11 @@ const Savings = () => {
                   <input
                     type="file"
                     onChange={handleFileChange}
-                    accept="image/*"
+                    accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                   />
                   <p className="mt-1 text-sm text-gray-500">
-                    Maksimal 5MB, format gambar
+                    Maksimal 5MB, format: JPG, PNG, GIF, PDF, DOC, DOCX
                   </p>
                 </div>
 

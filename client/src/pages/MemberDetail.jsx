@@ -2035,15 +2035,48 @@ const MemberDetail = () => {
             <div className="p-4">
               {currentProofImage && (
                 <div className="text-center">
-                  <img
-                    src={currentProofImage}
-                    alt="Bukti Pembayaran"
-                    className="max-w-full max-h-[60vh] object-contain mx-auto rounded-lg shadow-lg"
-                    onError={(e) => {
-                      e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21,15 16,10 5,21'/%3E%3C/svg%3E";
-                      e.target.className = "max-w-full max-h-[60vh] object-contain mx-auto rounded-lg shadow-lg opacity-50";
-                    }}
-                  />
+                  {/* Check if file is PDF or Word document */}
+                  {currentProofImage.toLowerCase().match(/\.pdf(\?|$)/) ? (
+                    <div className="flex flex-col items-center justify-center py-8">
+                      <div className="w-24 h-24 bg-red-100 rounded-lg flex items-center justify-center mb-4">
+                        <span className="text-5xl">📄</span>
+                      </div>
+                      <p className="text-gray-700 font-medium mb-4">Dokumen PDF</p>
+                      <a
+                        href={currentProofImage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+                      >
+                        <span>📂</span> Buka PDF
+                      </a>
+                    </div>
+                  ) : currentProofImage.toLowerCase().match(/\.(doc|docx)(\?|$)/) ? (
+                    <div className="flex flex-col items-center justify-center py-8">
+                      <div className="w-24 h-24 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+                        <span className="text-5xl">📝</span>
+                      </div>
+                      <p className="text-gray-700 font-medium mb-4">Dokumen Word</p>
+                      <a
+                        href={currentProofImage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                      >
+                        <span>📥</span> Download Dokumen
+                      </a>
+                    </div>
+                  ) : (
+                    <img
+                      src={currentProofImage}
+                      alt="Bukti Pembayaran"
+                      className="max-w-full max-h-[60vh] object-contain mx-auto rounded-lg shadow-lg"
+                      onError={(e) => {
+                        e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21,15 16,10 5,21'/%3E%3C/svg%3E";
+                        e.target.className = "max-w-full max-h-[60vh] object-contain mx-auto rounded-lg shadow-lg opacity-50";
+                      }}
+                    />
+                  )}
                 </div>
               )}
 

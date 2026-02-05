@@ -417,7 +417,7 @@ const SavingsModal = ({ isOpen, onClose, onSuccess, savingsData }) => {
             <input
               type="file"
               {...register("proofFile")}
-              accept="image/*,.pdf"
+              accept="image/*,.pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {savingsData?.proofFile && (
