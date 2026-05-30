@@ -709,10 +709,37 @@ const Reports = () => {
     return lookup;
   }, [products]);
 
+  const reportMembers = useMemo(
+    () => members.filter((member) => member?.isVerified === true),
+    [members],
+  );
+
+  const reportMemberKeys = useMemo(() => {
+    const keys = new Set();
+
+    reportMembers.forEach((member) => {
+      if (member?._id) keys.add(String(member._id));
+      if (member?.uuid) keys.add(String(member.uuid));
+    });
+
+    return keys;
+  }, [reportMembers]);
+
+  const reportSavings = useMemo(
+    () =>
+      savings.filter((saving) => {
+        const memberId = normalizeId(saving.memberId);
+        const memberUuid = saving.memberId?.uuid;
+
+        return reportMemberKeys.has(memberId) || reportMemberKeys.has(memberUuid);
+      }),
+    [savings, reportMemberKeys],
+  );
+
   const memberLookup = useMemo(() => {
     const lookup = new Map();
 
-    members.forEach((member) => {
+    reportMembers.forEach((member) => {
       const resolvedProduct = getResolvedProduct(member, productLookup);
       const normalizedMember = {
         ...member,
@@ -724,12 +751,12 @@ const Reports = () => {
     });
 
     return lookup;
-  }, [members, productLookup]);
+  }, [reportMembers, productLookup]);
 
   const savingsByMember = useMemo(() => {
     const grouped = new Map();
 
-    savings.forEach((saving) => {
+    reportSavings.forEach((saving) => {
       const keys = [normalizeId(saving.memberId), saving.memberId?.uuid].filter(Boolean);
 
       keys.forEach((key) => {
@@ -740,14 +767,14 @@ const Reports = () => {
     });
 
     return grouped;
-  }, [savings]);
+  }, [reportSavings]);
 
   const memberMetrics = useMemo(() => {
     let membersWithOverdue = 0;
     let membersWithPartial = 0;
     let membersAllPaid = 0;
 
-    members.forEach((rawMember) => {
+    reportMembers.forEach((rawMember) => {
       const member = {
         ...rawMember,
         product: getResolvedProduct(rawMember, productLookup),
@@ -768,15 +795,15 @@ const Reports = () => {
     });
 
     return {
-      totalMembers: members.length,
+      totalMembers: reportMembers.length,
       membersWithOverdue,
       membersWithPartial,
       membersAllPaid,
     };
-  }, [members, savingsByMember, productLookup]);
+  }, [reportMembers, savingsByMember, productLookup]);
 
   const dashboardStats = useMemo(() => {
-    const totalSavingsAmount = savings
+    const totalSavingsAmount = reportSavings
       .filter(
         (saving) =>
           saving.type === "Setoran" &&
@@ -784,18 +811,18 @@ const Reports = () => {
       )
       .reduce((sum, saving) => sum + (Number(saving.amount) || 0), 0);
 
-    const totalWithdrawals = savings
+    const totalWithdrawals = reportSavings
       .filter((saving) => saving.type === "Penarikan" && saving.status === "Approved")
       .reduce((sum, saving) => sum + (Number(saving.amount) || 0), 0);
 
-    const pendingCount = savings.filter((saving) => saving.status === "Pending").length;
-    const partialSavingsCount = savings.filter(
+    const pendingCount = reportSavings.filter((saving) => saving.status === "Pending").length;
+    const partialSavingsCount = reportSavings.filter(
       (saving) => saving.status === "Partial" || saving.paymentType === "Partial"
     ).length;
 
     return {
-      totalMembers: members.length,
-      completedMembers: members.filter((member) => member.isCompleted).length,
+      totalMembers: reportMembers.length,
+      completedMembers: reportMembers.filter((member) => member.isCompleted).length,
       totalSavingsAmount,
       netSavings: totalSavingsAmount - totalWithdrawals,
       pendingCount,
@@ -804,7 +831,7 @@ const Reports = () => {
       membersWithPartial: memberMetrics.membersWithPartial,
       membersAllPaid: memberMetrics.membersAllPaid,
     };
-  }, [members, savings, memberMetrics]);
+  }, [reportMembers, reportSavings, memberMetrics]);
 
   const transactionRowsBase = useMemo(() => {
     const rows = [];
@@ -813,7 +840,7 @@ const Reports = () => {
     const end = new Date(dateTo);
     end.setHours(23, 59, 59, 999);
 
-    members.forEach((rawMember) => {
+    reportMembers.forEach((rawMember) => {
       const member = {
         ...rawMember,
         product: getResolvedProduct(rawMember, productLookup),
@@ -990,7 +1017,7 @@ const Reports = () => {
   }, [transactionRowsBase]);
 
   const memberBaseRows = useMemo(() => {
-    let rows = members.map((rawMember) => {
+    let rows = reportMembers.map((rawMember) => {
       const member = {
         ...rawMember,
         product: getResolvedProduct(rawMember, productLookup),
@@ -1076,7 +1103,7 @@ const Reports = () => {
   }, [transactionRowsBase]);
 
   const withdrawalAmount = useMemo(() => {
-    let result = savings.filter(
+    let result = reportSavings.filter(
       (saving) => saving.type === "Penarikan" && saving.status === "Approved"
     );
 
@@ -1500,7 +1527,7 @@ const Reports = () => {
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value="all">Semua Anggota</option>
-              {members.map((member) => (
+              {reportMembers.map((member) => (
                 <option key={member._id} value={member._id}>
                   {member.name}
                 </option>

@@ -380,9 +380,14 @@ function dateDiffInDays(left, right) {
 
 function paymentMatchesProjection(payment, projection, projectionIndex) {
   if (!payment || !projection) return false;
-  if (payment.projectionId && sameObjectId(payment.projectionId, projection._id)) {
-    return true;
+
+  // projectionId harus jadi source of truth.
+  // Kalau projectionId ada, jangan fallback ke projectionIndex.
+  if (payment.projectionId) {
+    return sameObjectId(payment.projectionId, projection._id);
   }
+
+  // Fallback ini hanya untuk payment lama/legacy yang belum punya projectionId.
   return (
     Number(payment.projectionIndex || 0) > 0 &&
     Number(payment.projectionIndex) === Number(projectionIndex)

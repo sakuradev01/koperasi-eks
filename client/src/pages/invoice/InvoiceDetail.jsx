@@ -879,19 +879,17 @@ export default function InvoiceDetail({
   );
 
   const suggestedPaymentProjection = useMemo(() => {
-    if (!outstandingProjections.length) return null;
+  if (!outstandingProjections.length) return null;
 
-    return [...outstandingProjections].sort((a, b) => {
-      const aPartial = String(a.status || "").toLowerCase() === "partial";
-      const bPartial = String(b.status || "").toLowerCase() === "partial";
-      if (aPartial !== bPartial) return aPartial ? -1 : 1;
+  return [...outstandingProjections].sort((a, b) => {
+    const dateDiff =
+      new Date(a.estimateDate).getTime() - new Date(b.estimateDate).getTime();
 
-      const agingDiff = Number(b.agingDays || 0) - Number(a.agingDays || 0);
-      if (agingDiff !== 0) return agingDiff;
+    if (dateDiff !== 0) return dateDiff;
 
-      return new Date(a.estimateDate) - new Date(b.estimateDate);
-    })[0];
-  }, [outstandingProjections]);
+    return Number(a.projectionIndex || 0) - Number(b.projectionIndex || 0);
+  })[0];
+}, [outstandingProjections]);
 
   const projectionOptions = useMemo(
     () =>
