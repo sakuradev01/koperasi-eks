@@ -16,7 +16,9 @@ const LoanManagement = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState(null);
+  const [approveLoanData, setApproveLoanData] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [editData, setEditData] = useState({
     monthlyInstallment: 0,
@@ -157,28 +159,41 @@ const LoanManagement = () => {
     }
   };
 
-  const handleApprove = async (loanId) => {
-    if (!window.confirm("Apakah Anda yakin ingin menyetujui pinjaman ini?")) {
-      return;
-    }
-
+  const handleApprove = async () => {
+    if (!approveLoanData) return;
+    
     try {
       const token = localStorage.getItem("token");
+      const loanId = approveLoanData._id;
       const response = await axios.post(
         `${API_URL}/api/admin/loans/${loanId}/approve`,
         {},
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
       if (response.data.success) {
         toast.success("Pinjaman berhasil disetujui");
+        setShowApproveModal(false);
+        setApproveLoanData(null);
         fetchLoans();
       }
     } catch (error) {
-      console.error("Error approving loan:", error);
       toast.error(error.response?.data?.message || "Gagal menyetujui pinjaman");
+    }
+  };
+
+  const openApproveModal = async (loan) => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API_URL}/api/admin/loans/${loan._id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = res.data?.data?.loan || res.data?.data || loan;
+      setApproveLoanData(data);
+      setShowApproveModal(true);
+    } catch {
+      setApproveLoanData(loan);
+      setShowApproveModal(true);
     }
   };
 
@@ -486,6 +501,9 @@ const LoanManagement = () => {
                   Status
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Dokumen
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Tanggal Pengajuan
                 </th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
@@ -532,6 +550,16 @@ const LoanManagement = () => {
                         {loan.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      {loan.documents && loan.documents.length > 0 ? (
+                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-700 cursor-help"
+                              title={loan.documents.map(d => `${d.type}: ${d.fileName}`).join('\n')}>
+                          📄 {loan.documents.length}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">-</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-900">
                       {format(new Date(loan.applicationDate), "dd MMM yyyy", { locale: id })}
                     </td>
@@ -540,7 +568,7 @@ const LoanManagement = () => {
                         {loan.status === "Pending" && (
                           <>
                             <button
-                              onClick={() => handleApprove(loan._id)}
+                              onClick={() => openApproveModal(loan)}
                               className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
                               title="Approve"
                             >
@@ -629,6 +657,106 @@ const LoanManagement = () => {
         </div>
       )}
 
+      {/* Approve Verification Modal */}
+      {showApproveModal && approveLoanData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <h2 className="text-lg font-bold mb-4">🔍 Verifikasi Pinjaman</h2>
+            
+            {/* Loan Info */}
+            <div className="space-y-3 mb-4">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-gray-500">Anggota</p>
+                  <p className="font-semibold">{approveLoanData.memberId?.name || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Produk</p>
+                  <p className="font-semibold">{approveLoanData.loanProductId?.title || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Total Pinjaman</p>
+                  <p className="font-semibold">{formatCurrency(approveLoanData.totalPayment)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Cicilan/Bulan</p>
+                  <p className="font-semibold">{formatCurrency(approveLoanData.monthlyInstallment)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Tenor</p>
+                  <p className="font-semibold">{approveLoanData.tenor} bulan</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Bunga</p>
+                  <p className="font-semibold">{approveLoanData.interestRate}%</p>
+                </div>
+              </div>
+              {approveLoanData.description && (
+                <div className="text-sm">
+                  <p className="text-gray-500">Keterangan</p>
+                  <p className="text-gray-700">{approveLoanData.description}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Documents */}
+            {approveLoanData.documents && approveLoanData.documents.length > 0 && (
+              <div className="mb-4">
+                <p className="text-sm font-semibold text-gray-700 mb-2">
+                  📄 Dokumen Terlampir ({approveLoanData.documents.length})
+                </p>
+                <div className="space-y-2">
+                  {approveLoanData.documents.map((doc, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                        {doc.type?.replace(/_/g, ' ')}
+                      </span>
+                      <a
+                        href={`https://api.samitcoop.com/uploads/pinjaman/${doc.fileName}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline text-xs truncate flex-1"
+                      >
+                        {doc.originalName || doc.fileName}
+                      </a>
+                      <a
+                        href={`https://api.samitcoop.com/uploads/pinjaman/${doc.fileName}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200"
+                      >
+                        Lihat
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(!approveLoanData.documents || approveLoanData.documents.length === 0) && (
+              <div className="mb-4 p-3 bg-yellow-50 text-yellow-800 rounded-lg text-sm">
+                ⚠️ Tidak ada dokumen terlampir untuk pinjaman ini.
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+              <button
+                onClick={() => { setShowApproveModal(false); setApproveLoanData(null); }}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleApprove}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+              >
+                ✅ Setujui Pinjaman
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -637,6 +765,32 @@ const LoanManagement = () => {
             <p className="text-sm text-gray-600 mb-4">
               {selectedLoan?.loanProductId?.title} - {selectedLoan?.memberId?.name}
             </p>
+            
+            {/* Documents section */}
+            {selectedLoan?.documents && selectedLoan.documents.length > 0 && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                  📄 Dokumen Terlampir ({selectedLoan.documents.length})
+                </p>
+                <div className="space-y-1">
+                  {selectedLoan.documents.map((doc, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-xs">
+                      <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-medium">
+                        {doc.type?.replace(/_/g, ' ')}
+                      </span>
+                      <a
+                        href={`https://api.samitcoop.com/uploads/pinjaman/${doc.fileName}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline truncate"
+                      >
+                        {doc.originalName || doc.fileName}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
             <div className="space-y-4">
               <div>
