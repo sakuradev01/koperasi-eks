@@ -50,6 +50,7 @@ const Members = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
   const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending
+  const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -427,6 +428,14 @@ const Members = () => {
     } else if (filterVerification === "address-pending") {
       result = result.filter(member => member.addressUpdateStatus === "pending");
     }
+
+    // Filter by product
+    if (filterProduct) {
+      result = result.filter(member => {
+        const productId = member.product?._id || member.productId || "";
+        return String(productId) === String(filterProduct);
+      });
+    }
     
     // Filter by search term
     if (searchTerm) {
@@ -439,7 +448,7 @@ const Members = () => {
     }
     
     return result;
-  }, [members, searchTerm, filterStatus, filterVerification]);
+  }, [members, searchTerm, filterStatus, filterVerification, filterProduct]);
 
   // Pagination logic with useMemo for performance
   const paginationData = useMemo(() => {
@@ -594,10 +603,30 @@ const Members = () => {
               <option value="address-pending">📍 Alamat Pending</option>
             </select>
           </div>
+
+          {/* Filter Produk */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 whitespace-nowrap">Produk:</label>
+            <select
+              value={filterProduct}
+              onChange={(e) => {
+                setFilterProduct(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
+            >
+              <option value="">📋 Semua</option>
+              {products.map((product) => (
+                <option key={product._id} value={product._id}>
+                  🌸 {product.title}
+                </option>
+              ))}
+            </select>
+          </div>
           
           {/* Search Results Info */}
           <div className="text-sm text-gray-600">
-            {searchTerm || filterStatus !== "all" || filterVerification !== "all" ? (
+            {searchTerm || filterStatus !== "all" || filterVerification !== "all" || filterProduct ? (
               <span className="flex items-center flex-wrap gap-1">
                 <span className="font-medium text-pink-600">{filteredMembers.length}</span>
                 <span>dari {members.length} anggota</span>
@@ -620,6 +649,11 @@ const Members = () => {
                         : "🕐 Belum Verifikasi"}
                   </span>
                 )}
+                {filterProduct ? (
+                  <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-800">
+                    🌸 {products.find(p => String(p._id) === String(filterProduct))?.title || filterProduct}
+                  </span>
+                ) : null}
               </span>
             ) : (
               <span>Total: <span className="font-medium">{members.length}</span> anggota</span>

@@ -715,7 +715,6 @@ export default function InvoiceForm() {
       projections.reduce((sum, item) => sum + normalizeMoney(item.amount), 0),
     [projections],
   );
-  const projectionRemaining = Math.max(total - projectionTotal, 0);
   const expectedReceiveIDR = total * (normalizeNumber(form.exchangeRate) || 1);
   const invoiceNumberBlocked = ["checking", "duplicate"].includes(
     invoiceNumberCheck.status,
@@ -767,12 +766,9 @@ export default function InvoiceForm() {
       const lastDate =
         [...prev].reverse().find((projection) => projection.estimateDate)
           ?.estimateDate || form.dueDate;
-      const nextAmount =
-        projectionRemaining > 0
-          ? projectionRemaining
-          : prev.length
-            ? normalizeMoney(prev[prev.length - 1].amount)
-            : 0;
+      const nextAmount = prev.length
+        ? normalizeMoney(prev[prev.length - 1].amount)
+        : 0;
 
       return [
         ...prev,
