@@ -28,6 +28,13 @@ export const createLoanApplicationValidation = {
       .messages({
         "string.max": "Deskripsi maksimal 500 karakter",
       }),
+    documents: Joi.array()
+      .items(Joi.object({
+        type: Joi.string().valid('kontrak_kerja','visa','zairyuu_card','slip_gaji','mutasi_rekening','signature').required(),
+        fileName: Joi.string().required(),
+        originalName: Joi.string().optional().allow(''),
+      }))
+      .optional(),
   }),
 };
 
