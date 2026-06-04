@@ -1,4 +1,7 @@
 import express from "express";
+import multer from "multer";
+import path from "path";
+import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";
 import {
   createLoanApplication,
   calculateInstallment,
@@ -11,6 +14,7 @@ import {
   checkOverdueLoans,
   updateLoan,
   deleteLoan,
+  uploadLoanDocument,
 } from "../controllers/admin/loan.controller.js";
 import { verifyToken } from "../middlewares/auth.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
@@ -24,8 +28,30 @@ import {
 
 const router = express.Router();
 
+// Multer config for loan document uploads (same pattern as savings)
+const { pinjaman: pinjamanDir } = ensureUploadsSubdirs();
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, pinjamanDir),
+    filename: (req, file, cb) => {
+      const prefix = req.body?.docType || 'loan-doc';
+      cb(null, `${prefix}-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|pdf|webp|bmp|heic/;
+    const ext = allowed.test(path.extname(file.originalname).toLowerCase());
+    const mime = allowed.test(file.mimetype);
+    cb(null, (mime && ext) || file.mimetype.startsWith('image/'));
+  },
+});
+
 // Apply authentication middleware to all routes
 router.use(verifyToken);
+
+// Document upload (multer handles multipart)
+router.post("/upload-document", upload.single("file"), uploadLoanDocument);
 
 // Loan application routes
 router.post(

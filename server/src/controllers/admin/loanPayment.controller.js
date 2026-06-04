@@ -505,26 +505,22 @@ const deletePayment = asyncHandler(async (req, res) => {
     }
   }
 
-  // If payment was approved, need to update loan
+  // If payment was approved, need to reverse loan progress
   if (payment.status === "Approved") {
     const loan = await Loan.findById(payment.loanId);
     if (loan) {
-      // Ensure all values are numbers before calculation
-      const loanAmount = Number(loan.loanAmount) || 0;
-      const interestAmount = Number(loan.interestAmount) || 0;
       const paymentAmount = Number(payment.amount) || 0;
-      const currentTotalPaid = Number(loan.totalPaid) || 0;
-      
-      // Recalculate loan values
-      loan.totalPaid = Math.max(0, currentTotalPaid - paymentAmount);
-      loan.outstandingAmount = loanAmount + interestAmount - loan.totalPaid;
+      const currentOutstanding = Number(loan.outstandingAmount) || 0;
+
+      // Reverse the payment: add amount back to outstanding, decrement period
+      loan.outstandingAmount = currentOutstanding + paymentAmount;
       loan.paidPeriods = Math.max(0, (loan.paidPeriods || 0) - 1);
-      
-      // Update loan status if needed
+
+      // If all periods reverted, set back to Active
       if (loan.paidPeriods === 0) {
         loan.status = "Active";
       }
-      
+
       await loan.save();
     }
   }

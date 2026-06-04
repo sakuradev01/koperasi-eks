@@ -65,6 +65,7 @@ const createLoanApplication = asyncHandler(async (req, res) => {
     description,
     status: "Pending",
     applicationDate: new Date(),
+    documents: req.body.documents || [],
   });
 
   await loan.save();
@@ -490,6 +491,25 @@ const deleteLoan = asyncHandler(async (req, res) => {
   });
 });
 
+// Upload loan document (from student dashboard)
+const uploadLoanDocument = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "File wajib diupload" });
+  }
+  const docType = req.body?.docType || 'loan-doc';
+  res.status(200).json({
+    success: true,
+    data: {
+      fileName: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      docType,
+      url: `/uploads/pinjaman/${req.file.filename}`,
+    },
+    message: "Dokumen berhasil diupload",
+  });
+});
+
 export {
   createLoanApplication,
   calculateInstallment,
@@ -502,4 +522,5 @@ export {
   checkOverdueLoans,
   updateLoan,
   deleteLoan,
+  uploadLoanDocument,
 };

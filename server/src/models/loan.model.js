@@ -98,6 +98,15 @@ const loanSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    documents: [{
+      type: {
+        type: String,
+        enum: ['kontrak_kerja', 'visa', 'zairyuu_card', 'slip_gaji', 'mutasi_rekening', 'signature'],
+      },
+      fileName: { type: String },
+      originalName: { type: String },
+      uploadDate: { type: Date, default: Date.now },
+    }],
   },
   {
     timestamps: true,
