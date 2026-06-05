@@ -15,6 +15,7 @@ import Loans from "../pages/Loans.jsx";
 import Donations from "../pages/Donations.jsx";
 import LoanProducts from "../pages/LoanProducts.jsx";
 import LoanManagement from "../pages/LoanManagement.jsx";
+import DanaDarurat from "../pages/DanaDarurat.jsx";
 import Settings from "../pages/Settings.jsx";
 import Reports from "../pages/Reports.jsx";
 import PrivateRoute from "../utils/PrivateRoute.jsx";
@@ -74,6 +75,7 @@ const router = createBrowserRouter(
         <Route path="/pinjaman" element={<Loans />} />
         <Route path="/donasi" element={<Donations />} />
         <Route path="/loan-management" element={<LoanManagement />} />
+        <Route path="/dana-darurat" element={<DanaDarurat />} />
         <Route path="/laporan" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/akuntansi/transaksi" element={<Transactions />} />

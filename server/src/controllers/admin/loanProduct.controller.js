@@ -39,6 +39,7 @@ const createLoanProduct = asyncHandler(async (req, res) => {
     downPayment,
     interestRate,
     description,
+    type,
   } = req.body;
 
   // Check if loan product with same title already exists
@@ -58,6 +59,7 @@ const createLoanProduct = asyncHandler(async (req, res) => {
     downPayment,
     interestRate,
     description,
+    type: type || 'barang',
   });
 
   await loanProduct.save();
@@ -111,6 +113,9 @@ const updateLoanProduct = asyncHandler(async (req, res) => {
   loanProduct.downPayment = downPayment || loanProduct.downPayment;
   loanProduct.interestRate = interestRate || loanProduct.interestRate;
   loanProduct.description = description || loanProduct.description;
+  if (type && ['barang','dana_darurat','multi_usaha','umroh_haji'].includes(type)) {
+    loanProduct.type = type;
+  }
 
   await loanProduct.save();
 

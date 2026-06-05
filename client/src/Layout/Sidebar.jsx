@@ -29,6 +29,11 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
       path: "/loan-management",
     },
     {
+      title: "Dana Darurat",
+      icon: "💸",
+      path: "/dana-darurat",
+    },
+    {
       title: "Laporan",
       icon: "📊",
       path: "/laporan",

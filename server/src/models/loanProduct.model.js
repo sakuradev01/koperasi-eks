@@ -40,6 +40,12 @@ const loanProductSchema = new mongoose.Schema(
       trim: true,
       maxlength: [500, "Deskripsi maksimal 500 karakter"],
     },
+    type: {
+      type: String,
+      enum: ['barang', 'dana_darurat', 'multi_usaha', 'umroh_haji'],
+      default: 'barang',
+      required: [true, "Tipe pinjaman wajib diisi"],
+    },
     isActive: {
       type: Boolean,
       default: true,

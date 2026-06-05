@@ -15,6 +15,7 @@ const LoanProducts = () => {
     downPayment: "",
     interestRate: "",
     description: "",
+    type: "barang",
     isActive: true,
   });
 
@@ -121,6 +122,7 @@ const LoanProducts = () => {
       downPayment: product.downPayment || "",
       interestRate: product.interestRate || "",
       description: product.description || "",
+      type: product.type || "barang",
       isActive: product.isActive !== undefined ? product.isActive : true,
     });
     setShowModal(true);
@@ -189,6 +191,7 @@ const LoanProducts = () => {
       downPayment: "",
       interestRate: "",
       description: "",
+      type: "barang",
       isActive: true,
     });
     setShowModal(true);
@@ -244,6 +247,9 @@ const LoanProducts = () => {
                 Nama Pinjaman
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Tipe
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Lama Angsuran (bulan)
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -271,6 +277,16 @@ const LoanProducts = () => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                   {product.title}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                    product.type === 'dana_darurat' ? 'bg-red-100 text-red-800' :
+                    product.type === 'multi_usaha' ? 'bg-blue-100 text-blue-800' :
+                    product.type === 'umroh_haji' ? 'bg-green-100 text-green-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {product.type ? product.type.replace(/_/g, ' ') : 'barang'}
+                  </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {product.loanTerm}
@@ -414,6 +430,22 @@ const LoanProducts = () => {
                     step="0.1"
                     required
                   />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tipe Pinjaman *
+                  </label>
+                  <select
+                    value={formData.type}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="barang">Barang</option>
+                    <option value="dana_darurat">Dana Darurat</option>
+                    <option value="multi_usaha">Multi Usaha</option>
+                    <option value="umroh_haji">Umroh / Haji</option>
+                  </select>
                 </div>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">

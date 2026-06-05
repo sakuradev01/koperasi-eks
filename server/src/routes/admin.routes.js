@@ -62,6 +62,7 @@ import productUpgradeRoutes from "./admin/productUpgrade.routes.js";
 import loanRoutes from "./loan.routes.js";
 import loanPaymentRoutes from "./loanPayment.routes.js";
 import loanProductRoutes from "./loanProduct.routes.js";
+import danaDaruratRoutes from "./danaDarurat.routes.js";
 import coaRoutes from "./coa.routes.js";
 import transactionRoutes from "./transaction.routes.js";
 import reconciliationRoutes from "./reconciliation.routes.js";
@@ -165,6 +166,7 @@ router.use("/product-upgrade", productUpgradeRoutes);
 router.use("/loans", loanRoutes);
 router.use("/loan-payments", loanPaymentRoutes);
 router.use("/loan-products", loanProductRoutes);
+router.use("/dana-darurat", danaDaruratRoutes);
 
 // Accounting routes
 router.use("/coa", verifyToken, coaRoutes);

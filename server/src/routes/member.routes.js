@@ -15,6 +15,7 @@ import {
 import { verifyMemberToken } from "../middlewares/memberAuth.middleware.js";
 import multer from "multer";
 import loanRoutes from "./member/loan.routes.js";
+import danaDaruratRoutes from "./member/danaDarurat.routes.js";
 
 const router = express.Router();
 
@@ -80,5 +81,6 @@ router.get("/savings/:id", verifyMemberToken, getMemberSavingById);
 
 // Loan routes
 router.use("/loans", loanRoutes);
+router.use("/dana-darurat", danaDaruratRoutes);
 
 export default router;

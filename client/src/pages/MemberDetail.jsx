@@ -29,6 +29,7 @@ const MemberDetail = () => {
   const [savings, setSavings] = useState([]);
   const [loans, setLoans] = useState([]);
   const [loanProducts, setLoanProducts] = useState([]);
+  const [danaDaruratApps, setDanaDaruratApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("simpanan");
@@ -91,6 +92,7 @@ const MemberDetail = () => {
   useEffect(() => {
     if (member?._id) {
       fetchMemberLoans();
+      fetchDanaDarurat();
     }
   }, [member]);
 
@@ -239,6 +241,19 @@ const MemberDetail = () => {
       console.error("Loans fetch error:", err);
       setLoans([]);
     }
+  };
+
+  const fetchDanaDarurat = async () => {
+    if (!member?._id) return;
+    try {
+      const res = await api.get("/api/admin/dana-darurat");
+      if (res.data.success) {
+        const apps = (res.data.data?.applications || []).filter(
+          a => a.memberId?._id === member._id || a.memberId === member._id
+        );
+        setDanaDaruratApps(apps);
+      }
+    } catch { setDanaDaruratApps([]); }
   };
 
   const fetchLoanProducts = async () => {
@@ -1498,6 +1513,16 @@ const MemberDetail = () => {
             >
               🏦 Pinjaman ({loans.length})
             </button>
+            <button
+              onClick={() => setActiveTab("dana_darurat")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "dana_darurat"
+                  ? "border-pink-500 text-pink-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              💸 Dana Darurat
+            </button>
           </nav>
         </div>
 
@@ -1812,6 +1837,38 @@ const MemberDetail = () => {
                 </div>
               )}
 
+            </div>
+          )}
+
+          {activeTab === "dana_darurat" && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">💸 Pengajuan Dana Darurat</h3>
+              {danaDaruratApps.length === 0 ? (
+                <p className="text-gray-500">Belum ada pengajuan Dana Darurat untuk anggota ini.</p>
+              ) : (
+                <div className="space-y-4">
+                  {danaDaruratApps.map((app) => (
+                    <div key={app._id} className="border rounded-lg p-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            app.status === 'approved' ? 'bg-green-100 text-green-800' :
+                            app.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                            app.status === 'reviewing' ? 'bg-blue-100 text-blue-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>{app.status}</span>
+                          <p className="mt-2 font-medium">{formatCurrency(app.loanDetails?.amount)}</p>
+                          <p className="text-xs text-gray-500">{app.applicationNumber}</p>
+                        </div>
+                        <p className="text-xs text-gray-400">{formatDate(app.submissionDate)}</p>
+                      </div>
+                      {app.loanDetails?.reason && (
+                        <p className="mt-2 text-sm text-gray-600 line-clamp-2">{app.loanDetails.reason}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
