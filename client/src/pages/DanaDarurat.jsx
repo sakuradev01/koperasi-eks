@@ -19,12 +19,31 @@ const STATUS_META = {
   rejected: { label: "Ditolak", color: "bg-red-100 text-red-800" },
 };
 
+const DOCUMENT_TYPES = [
+  "zairyu_card", "passport", "employment_contract", "salary_slip",
+  "bank_book_jp", "bank_statement_jp", "bank_statement_id", "jp_certificate",
+];
+
+const DOCUMENT_LABELS = {
+  zairyu_card: "Zairyu Ka-do",
+  passport: "Paspor",
+  employment_contract: "Kontrak Kerja",
+  salary_slip: "Slip Gaji",
+  bank_book_jp: "Buku Tabungan (JP)",
+  bank_statement_jp: "Mutasi Rekening (JP)",
+  bank_statement_id: "Mutasi Rekening (ID)",
+  jp_certificate: "Sertifikat Bahasa Jepang",
+};
+
 const DanaDarurat = () => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
+  const [uploadType, setUploadType] = useState("");
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => { fetchApplications(); }, [statusFilter]);
 
@@ -56,6 +75,38 @@ const DanaDarurat = () => {
       );
       if (res.data.success) { toast.success(res.data.message); setShowDetail(false); fetchApplications(); }
     } catch { toast.error("Gagal update status"); }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadType) { toast.error("Pilih tipe dokumen"); return; }
+    if (!uploadFile) { toast.error("Pilih file"); return; }
+    if (!selected?._id) return;
+
+    setUploading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const fd = new FormData();
+      fd.append("applicationId", selected._id);
+      fd.append("documentType", uploadType);
+      fd.append("file", uploadFile);
+
+      await axios.post(`${API_URL}/api/admin/dana-darurat/upload`, fd, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" }
+      });
+      toast.success("Dokumen berhasil diupload");
+      setUploadFile(null);
+      setUploadType("");
+      // Reset file input
+      const fileInput = document.getElementById("ddUploadFile");
+      if (fileInput) fileInput.value = "";
+      // Refresh detail
+      const res = await axios.get(`${API_URL}/api/admin/dana-darurat/${selected._id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data.success) setSelected(res.data.data);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Gagal upload dokumen");
+    } finally { setUploading(false); }
   };
 
   const formatCurrency = (v) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(v || 0);
@@ -195,7 +246,7 @@ const DanaDarurat = () => {
               <Section title="📄 Dokumen">
                 {selected.documents?.length > 0 ? selected.documents.map((doc, i) => (
                   <div key={i} className="mb-2">
-                    <p className="font-medium text-gray-700">{doc.type?.replace(/_/g, " ")}</p>
+                    <p className="font-medium text-gray-700 capitalize">{doc.type?.replace(/_/g, " ")}</p>
                     {doc.files?.map((f, j) => (
                       <a key={j} href={`${API_URL}${f.filePath}`} target="_blank" rel="noreferrer"
                         className="text-blue-600 hover:underline block ml-2 text-xs">
@@ -204,6 +255,27 @@ const DanaDarurat = () => {
                     ))}
                   </div>
                 )) : <p className="text-gray-400">Tidak ada dokumen</p>}
+
+                {/* Upload Section */}
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">📤 Upload Dokumen Baru</p>
+                  <div className="flex flex-col gap-2">
+                    <select value={uploadType} onChange={(e) => setUploadType(e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs">
+                      <option value="">Pilih tipe dokumen...</option>
+                      {DOCUMENT_TYPES.map(t => (
+                        <option key={t} value={t}>{DOCUMENT_LABELS[t] || t}</option>
+                      ))}
+                    </select>
+                    <input id="ddUploadFile" type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+                      onChange={(e) => setUploadFile(e.target.files[0])}
+                      className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-purple-50 file:text-purple-700" />
+                    <button onClick={handleUpload} disabled={uploading || !uploadType || !uploadFile}
+                      className="self-start px-3 py-1.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 disabled:opacity-50">
+                      {uploading ? "Mengupload..." : "📤 Upload"}
+                    </button>
+                  </div>
+                </div>
               </Section>
 
               {selected.reviewNotes && (

@@ -78,4 +78,45 @@ const updateStatus = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: application, message: `Status berhasil diubah menjadi ${status}` });
 });
 
-export { submitApplication, saveDraft, getAllApplications, getApplicationDetail, updateStatus };
+// Upload document to an existing application
+const uploadDocument = asyncHandler(async (req, res) => {
+  const { applicationId, documentType } = req.body;
+  const file = req.file;
+
+  if (!applicationId) {
+    return res.status(400).json({ success: false, message: "Application ID wajib diisi" });
+  }
+  if (!documentType) {
+    return res.status(400).json({ success: false, message: "Tipe dokumen wajib diisi" });
+  }
+  if (!file) {
+    return res.status(400).json({ success: false, message: "File wajib diupload" });
+  }
+
+  const filePath = `/uploads/dana-darurat/${file.filename}`;
+
+  const app = await DanaDarurat.findById(applicationId);
+  if (!app) {
+    return res.status(404).json({ success: false, message: "Pengajuan tidak ditemukan" });
+  }
+
+  // Find existing document type entry or push new
+  const existingDocIdx = app.documents.findIndex(d => d.type === documentType);
+  const fileEntry = {
+    fileName: file.filename,
+    originalName: file.originalname,
+    filePath: filePath,
+    size: file.size,
+  };
+
+  if (existingDocIdx >= 0) {
+    app.documents[existingDocIdx].files.push(fileEntry);
+  } else {
+    app.documents.push({ type: documentType, files: [fileEntry] });
+  }
+
+  await app.save();
+  res.status(200).json({ success: true, data: app, message: "Dokumen berhasil diupload" });
+});
+
+export { submitApplication, saveDraft, getAllApplications, getApplicationDetail, updateStatus, uploadDocument };

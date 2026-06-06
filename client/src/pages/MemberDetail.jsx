@@ -10,6 +10,8 @@ import { toast } from "react-toastify";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 const formatMemberDate = (value) => {
   if (!value) return "-";
 
@@ -1848,24 +1850,7 @@ const MemberDetail = () => {
               ) : (
                 <div className="space-y-4">
                   {danaDaruratApps.map((app) => (
-                    <div key={app._id} className="border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                            app.status === 'approved' ? 'bg-green-100 text-green-800' :
-                            app.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                            app.status === 'reviewing' ? 'bg-blue-100 text-blue-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>{app.status}</span>
-                          <p className="mt-2 font-medium">{formatCurrency(app.loanDetails?.amount)}</p>
-                          <p className="text-xs text-gray-500">{app.applicationNumber}</p>
-                        </div>
-                        <p className="text-xs text-gray-400">{formatDate(app.submissionDate)}</p>
-                      </div>
-                      {app.loanDetails?.reason && (
-                        <p className="mt-2 text-sm text-gray-600 line-clamp-2">{app.loanDetails.reason}</p>
-                      )}
-                    </div>
+                    <DanaDaruratCard key={app._id} app={app} formatCurrency={formatCurrency} formatDateSafe={formatDateSafe} apiUrl={API_URL} />
                   ))}
                 </div>
               )}
@@ -2924,6 +2909,67 @@ const MemberDetail = () => {
         type={confirmDialog.type}
         loading={confirmLoading}
       />
+    </div>
+  );
+};
+
+const DanaDaruratCard = ({ app, formatCurrency, formatDateSafe, apiUrl }) => {
+  const [expanded, setExpanded] = useState(false);
+  const baseUrl = apiUrl || import.meta.env.VITE_API_URL || "http://localhost:5000";
+  
+  return (
+    <div className="border rounded-lg p-4 hover:shadow-sm transition-shadow">
+      <div className="flex justify-between items-start">
+        <div>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+            app.status === 'approved' ? 'bg-green-100 text-green-800' :
+            app.status === 'rejected' ? 'bg-red-100 text-red-800' :
+            app.status === 'reviewing' ? 'bg-blue-100 text-blue-800' :
+            'bg-yellow-100 text-yellow-800'
+          }`}>{app.status}</span>
+          <p className="mt-2 font-medium">{formatCurrency(app.loanDetails?.amount)}</p>
+          <p className="text-xs text-gray-500">{app.applicationNumber}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-400">{formatDateSafe(app.submissionDate)}</p>
+          {app.documents?.length > 0 && (
+            <button onClick={() => setExpanded(!expanded)}
+              className="mt-1 text-xs text-purple-600 hover:text-purple-800 hover:underline">
+              📄 {expanded ? 'Sembunyikan' : 'Lihat'} Dokumen ({app.documents.length})
+            </button>
+          )}
+        </div>
+      </div>
+      {app.loanDetails?.reason && (
+        <p className="mt-2 text-sm text-gray-600 line-clamp-2">{app.loanDetails.reason}</p>
+      )}
+      
+      {/* Expanded documents section */}
+      {expanded && app.documents?.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">📎 Dokumen Terlampir</p>
+          <div className="space-y-1">
+            {app.documents.map((doc, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-xs">
+                {doc.files?.map((f, j) => (
+                  <a key={j}
+                    href={`${baseUrl}${f.filePath}`}
+                    target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline bg-blue-50 px-2 py-1 rounded">
+                    <span className="px-1 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] font-medium">
+                      {doc.type?.replace(/_/g, ' ')}
+                    </span>
+                    {f.originalName || f.fileName}
+                  </a>
+                ))}
+              </div>
+            ))}
+            {(!doc?.files || doc.files.length === 0) && (
+              <p className="text-gray-400 text-xs italic">Tidak ada file</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

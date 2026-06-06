@@ -20,6 +20,7 @@ export function ensureUploadsSubdirs() {
   const transactions = path.join(base, "transactions");
   const expenses = path.join(base, "expenses");
   const expensePaymentProofs = path.join(base, "expense-payment-proofs");
+  const danaDarurat = path.join(base, "dana-darurat");
 
   fs.mkdirSync(simpanan, { recursive: true });
   fs.mkdirSync(pinjaman, { recursive: true });
@@ -27,8 +28,9 @@ export function ensureUploadsSubdirs() {
   fs.mkdirSync(transactions, { recursive: true });
   fs.mkdirSync(expenses, { recursive: true });
   fs.mkdirSync(expensePaymentProofs, { recursive: true });
+  fs.mkdirSync(danaDarurat, { recursive: true });
 
-  return { base, simpanan, pinjaman, donasi, transactions, expenses, expensePaymentProofs };
+  return { base, simpanan, pinjaman, donasi, transactions, expenses, expensePaymentProofs, danaDarurat };
 }
 
 /**
