@@ -16,7 +16,7 @@ const getAvailableLoanProducts = asyncHandler(async (req, res) => {
 
 // Get member's loans
 const getMemberLoans = asyncHandler(async (req, res) => {
-  const memberId = req.member._id;
+  const memberId = req.member.memberId;
 
   const loans = await Loan.find({ memberId })
     .populate("loanProductId")
@@ -30,7 +30,7 @@ const getMemberLoans = asyncHandler(async (req, res) => {
 
 // Apply for loan
 const applyForLoan = asyncHandler(async (req, res) => {
-  const memberId = req.member._id;
+  const memberId = req.member.memberId;
   const {
     loanProductId,
     downPayment,
@@ -101,7 +101,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
 
 // Make loan payment
 const makeLoanPayment = asyncHandler(async (req, res) => {
-  const memberId = req.member._id;
+  const memberId = req.member.memberId;
   const {
     loanId,
     amount,
@@ -198,7 +198,7 @@ const makeLoanPayment = asyncHandler(async (req, res) => {
 
 // Get member's loan payments
 const getMemberLoanPayments = asyncHandler(async (req, res) => {
-  const memberId = req.member._id;
+  const memberId = req.member.memberId;
   const { loanId } = req.query;
 
   const query = { memberId };
@@ -223,7 +223,7 @@ const getMemberLoanPayments = asyncHandler(async (req, res) => {
 
 // Get loan payment schedule
 const getLoanPaymentSchedule = asyncHandler(async (req, res) => {
-  const memberId = req.member._id;
+  const memberId = req.member.memberId;
   const { loanId } = req.params;
 
   // Check if loan exists and belongs to member
