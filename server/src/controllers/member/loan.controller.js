@@ -35,6 +35,9 @@ const applyForLoan = asyncHandler(async (req, res) => {
     loanProductId,
     downPayment,
     description,
+    emergencyContacts,
+    faceScanUrl,
+    ktpUrl,
   } = req.body;
 
   // Check if loan product exists
@@ -87,6 +90,9 @@ const applyForLoan = asyncHandler(async (req, res) => {
     description,
     status: "Pending",
     applicationDate: new Date(),
+    emergencyContacts: emergencyContacts || [],
+    faceScanUrl: faceScanUrl || "",
+    ktpUrl: ktpUrl || "",
   });
 
   await loan.save();

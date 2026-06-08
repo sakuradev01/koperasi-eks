@@ -72,6 +72,14 @@ const loanSchema = new mongoose.Schema(
       trim: true,
       maxlength: [500, "Deskripsi maksimal 500 karakter"],
     },
+    emergencyContacts: [{
+      fullName: { type: String, default: "" },
+      phone: { type: String, default: "" },
+      addressJapan: { type: String, default: "" },
+      relationship: { type: String, default: "" }
+    }],
+    faceScanUrl: { type: String, default: "" },
+    ktpUrl: { type: String, default: "" },
     rejectionReason: {
       type: String,
       default: "",
@@ -101,7 +109,7 @@ const loanSchema = new mongoose.Schema(
     documents: [{
       type: {
         type: String,
-        enum: ['kontrak_kerja', 'visa', 'zairyuu_card', 'slip_gaji', 'mutasi_rekening', 'signature'],
+        enum: ['kontrak_kerja', 'visa', 'zairyuu_card', 'slip_gaji', 'mutasi_rekening', 'signature', 'face_scan', 'ktp'],
       },
       fileName: { type: String },
       originalName: { type: String },

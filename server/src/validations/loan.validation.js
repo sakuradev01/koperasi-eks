@@ -35,6 +35,16 @@ export const createLoanApplicationValidation = {
         originalName: Joi.string().optional().allow(''),
       }))
       .optional(),
+    emergencyContacts: Joi.array()
+      .items(Joi.object({
+        fullName: Joi.string().allow(''),
+        phone: Joi.string().allow(''),
+        addressJapan: Joi.string().allow(''),
+        relationship: Joi.string().allow(''),
+      }))
+      .optional(),
+    faceScanUrl: Joi.string().allow('').optional(),
+    ktpUrl: Joi.string().allow('').optional(),
   }),
 };
 

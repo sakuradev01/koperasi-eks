@@ -12,6 +12,9 @@ const createLoanApplication = asyncHandler(async (req, res) => {
     loanProductId,
     downPayment,
     description,
+    emergencyContacts,
+    faceScanUrl,
+    ktpUrl,
   } = req.body;
 
   // Check if member exists
@@ -66,6 +69,9 @@ const createLoanApplication = asyncHandler(async (req, res) => {
     status: "Pending",
     applicationDate: new Date(),
     documents: req.body.documents || [],
+    emergencyContacts: emergencyContacts || [],
+    faceScanUrl: faceScanUrl || "",
+    ktpUrl: ktpUrl || "",
   });
 
   await loan.save();
