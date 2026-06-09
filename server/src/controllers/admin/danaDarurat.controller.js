@@ -1,4 +1,6 @@
 import { DanaDarurat } from "../../models/danaDarurat.model.js";
+import { Loan } from "../../models/loan.model.js";
+import { Member } from "../../models/member.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
 // Submit new dana darurat application
@@ -68,14 +70,78 @@ const updateStatus = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: "Status tidak valid" });
   }
 
-  const application = await DanaDarurat.findByIdAndUpdate(
-    req.params.id,
-    { status, reviewNotes, reviewedBy: req.user?.userId || req.user?._id },
-    { new: true }
-  ).populate("memberId", "name uuid");
+  // Load the Dana Darurat application
+  const danaDarurat = await DanaDarurat.findById(req.params.id);
+  if (!danaDarurat) {
+    return res.status(404).json({ success: false, message: "Aplikasi tidak ditemukan" });
+  }
 
-  if (!application) return res.status(404).json({ success: false, message: "Pengajuan tidak ditemukan" });
-  res.status(200).json({ success: true, data: application, message: `Status berhasil diubah menjadi ${status}` });
+  let createdLoan = null;
+
+  // If approving, create a Loan record
+  if (status === 'approved') {
+    const tenor = danaDarurat.loanDetails?.tenor || 12;
+    const interestRate = danaDarurat.loanDetails?.interestRate || 10;
+    const loanAmount = danaDarurat.loanDetails?.amount || 0;
+
+    // Calculate payment schedule
+    const interestAmount = (loanAmount * interestRate) / 100;
+    const totalPayment = loanAmount + interestAmount;
+    const monthlyInstallment = Math.round(totalPayment / tenor);
+
+    // Find member
+    const member = await Member.findById(danaDarurat.memberId);
+    if (!member) {
+      return res.status(404).json({ success: false, message: "Anggota tidak ditemukan" });
+    }
+
+    // Create the Loan
+    createdLoan = new Loan({
+      memberId: danaDarurat.memberId,
+      loanAmount: loanAmount,
+      downPayment: 0,
+      tenor: tenor,
+      monthlyInstallment: monthlyInstallment,
+      interestRate: interestRate,
+      totalPayment: totalPayment,
+      status: 'Active',
+      applicationDate: danaDarurat.createdAt || new Date(),
+      approvalDate: new Date(),
+      startDate: new Date(),
+      description: `Dana Darurat - ${danaDarurat.applicationNumber || 'DD-' + Date.now()}`,
+    });
+
+    await createdLoan.save();
+
+    // Link loan back to danaDarurat
+    danaDarurat.loanDetails.loanId = createdLoan._id;
+    danaDarurat.loanDetails.monthlyInstallment = monthlyInstallment;
+  }
+
+  // Update status
+  danaDarurat.status = status;
+  if (reviewNotes) danaDarurat.reviewNotes = reviewNotes;
+  danaDarurat.reviewedBy = req.user?.userId || req.user?._id;
+  danaDarurat.reviewedAt = new Date();
+
+  await danaDarurat.save();
+
+  res.status(200).json({
+    success: true,
+    data: {
+      danaDarurat,
+      loan: createdLoan ? {
+        _id: createdLoan._id,
+        loanAmount: createdLoan.loanAmount,
+        tenor: createdLoan.tenor,
+        monthlyInstallment: createdLoan.monthlyInstallment,
+        interestRate: createdLoan.interestRate,
+        totalPayment: createdLoan.totalPayment,
+        status: createdLoan.status,
+      } : null,
+    },
+    message: `Status berhasil diubah menjadi ${status}`,
+  });
 });
 
 // Upload document to an existing application

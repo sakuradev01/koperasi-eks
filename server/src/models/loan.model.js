@@ -15,7 +15,7 @@ const loanSchema = new mongoose.Schema(
     loanProductId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "LoanProduct",
-      required: [true, "ID produk pinjaman wajib diisi"],
+      // required removed — Dana Darurat loans don't use a LoanProduct
     },
     loanAmount: {
       type: Number,

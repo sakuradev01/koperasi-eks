@@ -65,6 +65,10 @@ const danaDaruratSchema = new mongoose.Schema({
     },
     reason: { type: String, default: "" },                         // Alasan Mengajukan
     amount: { type: Number, required: true },                      // Nominal Pengajuan (Rp)
+    tenor: { type: Number, default: 12 },                          // Loan term in months
+    interestRate: { type: Number, default: 10 },                   // Interest rate percentage
+    monthlyInstallment: { type: Number, default: 0 },              // Auto-calculated on approval
+    loanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Loan', default: null }, // Link to created Loan
   },
 
   // ==================== FORM G - Data Penghasilan ====================
