@@ -760,7 +760,7 @@ const MemberDetail = () => {
       });
     };
 
-    // Ambil materi berkas pendukung
+    // Ambil materi berkas pendukung student
     const imgLogo = await loadImageAsync("/coop panjang.png");
     const imgKtp = await loadImageAsync(member.ktpImage);
     const imgSelfie = await loadImageAsync(member.selfieImage);
@@ -768,7 +768,7 @@ const MemberDetail = () => {
     const imgLivenessRight = await loadImageAsync(member.livenessRightImage);
     const imgSignature = await loadImageAsync(member.signatureImage);
 
-    // Font formal murni anti-scrambling & anti-crash
+    // Kunci Utama: Tetap gunakan Font Formal murni agar layout RIPL & Form super rapi
     const primaryFont = "times";
 
     // --- EKSTRAKSI & PEMBACAAN DINAMIS DATA RIPL DARI DATABASE ---
@@ -833,8 +833,8 @@ const MemberDetail = () => {
         "Anggota koperasi telah membaca dan memahami produk tabungan sesuai Ringkasan Informasi Produk dan Layanan.",
         "Peserta LPK SAMIT yang mengambil dana talangan otomatis menjadi anggota Koperasi SAMIT.",
         "Informasi yang tercakup dalam Ringkasan Informasi Produk dan Layanan ini berlaku sampai dengan adanya perubahan terbaru Ringkasan Informasi Produk dan Layanan dimaksud.",
-        "Setiap anggota koperasi wajib membaca dengan teliti Ringkasan Informasi Produk dan Layanan ini sebelum menyetujui dan berhak bertanya kepada Staff Finance Koperasi SAMIT atas semua hal maupun pengaduan terkait Ringkasan Informasi Produk dan Layanan.",
-        "Dengan menandatangani surat ini anggota menyetujui untuk mengikuti segala prosedur dan ketentuan selama menjadi anggota Koperasi SAMIT."
+        "Setiap anggota koperasi wajib membaca dengan teliti Ringkasan Informasi Produk dan Layanan ini sebelum menyetujui and berhak bertanya kepada Staff Finance Koperasi SAMIT atas semua hal maupun pengaduan terkait Ringkasan Informasi Produk dan Layanan.",
+        "With menandatangani surat ini anggota menyetujui untuk mengikuti segala prosedur dan ketentuan selama menjadi anggota Koperasi SAMIT."
       );
     }
 
@@ -878,7 +878,6 @@ const MemberDetail = () => {
       doc.setLineWidth(0.25);
       doc.line(startX + labelWidth, 38.6, startX + labelWidth + valueWidth, 38.6);
 
-      // Reset warna kembali ke Hitam & Cokelat Marun Kop Resmi
       doc.setTextColor(0, 0, 0);
       doc.setDrawColor(115, 25, 25); 
       doc.setLineWidth(0.8);
@@ -948,30 +947,29 @@ const MemberDetail = () => {
     doc.setFont(primaryFont, "bold"); doc.setFontSize(13);
     doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 49, { align: "center" });
 
-    let y = 58;
+    let lineY = 58;
     doc.setFontSize(10.5);
-    doc.text("Nama Penerbit", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": Koperasi Sakura Mitra Internasional", 55, y); y += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Jenis Produk", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": Tabungan", 55, y); y += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Mata Uang", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": IDR", 55, y); y += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Deskripsi", 20, y); doc.setFont(primaryFont, "normal");
+    doc.text("Nama Penerbit", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": Koperasi Sakura Mitra Internasional", 55, lineY); lineY += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Jenis Produk", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": Tabungan", 55, lineY); lineY += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Mata Uang", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": IDR", 55, lineY); lineY += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Deskripsi", 20, lineY); doc.setFont(primaryFont, "normal");
     
     const descText = ": Tabungan Koperasi SAMIT merupakan program simpanan khusus bagi alumni LPK SAMIT, yang dirancang untuk memberikan kemudahan menabung secara aman dan terkelola, serta memberikan beragam benefit eksklusif bagi para anggotanya.";
     const splitDesc = doc.splitTextToSize(descText, pageWidth - 76);
-    splitDesc.forEach((line, idx) => { doc.text(line, 55, y + (idx * 5.5)); });
-    y += (splitDesc.length * 5.5) + 5;
+    splitDesc.forEach((line, idx) => { doc.text(line, 55, lineY + (idx * 5.5)); });
+    lineY += (splitDesc.length * 5.5) + 5;
 
-    doc.setFont(primaryFont, "bold"); doc.text("Fitur Utama Tabungan Koperasi SAMIT:", 20, y); y += 6;
-    
+    doc.setFont(primaryFont, "bold"); doc.text("Fitur Utama Tabungan Koperasi SAMIT:", 20, lineY); lineY += 6;
     for (let i = 0; i < Math.min(extractedFitur.length, 5); i++) {
-      y = drawBulletLine(extractedFitur[i], 20, y, pageWidth - 40);
+      lineY = drawBulletLine(extractedFitur[i], 20, lineY, pageWidth - 40);
     }
 
-    y += 2; doc.setFont(primaryFont, "normal");
-    doc.text(`Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, y);
-    y += 4;
+    lineY += 2; doc.setFont(primaryFont, "normal");
+    doc.text(`Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, lineY);
+    lineY += 4;
 
     autoTable(doc, {
-      startY: y,
+      startY: lineY,
       margin: { left: 20, right: 20 },
       head: [["Jenis Tabungan", `Paket ${pName}`]],
       body: [
@@ -984,9 +982,9 @@ const MemberDetail = () => {
       columnStyles: { 0: { fontStyle: "bold", width: 45 }, 1: { halign: "left" } }
     });
 
-    y = doc.lastAutoTable.finalY + 6;
+    lineY = doc.lastAutoTable.finalY + 6;
     doc.setFontSize(9); doc.setFont(primaryFont, "italic");
-    doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, y);
+    doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, lineY);
 
     // --- HALAMAN 2: RIPL HALAMAN 2 ---
     doc.addPage();
@@ -1034,10 +1032,9 @@ const MemberDetail = () => {
     let page3Y = 46;
     doc.setFont(primaryFont, "bold"); doc.setFontSize(11); doc.setTextColor(0, 0, 0);
     doc.text("Syarat & Ketentuan :", 20, page3Y); page3Y += 6;
-    
     extractedSK.forEach(line => { page3Y = drawBulletLine(line, 20, page3Y, pageWidth - 40); });
 
-    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (SUDAH FIX TYPO DAI SENPAI) ---
+    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (ANTI-SCRAMBLING KANJI VIA CANVAS) ---
     doc.addPage();
     drawHeader();
     let formY = 46;
@@ -1081,9 +1078,49 @@ const MemberDetail = () => {
         formY += 6;
       } else if (label === "4. Alamat Lengkap") {
         doc.text(":", 61, formY);
-        const splitAlamat = doc.splitTextToSize(value, pageWidth - 88);
-        splitAlamat.forEach((aline, aIdx) => { doc.text(aline, 65, formY + (aIdx * 5.5)); });
-        formY += (splitAlamat.length * 5.5) + 1;
+        
+        // SOLUSI TOTAL KANJI JEPANG: Gambar alamat menggunakan HTML5 Canvas agar tulisan Kanji & Latin tampil sempurna
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const renderScale = 4; // High definition resolution
+        
+        ctx.font = "11pt 'Times New Roman', 'Meiryo', 'MS Gothic', sans-serif";
+        
+        // Membungkus kalimat alamat yang panjang agar turun ke baris baru secara otomatis
+        const maxCanvasWidth = 470;
+        let lines = [];
+        let currentLine = "";
+        
+        for (let i = 0; i < value.length; i++) {
+          const char = value[i];
+          const testLine = currentLine + char;
+          if (ctx.measureText(testLine).width > maxCanvasWidth) {
+            lines.push(currentLine);
+            currentLine = char;
+          } else {
+            currentLine = testLine;
+          }
+        }
+        if (currentLine) lines.push(currentLine);
+        
+        canvas.width = 520 * renderScale;
+        canvas.height = (lines.length * 22) * renderScale;
+        ctx.scale(renderScale, renderScale);
+        
+        ctx.font = "11pt 'Times New Roman', 'Meiryo', 'MS Gothic', sans-serif";
+        ctx.fillStyle = "#000000";
+        ctx.textBaseline = "top";
+        
+        lines.forEach((line, idx) => {
+          ctx.fillText(line, 0, idx * 22);
+        });
+        
+        const imgData = canvas.toDataURL("image/png");
+        const pdfWidth = 125;
+        const pdfHeight = lines.length * 5.4; // Tinggi baris proporsional
+        
+        doc.addImage(imgData, "PNG", 65, formY - 3.4, pdfWidth, pdfHeight);
+        formY += pdfHeight + 1.5;
       } else {
         doc.text(":", 61, formY);
         doc.text(value, 65, formY);
@@ -1107,7 +1144,6 @@ const MemberDetail = () => {
     doc.rect(60, formY - 3.5, 4, 4); if (isSenpai) { doc.line(60, formY - 3.5, 64, formY + 0.5); doc.line(64, formY - 3.5, 60, formY + 0.5); }
     doc.text(`Paket Senpai`, 66, formY);
 
-    // FIX: Mengubah 'y - 3.5' menjadi 'formY - 3.5' agar terhindar dari ReferenceError
     doc.rect(100, formY - 3.5, 4, 4); if (isDaiSenpai) { doc.line(100, formY - 3.5, 104, formY + 0.5); doc.line(104, formY - 3.5, 100, formY + 0.5); }
     doc.text(`Paket Dai Senpai`, 106, formY);
 
@@ -1130,7 +1166,7 @@ const MemberDetail = () => {
     doc.setFont(primaryFont, "bold"); doc.text("Staff Koperasi", 20, formY); doc.text(member.name.toUpperCase(), pageWidth - 75, formY); formY += 4;
     doc.setFont(primaryFont, "normal"); doc.setFontSize(9); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, formY);
 
-    // --- HALAMAN AKHIR (LAMPIRAN BERKAS) ---
+    // --- HALAMAN AKHIR (LAMPIRAN BERKAS FOTO PROPORMENTAL) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
       doc.addPage();
       doc.setFont(primaryFont, "bold"); doc.setFontSize(12); doc.setTextColor(0, 0, 0);
@@ -1138,13 +1174,11 @@ const MemberDetail = () => {
       doc.setDrawColor(200, 200, 200); doc.line(20, 24, pageWidth - 20, 24);
 
       let currentY = 30;
-      
       if (imgKtp) {
         doc.setFontSize(10); doc.text("1. Foto Kartu Tanda Penduduk (KTP)", 20, currentY); 
         currentY += 4;
         currentY = drawImageProportional(imgKtp, 20, currentY, 80, 50) + 8;
       }
-      
       if (imgSelfie) {
         if (currentY + 65 > pageHeight) { doc.addPage(); currentY = 25; }
         doc.setFontSize(10); doc.setFont(primaryFont, "bold");
@@ -1152,7 +1186,6 @@ const MemberDetail = () => {
         currentY += 4;
         currentY = drawImageProportional(imgSelfie, 20, currentY, 70, 65) + 8;
       }
-      
       if (imgLivenessLeft || imgLivenessRight) {
         doc.addPage();
         doc.setFont(primaryFont, "bold"); doc.setFontSize(12);
