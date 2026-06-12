@@ -760,7 +760,7 @@ const MemberDetail = () => {
       });
     };
 
-    // Ambil berkas gambar pendukung
+    // Ambil semua aset visual pendukung
     const imgLogo = await loadImageAsync("/coop panjang.png");
     const imgKtp = await loadImageAsync(member.ktpImage);
     const imgSelfie = await loadImageAsync(member.selfieImage);
@@ -768,74 +768,79 @@ const MemberDetail = () => {
     const imgLivenessRight = await loadImageAsync(member.livenessRightImage);
     const imgSignature = await loadImageAsync(member.signatureImage);
 
-    // 1. FUNGSI HEADER KOP SURAT TENGAH DENGAN EMAIL BIRU & UNDERLINE
+    // 1. KOP HEADER RESMI - POSISI DI TENGAH (CENTERED) DENGAN RASIO LOGO YANG PAS
     const drawHeader = () => {
+      doc.setTextColor(0, 0, 0);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.2);
+
       if (imgLogo) {
-        const logoW = 52;
-        const logoH = 12;
+        // PERBAIKAN: Rasio disesuaikan (Lebar 58mm, Tinggi 14mm) agar TIDAK gepeng horizontal
+        const logoW = 58;
+        const logoH = 14;
         doc.addImage(imgLogo, "PNG", (pageWidth - logoW) / 2, 10, logoW, logoH);
       } else {
         doc.setFont("times", "bold");
         doc.setFontSize(14);
-        doc.setTextColor(40, 40, 40);
         doc.text("KOPERASI SAMIT", pageWidth / 2, 18, { align: "center" });
       }
 
       doc.setFont("times", "normal");
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
-      doc.text("Ruko Dalton Utara Blok DLNU 05, Jl. Scientia Square Selatan", pageWidth / 2, 26, { align: "center" });
-      doc.text("Kel. Curug Sangereng, Kec. Kelapa Dua, Kab. Tangerang, Banten, 15810.", pageWidth / 2, 30, { align: "center" });
+      doc.text("Ruko Dalton Utara Blok DLNU 05, Jl. Scientia Square Selatan", pageWidth / 2, 28, { align: "center" });
+      doc.text("Kel. Curug Sangereng, Kec. Kelapa Dua, Kab. Tangerang, Banten, 15810.", pageWidth / 2, 32, { align: "center" });
       
-      // LOGIKA PEMISAH EMAIL AGAR BISA DIWARNAI BIRU & DIGARISBAWAHI DI TENGAH
+      // LOGIKA LINK EMAIL CENTERED (HANYA VALUE EMAIL YANG BIRU & UNDERLINE)
       const emailLabel = "Email : ";
       const emailValue = "koperasi@sakuramitra.com";
       
       doc.setFont("times", "normal");
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       
       const labelWidth = doc.getTextWidth(emailLabel);
       const valueWidth = doc.getTextWidth(emailValue);
       const totalWidth = labelWidth + valueWidth;
       const startX = (pageWidth - totalWidth) / 2;
 
-      // Cetak tulisan "Email : " (Warna abu-abu standar)
       doc.setTextColor(80, 80, 80);
-      doc.text(emailLabel, startX, 34);
+      doc.text(emailLabel, startX, 36);
 
-      // Cetak tulisan alamat email (Warna Biru Link)
+      // Gambar Email warna biru
       doc.setTextColor(0, 0, 255); 
-      doc.text(emailValue, startX + labelWidth, 34);
+      doc.text(emailValue, startX + labelWidth, 36);
 
-      // Gambar garis bawah (Underline) tepat di bawah teks email secara presisi
+      // Garis bawah biru khusus email murni
       doc.setDrawColor(0, 0, 255);
       doc.setLineWidth(0.2);
-      doc.line(startX + labelWidth, 34.6, startX + labelWidth + valueWidth, 34.6);
+      doc.line(startX + labelWidth, 36.6, startX + labelWidth + valueWidth, 36.6);
 
-      // Garis tebal pembatas warna cokelat/merah marun gelap khas dokumen asli
-      doc.setDrawColor(115, 25, 25);
+      // KUNCI UTAMA: Reset warna kembali ke Hitam Formal (Mencegah teks form ikut membiru)
+      doc.setTextColor(0, 0, 0);
+      doc.setDrawColor(115, 25, 25); // Cokelat/Merah Marun Gelap Resmi Koperasi
       doc.setLineWidth(0.8);
-      doc.line(20, 37, pageWidth - 20, 37);
+      doc.line(20, 39, pageWidth - 20, 39);
     };
 
-    // 2. HELPER UNTUK MENGGAMBAR PANAH SEGITIGA MANUAL
+    // 2. PERBAIKAN TANDA PANAH BULLET: DIGAMBAR RAMPING, SEJAJAR DAN ELEGAN
     const drawBulletLine = (text, x, currentY, maxW) => {
-      doc.setFont("times", "normal");
-      doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      
       doc.setDrawColor(0, 0, 0);
       doc.setFillColor(0, 0, 0);
-      doc.triangle(x, currentY - 2.8, x, currentY + 0.5, x + 2.5, currentY - 1.1, "FD");
       
+      // Koordinat diatur ulang agar membentuk panah segitiga tajam & tidak gemuk
+      doc.triangle(x, currentY - 2.5, x, currentY + 0.3, x + 2.2, currentY - 1.1, "FD");
+      
+      doc.setFont("times", "normal");
+      doc.setFontSize(10.5);
       const splitLines = doc.splitTextToSize(text, maxW - 6);
       splitLines.forEach((line, idx) => {
-        doc.text(line, x + 6, currentY + (idx * 5.2));
+        doc.text(line, x + 6, currentY + (idx * 5.5));
       });
-      return currentY + (splitLines.length * 5.2) + 1.5;
+      return currentY + (splitLines.length * 5.5) + 1.5;
     };
 
-    // Helper Fungsi Gambar Proporsional Anti-Gepeng
+    // Helper Gambar Proporsional Anti-Gepeng untuk Lembar Lampiran Berkas
     const drawImageProportional = (img, x, y, maxW, maxH) => {
       if (!img) return y;
       const origW = img.width || img.naturalWidth || 1;
@@ -850,7 +855,7 @@ const MemberDetail = () => {
       return y + finalH;
     };
 
-    // Identifikasi Pilihan Paket Tabungan Student
+    // Deteksi Paket Tabungan
     const productTitle = member.product?.title || "Kouhai";
     const isKouhai = productTitle.toLowerCase().includes("kouhai") || productTitle.toLowerCase().includes("komhai") || productTitle.toLowerCase().includes("kohai");
     const isSenpai = productTitle.toLowerCase().includes("senpai") && !productTitle.toLowerCase().includes("dai");
@@ -884,12 +889,11 @@ const MemberDetail = () => {
     // --- HALAMAN 1: RIPL LEMBARAN 1 ---
     drawHeader();
     doc.setFont("times", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 45, { align: "center" });
+    doc.setFontSize(13);
+    doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 47, { align: "center" });
 
-    let y = 53;
-    doc.setFontSize(10);
+    let y = 56;
+    doc.setFontSize(10.5);
     const infoLabels = [
       ["Nama Penerbit", ": Koperasi Sakura Mitra Internasional"],
       ["Jenis Produk", ": Tabungan"],
@@ -905,9 +909,9 @@ const MemberDetail = () => {
     doc.setFont("times", "normal");
     const descText = ": Tabungan Koperasi SAMIT merupakan program simpanan khusus bagi alumni LPK SAMIT, yang dirancang untuk memberikan kemudahan menabung secara aman dan terkelola, serta memberikan beragam benefit eksklusif bagi para anggotanya.";
     const splitDesc = doc.splitTextToSize(descText, pageWidth - 76);
-    splitDesc.forEach((line, idx) => { doc.text(line, 55, y + (idx * 5)); });
+    splitDesc.forEach((line, idx) => { doc.text(line, 55, y + (idx * 5.5)); });
 
-    y += (splitDesc.length * 5) + 4;
+    y += (splitDesc.length * 5.5) + 5;
     doc.setFont("times", "bold"); doc.text("Fitur Utama Tabungan Koperasi SAMIT:", 20, y);
     y += 6;
 
@@ -917,11 +921,12 @@ const MemberDetail = () => {
     y = drawBulletLine("Tabungan dapat diakses dimanapun dan kapanpun secara ter-update di website resmi student.samit.co.id", 20, y, pageWidth - 40);
     y = drawBulletLine("Mendapatkan share profit 10% per 3 tahun.", 20, y, pageWidth - 40);
 
-    doc.setFont("times", "normal");
     y += 2;
+    doc.setFont("times", "normal");
     doc.text(`Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, y);
     y += 4;
 
+    // PERBAIKAN TABEL: Diubah menjadi putih bersih dengan grid hitam formal (Sesuai Berkas Asli)
     autoTable(doc, {
       startY: y,
       margin: { left: 20, right: 20 },
@@ -937,7 +942,7 @@ const MemberDetail = () => {
         fontStyle: "bold", 
         halign: "center",
         lineColor: [0, 0, 0],
-        lineWidth: 0.4
+        lineWidth: 0.3
       },
       styles: { 
         fontSize: 10, 
@@ -945,25 +950,25 @@ const MemberDetail = () => {
         font: "times", 
         textColor: [0, 0, 0],
         lineColor: [0, 0, 0],
-        lineWidth: 0.4
+        lineWidth: 0.3
       },
       columnStyles: { 0: { fontStyle: "bold", width: 45 }, 1: { halign: "left" } }
     });
 
     y = doc.lastAutoTable.finalY + 6;
-    doc.setFontSize(8.5); doc.setFont("times", "italic");
+    doc.setFontSize(9); doc.setFont("times", "italic");
     doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, y);
 
     // --- HALAMAN 2: RIPL LEMBARAN 2 (Manfaat & Simulasi Perhitungan) ---
     doc.addPage();
     drawHeader();
-    y = 44;
+    y = 46;
     y = drawBulletLine("Anggota koperasi bisa merubah paket yang dipilih.", 20, y, pageWidth - 40);
     y = drawBulletLine("Seluruh kegiatan pengelolaan tabungan dilakukan dengan pencatatan yang jelas dan dapat dipertanggung jawabkan.", 20, y, pageWidth - 40);
     y = drawBulletLine("Tidak terdapat potongan terhadap dana yang disimpan bila menyelesaikan kontrak yang telah disetujui. Seluruh saldo tabungan akan tetap utuh sesuai jumlah setoran.", 20, y, pageWidth - 40);
 
     y += 2;
-    doc.setFont("times", "bold"); doc.setFontSize(10); doc.text("Manfaat:", 20, y); y += 5.5;
+    doc.setFont("times", "bold"); doc.setFontSize(11); doc.text("Manfaat:", 20, y); y += 6;
     const manfaatLines = [
       "Menjadi investasi berjangka yang mudah dan fleksibel bagi anggota koperasi.",
       "Menghindari pengeluaran yang tidak perlu.",
@@ -973,7 +978,7 @@ const MemberDetail = () => {
     manfaatLines.forEach(line => { y = drawBulletLine(line, 20, y, pageWidth - 40); });
 
     y += 2;
-    doc.setFont("times", "bold"); doc.text("Persyaratan dan Tata Cara:", 20, y); y += 5.5;
+    doc.setFont("times", "bold"); doc.text("Persyaratan dan Tata Cara:", 20, y); y += 6;
     const syaratLines = [
       "Anggota koperasi merupakan Alumni LPK SAMIT yang sudah bekerja di Jepang.",
       "Jangka waktu menabung minimal 3 tahun.",
@@ -987,6 +992,7 @@ const MemberDetail = () => {
     const simRows = [["1", "-", "-"], ["2", "-", "-"]];
     for (let m = 3; m <= 12; m++) { simRows.push([String(m), "Rp 2.852.000", pNominal]); }
 
+    // TABEL SIMULASI PUTIH FORMAL BORDER HITAM
     autoTable(doc, {
       startY: y,
       margin: { left: 20, right: 20 },
@@ -998,35 +1004,35 @@ const MemberDetail = () => {
         textColor: [0, 0, 0], 
         fontStyle: "bold", 
         halign: "center", 
-        fontSize: 9,
+        fontSize: 9.5,
         lineColor: [0, 0, 0],
-        lineWidth: 0.4
+        lineWidth: 0.3
       },
       styles: { 
-        fontSize: 9, 
+        fontSize: 9.5, 
         cellPadding: 3, 
         halign: "center", 
         font: "times",
         textColor: [0, 0, 0],
         lineColor: [0, 0, 0],
-        lineWidth: 0.4
+        lineWidth: 0.3
       },
       columnStyles: { 0: { width: 60 }, 1: { width: 65 }, 2: { width: 45 } }
     });
 
     y = doc.lastAutoTable.finalY + 8;
-    doc.setFontSize(8.5); doc.setFont("times", "normal"); doc.setTextColor(120, 120, 120);
+    doc.setFontSize(9); doc.setFont("times", "normal"); doc.setTextColor(120, 120, 120);
     doc.text("Perubahan Terakhir: 19 Juli 2025", 20, y);
 
     // --- HALAMAN 3: Syarat & Ketentuan Hukum ---
     doc.addPage();
     drawHeader();
-    y = 44;
+    y = 46;
     doc.setFont("times", "bold"); doc.setFontSize(11); doc.setTextColor(0, 0, 0);
     doc.text("Syarat & Ketentuan :", 20, y); y += 6;
     
     const sKLines = [
-      "Koperasi SAMIT dapat menolak permohonan anggota apabila tidak memenuhi persyaratan and peraturan yang berlaku.",
+      "Koperasi SAMIT dapat menolak permohonan anggota apabila tidak memenuhi persyaratan dan peraturan yang berlaku.",
       "Jika anggota ingin melakukan penarikan sebelum kontrak habis, anggota dikenakan penalti sebesar 6% dari total saldo serta tidak termasuk biaya admin transfer antar bank & biaya remittance.",
       "Anggota koperasi telah membaca dan memahami produk tabungan sesuai Ringkasan Informasi Produk dan Layanan.",
       "Peserta LPK SAMIT yang mengambil dana talangan otomatis menjadi anggota Koperasi SAMIT.",
@@ -1036,15 +1042,15 @@ const MemberDetail = () => {
     ];
     sKLines.forEach(line => { y = drawBulletLine(line, 20, y, pageWidth - 40); });
 
-    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI ---
+    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (PERBAIKAN WARNA HITAM TOTAL) ---
     doc.addPage();
     drawHeader();
-    y = 44;
-    doc.setFont("times", "bold"); doc.setFontSize(12);
+    y = 46;
+    doc.setFont("times", "bold"); doc.setFontSize(13); doc.setTextColor(0, 0, 0);
     doc.text("Formulir Pendaftaran Koperasi SAMIT", pageWidth / 2, y, { align: "center" });
     y += 8;
 
-    doc.setFontSize(10); doc.text("Data Anggota:", 20, y); y += 6;
+    doc.setFontSize(11); doc.text("Data Anggota:", 20, y); y += 6;
 
     const formattedBirthDate = member.birthDate ? format(new Date(member.birthDate), "dd MMMM yyyy", { locale: id }) : "-";
     const tempatTanggalLahir = `${member.birthPlace || "-"}, ${formattedBirthDate}`;
@@ -1060,14 +1066,16 @@ const MemberDetail = () => {
       ["8. Email", `: ${member.email || "-"}`],
     ];
 
-    doc.setFontSize(9.5);
+    doc.setFontSize(10.5);
     formFields.forEach(([label, value]) => {
-      doc.setFont("times", "bold"); doc.text(label, 20, y);
+      doc.setFont("times", "bold"); doc.setTextColor(0, 0, 0);
+      doc.text(label, 20, y);
       doc.setFont("times", "normal");
       
       if (label === "3. Jenis Kelamin") {
         const isLaki = member.gender === "L";
         doc.text(":", 55, y);
+        doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.3);
         doc.rect(59, y - 3.5, 4, 4);
         if (isLaki) { doc.line(59, y - 3.5, 63, y + 0.5); doc.line(63, y - 3.5, 59, y + 0.5); }
         doc.text("Laki-laki", 65, y);
@@ -1078,8 +1086,8 @@ const MemberDetail = () => {
         y += 6;
       } else if (label === "4. Alamat Lengkap") {
         const splitAlamat = doc.splitTextToSize(value, pageWidth - 78);
-        splitAlamat.forEach((aline, aIdx) => { doc.text(aline, 55, y + (aIdx * 5)); });
-        y += (splitAlamat.length * 5) + 1;
+        splitAlamat.forEach((aline, aIdx) => { doc.text(aline, 55, y + (aIdx * 5.5)); });
+        y += (splitAlamat.length * 5.5) + 1;
       } else {
         doc.text(value, 55, y);
         y += 6;
@@ -1095,6 +1103,7 @@ const MemberDetail = () => {
     doc.setFont("times", "bold"); doc.text("Jenis Paket Simpanan yang Dipilih:", 20, y); y += 6;
     doc.setFont("times", "normal");
     
+    doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.3);
     doc.rect(20, y - 3.5, 4, 4); if (isKouhai) { doc.line(20, y - 3.5, 24, y + 0.5); doc.line(24, y - 3.5, 20, y + 0.5); }
     doc.text(`Paket Kouhai`, 26, y);
 
@@ -1118,9 +1127,10 @@ const MemberDetail = () => {
 
     if (imgSignature) { doc.addImage(imgSignature, "PNG", pageWidth - 73, y, 28, 14); }
     y += 16;
+    doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.3);
     doc.line(20, y, 60, y); doc.line(pageWidth - 75, y, pageWidth - 20, y); y += 4;
     doc.setFont("times", "bold"); doc.text("Staff Koperasi", 20, y); doc.text(member.name.toUpperCase(), pageWidth - 75, y); y += 4;
-    doc.setFont("times", "normal"); doc.setFontSize(8.5); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, y);
+    doc.setFont("times", "normal"); doc.setFontSize(9); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, y);
 
     // --- HALAMAN AKHIR (LAMPIRAN BERKAS) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
