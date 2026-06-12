@@ -760,23 +760,33 @@ const MemberDetail = () => {
       });
     };
 
-    // SOLUSI KANJI: Ambil font Noto Sans JP secara dinamis agar mendukung huruf Kanji Jepang
-    let fontLoaded = false;
+    // SOLUSI KANJI PERMANEN: Menggunakan CDN @fontsource via jsDelivr yang super stabil & anti-404
+    let primaryFont = "times";
     try {
-      const fontRes = await fetch("https://fonts.gstatic.com/s/notosansjp/v52/-cyWh2FPCowO2sLD76o71K_bX3_m.ttf");
+      const fontRes = await fetch("https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-jp/files/noto-sans-jp-japanese-400-normal.ttf");
+      
+      // PROTEKSI: Cek status HTTP, jika tidak 200/OK langsung gagalkan agar masuk ke blok catch
+      if (!fontRes.ok) {
+        throw new Error(`Gagal mengunduh font, status: ${fontRes.status}`);
+      }
+      
       const fontBuffer = await fontRes.arrayBuffer();
+      
+      // PROTEKSI: Jika ukuran file terlalu kecil (berarti file HTML 404, bukan font asli), batalkan
+      if (fontBuffer.byteLength < 10000) {
+        throw new Error("File font tidak valid atau rusak.");
+      }
+      
       const binaryString = new Uint8Array(fontBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "");
       const base64Font = btoa(binaryString);
       
       doc.addFileToVFS("NotoSansJP.ttf", base64Font);
       doc.addFont("NotoSansJP.ttf", "NotoSansJP", "normal");
-      fontLoaded = true;
+      primaryFont = "NotoSansJP"; // Sukses menggunakan font Unicode Kanji
     } catch (e) {
-      console.warn("Gagal memuat font Kanji online, menggunakan fallback font standar:", e);
+      console.error("Sistem proteksi aktif, beralih ke font fallback standar:", e);
+      primaryFont = "times"; // Fallback aman jika koneksi offline/gagal tanpa membuat web crash
     }
-
-    // Set font utama dokumen (Gunakan NotoSansJP jika sukses, jika tidak gunakan times)
-    const primaryFont = fontLoaded ? "NotoSansJP" : "times";
 
     // Ambil materi berkas pendukung
     const imgLogo = await loadImageAsync("/coop panjang.png");
@@ -786,7 +796,7 @@ const MemberDetail = () => {
     const imgLivenessRight = await loadImageAsync(member.livenessRightImage);
     const imgSignature = await loadImageAsync(member.signatureImage);
 
-    // 1. KOP HEADER RESMI - DI TENGAH DENGAN RASIO LOGO PANJANG
+    // Kop Header Resmi di Tengah
     const drawHeader = () => {
       doc.setTextColor(0, 0, 0);
       doc.setDrawColor(0, 0, 0);
@@ -808,7 +818,7 @@ const MemberDetail = () => {
       doc.text("Ruko Dalton Utara Blok DLNU 05, Jl. Scientia Square Selatan", pageWidth / 2, 28, { align: "center" });
       doc.text("Kel. Curug Sangereng, Kec. Kelapa Dua, Kab. Tangerang, Banten, 15810.", pageWidth / 2, 33, { align: "center" });
       
-      // LOGIKA LINK EMAIL CENTERED (BIRU DAN UNDERLINE)
+      // Link Email Centered
       const emailLabel = "Email : ";
       const emailValue = "koperasi@sakuramitra.com";
       
@@ -827,14 +837,30 @@ const MemberDetail = () => {
       doc.setLineWidth(0.25);
       doc.line(startX + labelWidth, 38.6, startX + labelWidth + valueWidth, 38.6);
 
-      // Reset warna kembali ke Hitam Formal & Gambar pembatas cokelat marun tebal Koperasi
       doc.setTextColor(0, 0, 0);
       doc.setDrawColor(115, 25, 25); 
       doc.setLineWidth(0.8);
       doc.line(20, 41, pageWidth - 20, 41);
     };
 
-    // Helper Menggambar Gambar Proporsional Anti-Gepeng
+    // Helper Tanda Panah Bullet Ramping
+    const drawBulletLine = (text, x, currentY, maxW) => {
+      doc.setTextColor(0, 0, 0);
+      doc.setDrawColor(0, 0, 0);
+      doc.setFillColor(0, 0, 0);
+      
+      doc.triangle(x, currentY - 2.1, x, currentY - 0.6, x + 1.5, currentY - 1.35, "FD");
+      
+      doc.setFont(primaryFont, "normal");
+      doc.setFontSize(10.5);
+      const splitLines = doc.splitTextToSize(text, maxW - 5);
+      splitLines.forEach((line, idx) => {
+        doc.text(line, x + 5, currentY + (idx * 5.5));
+      });
+      return currentY + (splitLines.length * 5.5) + 1.5;
+    };
+
+    // Helper Gambar Proporsional Anti-Gepeng
     const drawImageProportional = (img, x, y, maxW, maxH) => {
       if (!img) return y;
       const origW = img.width || img.naturalWidth || 1;
@@ -880,11 +906,10 @@ const MemberDetail = () => {
       pBenefits = ["1) Share Profit", "2) Kredit Barang"];
     }
 
-    // --- PEMBACAAN DAN PARSING DINAMIS RIPL TEXT DARI DATABASE ---
+    // --- HALAMAN 1: PARSING RIPL TEXT DATABASE ---
     drawHeader();
     let currentY = 49;
 
-    // Ambil isi RIPL murni dari database student, jika kosong pakai teks cadangan formal
     const baseRiplText = member.riplText || "Ringkasan Informasi Produk dan Layanan\nNama Penerbit : Koperasi Sakura Mitra Internasional\nJenis Produk : Tabungan\nMata Uang : IDR";
     const riplLines = baseRiplText.split("\n");
 
@@ -892,14 +917,12 @@ const MemberDetail = () => {
       let cleanLine = lineText.trim();
       if (!cleanLine) return;
 
-      // Proteksi luapan halaman (Page Overflow)
       if (currentY + 12 > pageHeight - 15) {
         doc.addPage();
         drawHeader();
         currentY = 46;
       }
 
-      // Atur hirarki komponen font berdasarkan pola kalimat database
       if (cleanLine.startsWith("Ringkasan Informasi") || cleanLine.startsWith("Fitur Utama") || cleanLine.startsWith("Manfaat:") || cleanLine.startsWith("Persyaratan") || cleanLine.startsWith("Syarat & Ketentuan")) {
         currentY += 2;
         doc.setFont(primaryFont, "bold");
@@ -907,21 +930,9 @@ const MemberDetail = () => {
         doc.text(cleanLine, 20, currentY);
         currentY += 6;
       } else if (cleanLine.startsWith(">") || cleanLine.startsWith("-") || cleanLine.startsWith("➤") || cleanLine.startsWith("➢")) {
-        // Bersihkan simbol aneh database dan gambar dengan micro-vektor triangle yang rapi
         const bulletContent = cleanLine.replace(/^[>\-➤➢\s]+/, "");
-        doc.setDrawColor(0, 0, 0); doc.setFillColor(0, 0, 0);
-        doc.triangle(20, currentY - 2.1, 20, currentY - 0.6, 21.5, currentY - 1.35, "FD");
-        
-        doc.setFont(primaryFont, "normal");
-        doc.setFontSize(10);
-        const wrappedBullet = doc.splitTextToSize(bulletContent, pageWidth - 46);
-        wrappedBullet.forEach((bLine) => {
-          doc.text(bLine, 25, currentY);
-          currentY += 5.5;
-        });
-        currentY += 0.5;
+        currentY = drawBulletLine(bulletContent, 20, currentY, pageWidth - 40);
       } else {
-        // Baris teks biasa (Keterangan/Deskripsi)
         doc.setFont(primaryFont, "normal");
         doc.setFontSize(10);
         const wrappedPlain = doc.splitTextToSize(cleanLine, pageWidth - 40);
@@ -931,7 +942,6 @@ const MemberDetail = () => {
         });
       }
 
-      // ANCHOR DETECTOR 1: Deteksi otomatis area penyisipan Tabel Paket Benefit
       if (cleanLine.includes("nominal dan benefit") || cleanLine.includes("berbeda-beda")) {
         currentY += 1;
         autoTable(doc, {
@@ -950,7 +960,6 @@ const MemberDetail = () => {
         currentY = doc.lastAutoTable.finalY + 6;
       }
 
-      // ANCHOR DETECTOR 2: Deteksi otomatis area penyisipan Tabel Simulasi Perhitungan
       if (cleanLine.includes("Simulasi 1 contoh") || cleanLine.includes("perhitungan")) {
         currentY += 1;
         const simRows = [["1", "-", "-"], ["2", "-", "-"]];
@@ -970,7 +979,7 @@ const MemberDetail = () => {
       }
     });
 
-    // --- HALAMAN UTAMA BERIKUTNYA: FORMULIR PENDAFTARAN KOPERASI ---
+    // --- HALAMAN FORMULIR PENDAFTARAN KOPERASI (KOORDINAT GESER DAN AMAN KANJI) ---
     doc.addPage();
     drawHeader();
     let formY = 46;
@@ -1014,7 +1023,6 @@ const MemberDetail = () => {
         formY += 6;
       } else if (label === "4. Alamat Lengkap") {
         doc.text(":", 61, formY);
-        // AMAN KANJI: splitTextToSize memproses karakter kanji secara rapi ke bawah
         const splitAlamat = doc.splitTextToSize(value, pageWidth - 88);
         splitAlamat.forEach((aline, aIdx) => { doc.text(aline, 65, formY + (aIdx * 5.5)); });
         formY += (splitAlamat.length * 5.5) + 1;
@@ -1063,7 +1071,7 @@ const MemberDetail = () => {
     doc.setFont(primaryFont, "bold"); doc.text("Staff Koperasi", 20, formY); doc.text(member.name.toUpperCase(), pageWidth - 75, formY); formY += 4;
     doc.setFont(primaryFont, "normal"); doc.setFontSize(9); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, formY);
 
-    // --- HALAMAN AKHIR (LAMPIRAN BERKAS FOTO DENGAN RATIO FIT PROPORMENTAL) ---
+    // --- HALAMAN AKHIR (LAMPIRAN BERKAS) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
       doc.addPage();
       doc.setFont(primaryFont, "bold"); doc.setFontSize(12); doc.setTextColor(0, 0, 0);
