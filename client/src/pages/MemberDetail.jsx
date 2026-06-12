@@ -919,7 +919,9 @@ const MemberDetail = () => {
     y += 3;
     doc.setFont("helvetica", "bold"); doc.text("Manfaat:", 20, y); y += 5.5;
     doc.setFont("helvetica", "normal");
-    manfaatLines = [
+    
+    // SUDAH DIPERBAIKI: Menambahkan 'const' di depan manfaatLines
+    const manfaatLines = [
       "➤ Menjadi investasi berjangka yang mudah dan fleksibel bagi anggota koperasi.",
       "➤ Menghindari pengeluaran yang tidak perlu.",
       "➤ Meningkatkan kemandirian finansial.",
@@ -981,7 +983,7 @@ const MemberDetail = () => {
       y += 1.5;
     });
 
-    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (TATA LETAK DINAMIS AMAN OVERFLOW) ---
+    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI ---
     doc.addPage();
     drawHeader();
     y = 44;
@@ -994,7 +996,6 @@ const MemberDetail = () => {
     const formattedBirthDate = member.birthDate ? format(new Date(member.birthDate), "dd MMMM yyyy", { locale: id }) : "-";
     const tempatTanggalLahir = `${member.birthPlace || "-"}, ${formattedBirthDate}`;
 
-    // Array field form
     const formFields = [
       ["1. Nama Lengkap", `: ${member.name || "-"}`],
       ["2. Tempat, Tanggal Lahir", `: ${tempatTanggalLahir}`],
@@ -1028,7 +1029,6 @@ const MemberDetail = () => {
         splitAlamat.forEach((aline, aIdx) => {
           doc.text(aline, 55, y + (aIdx * 5));
         });
-        // Jarak baris dinamis mengikuti panjang alamat real student
         y += (splitAlamat.length * 5) + 1;
       } else {
         doc.text(value, 55, y);
@@ -1036,14 +1036,12 @@ const MemberDetail = () => {
       }
     });
 
-    // Sub-grup Detail Rekening Bank
     doc.setFont("helvetica", "bold"); doc.text("9. Detail Rekening", 20, y); y += 5.5;
     doc.setFont("helvetica", "normal");
     doc.text(`-  Nama Bank      : ${member.bankName || "-"}`, 25, y); y += 5.5;
     doc.text(`-  No. Rekening   : ${member.accountNumber || "-"}`, 25, y); y += 5.5;
     doc.text(`-  Atas nama       : ${member.accountHolderName || "-"}`, 25, y); y += 7;
 
-    // Checkbox Jenis Paket Pilihan
     doc.setFont("helvetica", "bold"); doc.text("Jenis Paket Simpanan yang Dipilih:", 20, y); y += 6;
     doc.setFont("helvetica", "normal");
     
@@ -1068,14 +1066,13 @@ const MemberDetail = () => {
     doc.text(`Tangerang, ${signatureDateStr}`, pageWidth - 75, y); y += 6;
     doc.text("Diproses oleh,", 20, y); doc.text("Disetujui oleh,", pageWidth - 75, y); y += 4;
 
-    // Ttd Digital ditempel pas di area penandatangan (tidak gepeng)
     if (imgSignature) { doc.addImage(imgSignature, "PNG", pageWidth - 73, y, 28, 14); }
     y += 16;
     doc.line(20, y, 60, y); doc.line(pageWidth - 75, y, pageWidth - 20, y); y += 4;
     doc.setFont("helvetica", "bold"); doc.text("Staff Koperasi", 20, y); doc.text(member.name.toUpperCase(), pageWidth - 75, y); y += 4;
     doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, y);
 
-    // --- HALAMAN AKHIR (LAMPIRAN GAMBAR - RATIO FIT ANTI GEPENG) ---
+    // --- HALAMAN AKHIR (LAMPIRAN GAMBAR) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
       doc.addPage();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(30, 30, 30);
@@ -1088,17 +1085,14 @@ const MemberDetail = () => {
         doc.setFontSize(10); doc.setTextColor(40, 40, 40);
         doc.text("1. Foto Kartu Tanda Penduduk (KTP)", 20, currentY); 
         currentY += 4;
-        // Render proporsional mengikuti rasio asli KTP
         currentY = drawImageProportional(imgKtp, 20, currentY, 80, 50) + 8;
       }
       
       if (imgSelfie) {
-        // Cek sisa halaman sebelum menggambar foto selfie
         if (currentY + 60 > pageHeight) { doc.addPage(); currentY = 25; }
         doc.setFontSize(10); doc.setFont("helvetica", "bold");
         doc.text("2. Foto Selfie dengan KTP", 20, currentY); 
         currentY += 4;
-        // Render proporsional mengikuti rasio asli foto portrait HP student
         currentY = drawImageProportional(imgSelfie, 20, currentY, 70, 65) + 8;
       }
       
