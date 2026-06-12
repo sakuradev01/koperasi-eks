@@ -8,7 +8,7 @@ import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { toast } from "react-toastify";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -760,6 +760,9 @@ const MemberDetail = () => {
       });
     };
 
+    // 1. MEMUAT LOGO KOPERASI DARI FOLDER PUBLIC
+    const imgLogo = await loadImageAsync("/coop panjang.png");
+
     // Load semua lampiran gambar dari database/student dashboard
     const imgKtp = await loadImageAsync(member.ktpImage);
     const imgSelfie = await loadImageAsync(member.selfieImage);
@@ -767,23 +770,31 @@ const MemberDetail = () => {
     const imgLivenessRight = await loadImageAsync(member.livenessRightImage);
     const imgSignature = await loadImageAsync(member.signatureImage);
 
-    // Fungsi menggambar Header Koperasi SAMIT di setiap lembar awal
+    // Fungsi menggambar Header Koperasi SAMIT di setiap lembar awal (Menggunakan Logo Baru)
     const drawHeader = () => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.setTextColor(40, 40, 40);
-      doc.text("KOPERASI SAMIT", 20, 18);
+      if (imgLogo) {
+        // Menggambar logo coop panjang jika berhasil dimuat (lebar: 55, tinggi: 13)
+        doc.addImage(imgLogo, "PNG", 20, 10, 55, 13);
+      } else {
+        // Fallback teks jika logo tidak sengaja terhapus/gagal load
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(40, 40, 40);
+        doc.text("KOPERASI SAMIT", 20, 18);
+      }
 
+      // Alamat & Email digeser sedikit ke bawah agar sejajar rapi dengan logo
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8.5);
       doc.setTextColor(100, 100, 100);
-      doc.text("Ruko Dalton Utara Blok DLNU 05, Jl. Scientia Square Selatan", 20, 23);
-      doc.text("Kel. Curug Sangereng, Kec. Kelapa Dua, Kab. Tangerang, Banten, 15810.", 20, 27);
-      doc.text("Email: koperasi@sakuramitra.com", 20, 31);
+      doc.text("Ruko Dalton Utara Blok DLNU 05, Jl. Scientia Square Selatan", 20, 27);
+      doc.text("Kel. Curug Sangereng, Kec. Kelapa Dua, Kab. Tangerang, Banten, 15810.", 20, 31);
+      doc.text("Email: koperasi@sakuramitra.com", 20, 35);
 
+      // Garis pembatas header
       doc.setDrawColor(180, 180, 180);
       doc.setLineWidth(0.5);
-      doc.line(20, 34, pageWidth - 20, 34);
+      doc.line(20, 38, pageWidth - 20, 38);
     };
 
     // Deteksi dinamis paket tabungan yang dipilih member
@@ -822,9 +833,9 @@ const MemberDetail = () => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(30, 30, 30);
-    doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 43, { align: "center" });
+    doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 46, { align: "center" });
 
-    let y = 50;
+    let y = 53;
     doc.setFontSize(10);
     const infoLabels = [
       ["Nama Penerbit", ": Koperasi Sakura Mitra Internasional"],
@@ -870,8 +881,8 @@ const MemberDetail = () => {
     doc.text(`➤ Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, y);
     y += 6;
 
-    // Render Tabel Khusus Paket yang dipilih saja (Mengganti penjelasan 3 tabel rumit)
-    doc.autoTable({
+    // Perbaikan Panggilan Tabel 1 (autoTable)
+    autoTable(doc, {
       startY: y,
       margin: { left: 20, right: 20 },
       head: [["Jenis Tabungan", pName]],
@@ -885,7 +896,7 @@ const MemberDetail = () => {
       columnStyles: { 0: { fontStyle: "bold", width: 50 }, 1: { halign: "left" } }
     });
 
-    y = doc.autoTable.previous.finalY + 6;
+    y = doc.lastAutoTable.finalY + 6;
     doc.setFontSize(8.5);
     doc.setFont("helvetica", "italic");
     doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, y);
@@ -893,7 +904,7 @@ const MemberDetail = () => {
     // --- HALAMAN 2: RIPL Bagian 2 (Manfaat & Simulasi Perhitungan) ---
     doc.addPage();
     drawHeader();
-    y = 43;
+    y = 45;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.text("➤ Anggota koperasi bisa merubah paket yang dipilih.", 20, y); y += 5.5;
@@ -927,11 +938,11 @@ const MemberDetail = () => {
     y += 5;
     doc.setFont("helvetica", "bold"); doc.text("Simulasi 1 contoh perhitungan (Jika peserta juga mengambil Dana Talangan):", 20, y); y += 6;
 
-    // Tabel Simulasi Perhitungan yang otomatis merujuk ke nominal paket terpilih
     const simRows = [["1", "-", "-"], ["2", "-", "-"]];
     for (let m = 3; m <= 12; m++) { simRows.push([String(m), "Rp 2.852.000", pNominal]); }
 
-    doc.autoTable({
+    // Perbaikan Panggilan Tabel 2 (autoTable)
+    autoTable(doc, {
       startY: y,
       margin: { left: 20, right: 20 },
       head: [["Bulan Pembayaran\n(terhitung sejak keberangkatan)", "Dana Talangan\n(Contoh Pinjaman Rp 23.000.000)", `Koperasi\n(Contoh Tabungan Paket ${pName})`]],
@@ -942,14 +953,14 @@ const MemberDetail = () => {
       columnStyles: { 0: { width: 60 }, 1: { width: 65 }, 2: { width: 45 } }
     });
 
-    y = doc.autoTable.previous.finalY + 8;
+    y = doc.lastAutoTable.finalY + 8;
     doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(120, 120, 120);
     doc.text("Perubahan Terakhir: 19 Juli 2025", 20, y);
 
     // --- HALAMAN 3: RIPL Bagian 3 (Syarat & Ketentuan Hukum) ---
     doc.addPage();
     drawHeader();
-    y = 43;
+    y = 45;
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(30, 30, 30);
     doc.text("Syarat & Ketentuan :", 20, y); y += 6;
     doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
@@ -969,10 +980,10 @@ const MemberDetail = () => {
       y += 1.5;
     });
 
-    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (Isi otomatis dari data web) ---
+    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI ---
     doc.addPage();
     drawHeader();
-    y = 43;
+    y = 45;
     doc.setFont("helvetica", "bold"); doc.setFontSize(12);
     doc.text("Formulir Pendaftaran Koperasi SAMIT", pageWidth / 2, y, { align: "center" });
     y += 8;
@@ -1020,7 +1031,6 @@ const MemberDetail = () => {
     doc.text(`-  No. Rekening   : ${member.accountNumber || "-"}`, 25, y); y += 5.5;
     doc.text(`-  Atas nama       : ${member.accountHolderName || "-"}`, 25, y); y += 7;
 
-    // Menggambar Checkbox Paket Pilihan otomatis silang (X)
     doc.setFont("helvetica", "bold"); doc.text("Jenis Paket Simpanan yang Dipilih:", 20, y); y += 6;
     doc.setFont("helvetica", "normal");
     
@@ -1045,14 +1055,13 @@ const MemberDetail = () => {
     doc.text(`Tangerang, ${signatureDateStr}`, pageWidth - 75, y); y += 6;
     doc.text("Diproses oleh,", 20, y); doc.text("Disetujui oleh,", pageWidth - 75, y); y += 4;
 
-    // Memasang Tanda Tangan Digital otomatis di atas nama persetujuan anggota
     if (imgSignature) { doc.addImage(imgSignature, "PNG", pageWidth - 75, y, 32, 16); }
     y += 18;
     doc.line(20, y, 60, y); doc.line(pageWidth - 75, y, pageWidth - 20, y); y += 4;
     doc.setFont("helvetica", "bold"); doc.text("Staff Koperasi", 20, y); doc.text(member.name.toUpperCase(), pageWidth - 75, y); y += 4;
     doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, y);
 
-    // --- HALAMAN AKHIR (APPENDIX): LAMPIRAN GAMBAR (Ttd digital dikecualikan dari lampiran akhir sesuai instruksi) ---
+    // --- HALAMAN AKHIR (LAMPIRAN GAMBAR) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
       doc.addPage();
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(30, 30, 30);
