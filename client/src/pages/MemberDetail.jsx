@@ -788,7 +788,6 @@ const MemberDetail = () => {
       if (lower.includes("persyaratan dan tata cara")) { currentSection = "persyaratan"; return; }
       if (lower.includes("syarat & ketentuan :") || lower.startsWith("syarat & ketentuan")) { currentSection = "sk"; return; }
       
-      // Bersihkan awalan bullet point bawaan database (> / - / panah)
       const cleanLine = line.replace(/^[>\-➤➢•\*▪\s\d\)\.]+\s*/, "");
       
       if (currentSection === "fitur" && !lower.includes("tabel") && !lower.includes("paket")) {
@@ -892,7 +891,6 @@ const MemberDetail = () => {
       doc.setDrawColor(0, 0, 0);
       doc.setFillColor(0, 0, 0);
       
-      // Dimensi mikro (1.5mm) agar ramping dan sejajar teks
       doc.triangle(x, currentY - 2.1, x, currentY - 0.6, x + 1.5, currentY - 1.35, "FD");
       
       doc.setFont(primaryFont, "normal");
@@ -945,37 +943,35 @@ const MemberDetail = () => {
       ];
     }
 
-    // --- HALAMAN 1: RIPL HALAMAN 1 (FITUR UTAMA & TABEL BENEFIT PUTIH) ---
+    // --- HALAMAN 1: RIPL HALAMAN 1 ---
     drawHeader();
     doc.setFont(primaryFont, "bold"); doc.setFontSize(13);
     doc.text("Ringkasan Informasi Produk dan Layanan", pageWidth / 2, 49, { align: "center" });
 
-    let lineY = 58;
+    let y = 58;
     doc.setFontSize(10.5);
-    doc.text("Nama Penerbit", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": Koperasi Sakura Mitra Internasional", 55, lineY); lineY += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Jenis Produk", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": Tabungan", 55, lineY); lineY += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Mata Uang", 20, lineY); doc.setFont(primaryFont, "normal"); doc.text(": IDR", 55, lineY); lineY += 6;
-    doc.setFont(primaryFont, "bold"); doc.text("Deskripsi", 20, lineY); doc.setFont(primaryFont, "normal");
+    doc.text("Nama Penerbit", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": Koperasi Sakura Mitra Internasional", 55, y); y += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Jenis Produk", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": Tabungan", 55, y); y += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Mata Uang", 20, y); doc.setFont(primaryFont, "normal"); doc.text(": IDR", 55, y); y += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Deskripsi", 20, y); doc.setFont(primaryFont, "normal");
     
     const descText = ": Tabungan Koperasi SAMIT merupakan program simpanan khusus bagi alumni LPK SAMIT, yang dirancang untuk memberikan kemudahan menabung secara aman dan terkelola, serta memberikan beragam benefit eksklusif bagi para anggotanya.";
     const splitDesc = doc.splitTextToSize(descText, pageWidth - 76);
-    splitDesc.forEach((line, idx) => { doc.text(line, 55, lineY + (idx * 5.5)); });
-    lineY += (splitDesc.length * 5.5) + 5;
+    splitDesc.forEach((line, idx) => { doc.text(line, 55, y + (idx * 5.5)); });
+    y += (splitDesc.length * 5.5) + 5;
 
-    doc.setFont(primaryFont, "bold"); doc.text("Fitur Utama Tabungan Koperasi SAMIT:", 20, lineY); lineY += 6;
+    doc.setFont(primaryFont, "bold"); doc.text("Fitur Utama Tabungan Koperasi SAMIT:", 20, y); y += 6;
     
-    // Cetak 5 baris fitur utama dinamis dari database
     for (let i = 0; i < Math.min(extractedFitur.length, 5); i++) {
-      lineY = drawBulletLine(extractedFitur[i], 20, lineY, pageWidth - 40);
+      y = drawBulletLine(extractedFitur[i], 20, y, pageWidth - 40);
     }
 
-    lineY += 2; doc.setFont(primaryFont, "normal");
-    doc.text(`Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, lineY);
-    lineY += 4;
+    y += 2; doc.setFont(primaryFont, "normal");
+    doc.text(`Tabungan tersedia dalam Paket ${pName} dengan nominal dan benefit sebagai berikut:`, 20, y);
+    y += 4;
 
-    // TABEL BENEFIT PUTIH BERSIH GRID HITAM
     autoTable(doc, {
-      startY: lineY,
+      startY: y,
       margin: { left: 20, right: 20 },
       head: [["Jenis Tabungan", `Paket ${pName}`]],
       body: [
@@ -988,16 +984,15 @@ const MemberDetail = () => {
       columnStyles: { 0: { fontStyle: "bold", width: 45 }, 1: { halign: "left" } }
     });
 
-    lineY = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 6;
     doc.setFontSize(9); doc.setFont(primaryFont, "italic");
-    doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, lineY);
+    doc.text("*) Syarat & Ketentuan benefit berlaku dan dapat dilihat di aplikasi student dashboard", 20, y);
 
-    // --- HALAMAN 2: RIPL HALAMAN 2 (SISA FITUR, MANFAAT & TABEL SIMULASI) ---
+    // --- HALAMAN 2: RIPL HALAMAN 2 ---
     doc.addPage();
     drawHeader();
     let page2Y = 46;
 
-    // Cetak sisa klausa fitur jika ada, jika tidak gunakan fallback penutup fitur utama
     const sisaFitur = extractedFitur.slice(5);
     if (sisaFitur.length > 0) {
       sisaFitur.forEach(line => { page2Y = drawBulletLine(line, 20, page2Y, pageWidth - 40); });
@@ -1018,7 +1013,6 @@ const MemberDetail = () => {
     const simRows = [["1", "-", "-"], ["2", "-", "-"]];
     for (let m = 3; m <= 12; m++) { simRows.push([String(m), "Rp 2.852.000", pNominal]); }
 
-    // TABEL SIMULASI PUTIH BORDER HITAM
     autoTable(doc, {
       startY: page2Y,
       margin: { left: 20, right: 20 },
@@ -1034,7 +1028,7 @@ const MemberDetail = () => {
     doc.setFontSize(9); doc.setFont(primaryFont, "normal"); doc.setTextColor(120, 120, 120);
     doc.text("Perubahan Terakhir: 19 Juli 2025", 20, page2Y);
 
-    // --- HALAMAN 3: RIPL HALAMAN 3 (SYARAT & KETENTUAN HUKUM) ---
+    // --- HALAMAN 3: Syarat & Ketentuan ---
     doc.addPage();
     drawHeader();
     let page3Y = 46;
@@ -1043,7 +1037,7 @@ const MemberDetail = () => {
     
     extractedSK.forEach(line => { page3Y = drawBulletLine(line, 20, page3Y, pageWidth - 40); });
 
-    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (PERBAIKAN FIT KOORDINAT X=65) ---
+    // --- HALAMAN 4: FORMULIR PENDAFTARAN KOPERASI (SUDAH FIX TYPO DAI SENPAI) ---
     doc.addPage();
     drawHeader();
     let formY = 46;
@@ -1087,12 +1081,10 @@ const MemberDetail = () => {
         formY += 6;
       } else if (label === "4. Alamat Lengkap") {
         doc.text(":", 61, formY);
-        // splitTextToSize memproses pembungkusan teks alamat yang sangat panjang dengan aman
         const splitAlamat = doc.splitTextToSize(value, pageWidth - 88);
         splitAlamat.forEach((aline, aIdx) => { doc.text(aline, 65, formY + (aIdx * 5.5)); });
         formY += (splitAlamat.length * 5.5) + 1;
       } else {
-        // PERBAIKAN: Jarak X=65 longgar menjamin data Tempat Tanggal Lahir panjang tidak akan menumpuk
         doc.text(":", 61, formY);
         doc.text(value, 65, formY);
         formY += 6;
@@ -1115,7 +1107,8 @@ const MemberDetail = () => {
     doc.rect(60, formY - 3.5, 4, 4); if (isSenpai) { doc.line(60, formY - 3.5, 64, formY + 0.5); doc.line(64, formY - 3.5, 60, formY + 0.5); }
     doc.text(`Paket Senpai`, 66, formY);
 
-    doc.rect(100, y - 3.5, 4, 4); if (isDaiSenpai) { doc.line(100, formY - 3.5, 104, formY + 0.5); doc.line(104, formY - 3.5, 100, formY + 0.5); }
+    // FIX: Mengubah 'y - 3.5' menjadi 'formY - 3.5' agar terhindar dari ReferenceError
+    doc.rect(100, formY - 3.5, 4, 4); if (isDaiSenpai) { doc.line(100, formY - 3.5, 104, formY + 0.5); doc.line(104, formY - 3.5, 100, formY + 0.5); }
     doc.text(`Paket Dai Senpai`, 106, formY);
 
     formY += 10;
@@ -1137,7 +1130,7 @@ const MemberDetail = () => {
     doc.setFont(primaryFont, "bold"); doc.text("Staff Koperasi", 20, formY); doc.text(member.name.toUpperCase(), pageWidth - 75, formY); formY += 4;
     doc.setFont(primaryFont, "normal"); doc.setFontSize(9); doc.text("Nama dan Tanda Tangan Anggota", pageWidth - 75, formY);
 
-    // --- HALAMAN AKHIR (LAMPIRAN BERKAS FOTO PROPORMENTAL) ---
+    // --- HALAMAN AKHIR (LAMPIRAN BERKAS) ---
     if (imgKtp || imgSelfie || imgLivenessLeft || imgLivenessRight) {
       doc.addPage();
       doc.setFont(primaryFont, "bold"); doc.setFontSize(12); doc.setTextColor(0, 0, 0);
