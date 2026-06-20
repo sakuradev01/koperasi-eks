@@ -2848,3 +2848,10 @@
     page-break-inside: avoid;
   }
 }
+
+
+.inv-referral-line {
+  margin: 4px 0 8px;
+  font-size: 0.9rem;
+  color: #334155;
+}

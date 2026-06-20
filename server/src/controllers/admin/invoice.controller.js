@@ -517,24 +517,35 @@ async function attachSplitRowsToSerializedInvoice(invoice) {
   return invoice;
 }
 
+async function enrichInvoiceCustomerSnapshot(invoice) {
+  let snap = { ...(invoice?.customerSnapshot || {}) };
+  let uuid = String(snap.uuid || "").trim();
+  if (!uuid && invoice?.memberId) {
+    const member = await Member.findById(invoice.memberId).select("uuid").lean();
+    if (member?.uuid) {
+      uuid = String(member.uuid).trim();
+      snap.uuid = uuid;
+    }
+  }
+  if (!uuid) return snap;
+  return enrichCustomerSnapshotReferral(snap);
+}
+
 async function serializeInvoiceWithSplits(invoiceDoc) {
   const invoice = await attachSplitRowsToSerializedInvoice(
     serializeInvoice(invoiceDoc),
   );
-  if (invoice?.customerSnapshot) {
-    invoice.customerSnapshot = await enrichCustomerSnapshotReferral(
-      invoice.customerSnapshot,
-    );
+  if (invoice) {
+    invoice.customerSnapshot = await enrichInvoiceCustomerSnapshot(invoice);
   }
   return invoice;
-}
-
-function serializePublicInvoice(invoiceDoc) {
+    async function serializePublicInvoice(invoiceDoc) {
   const invoice = serializeInvoice(invoiceDoc);
+  const customerSnapshot = await enrichInvoiceCustomerSnapshot(invoice);
 
   return {
     invoiceNumber: invoice.invoiceNumber,
-    customerSnapshot: invoice.customerSnapshot,
+    customerSnapshot,
     salesCode: invoice.salesCode,
     issuedDate: invoice.issuedDate,
     dueDate: invoice.dueDate,
@@ -1275,7 +1286,8 @@ export const getPublicInvoiceByNumber = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Invoice tidak ditemukan atau belum dipublish");
   }
 
-  res.status(200).json(new ApiResponse(200, serializePublicInvoice(invoice)));
+  const payload = await serializePublicInvoice(invoice);
+  res.status(200).json(new ApiResponse(200, payload));
 });
 
 export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
@@ -1311,7 +1323,9 @@ export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
   })
     .sort({ issuedDate: -1, createdAt: -1 })
     .lean();
-  const invoices = rawInvoices.map((invoice) => serializePublicInvoice(invoice));
+  const invoices = await Promise.all(
+    rawInvoices.map((inv) => serializePublicInvoice(inv)),
+  );
 
   res.status(200).json(
     new ApiResponse(200, {
