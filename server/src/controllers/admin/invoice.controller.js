@@ -1,6 +1,6 @@
 import {
   enrichCustomerSnapshotReferral,
-} from "../services/panelStudentReferral.service.js";
+} from "../../services/panelStudentReferral.service.js";
 import mongoose from "mongoose";
 import fs from "fs";
 import { Invoice } from "../../models/invoice.model.js";
