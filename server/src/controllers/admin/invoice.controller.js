@@ -539,7 +539,9 @@ async function serializeInvoiceWithSplits(invoiceDoc) {
     invoice.customerSnapshot = await enrichInvoiceCustomerSnapshot(invoice);
   }
   return invoice;
-    async function serializePublicInvoice(invoiceDoc) {
+}
+
+async function serializePublicInvoice(invoiceDoc) {
   const invoice = serializeInvoice(invoiceDoc);
   const customerSnapshot = await enrichInvoiceCustomerSnapshot(invoice);
 
