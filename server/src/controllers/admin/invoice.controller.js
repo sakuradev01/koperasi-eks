@@ -1,3 +1,6 @@
+import {
+  enrichCustomerSnapshotReferral,
+} from "../services/panelStudentReferral.service.js";
 import mongoose from "mongoose";
 import fs from "fs";
 import { Invoice } from "../../models/invoice.model.js";
@@ -515,7 +518,15 @@ async function attachSplitRowsToSerializedInvoice(invoice) {
 }
 
 async function serializeInvoiceWithSplits(invoiceDoc) {
-  return attachSplitRowsToSerializedInvoice(serializeInvoice(invoiceDoc));
+  const invoice = await attachSplitRowsToSerializedInvoice(
+    serializeInvoice(invoiceDoc),
+  );
+  if (invoice?.customerSnapshot) {
+    invoice.customerSnapshot = await enrichCustomerSnapshotReferral(
+      invoice.customerSnapshot,
+    );
+  }
+  return invoice;
 }
 
 function serializePublicInvoice(invoiceDoc) {

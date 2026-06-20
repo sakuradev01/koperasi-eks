@@ -2193,6 +2193,12 @@ export default function InvoiceDetail({
                     <h6>To,</h6>
                     <h4>{invoice.customerSnapshot?.name || "-"}</h4>
                     <p>{invoice.customerSnapshot?.productTitle || "-"}</p>
+                    {invoice.customerSnapshot?.referralCode ? (
+                      <p className="inv-referral-line">
+                        Kode referal: <strong>{invoice.customerSnapshot.referralCode}</strong>
+                      </p>
+                    ) : null}
+                    <p>{invoice.customerSnapshot?.productTitle || "-"}</p>
                     <p>
                       {invoice.customerSnapshot?.completeAddress ||
                         "Alamat belum diisi"}
@@ -2381,6 +2387,12 @@ export default function InvoiceDetail({
                   <address className="inv-print-to">
                     <h6>ご請求先</h6>
                     <h4>{invoice.customerSnapshot?.name || "-"}</h4>
+                    <p>{invoice.customerSnapshot?.productTitle || "-"}</p>
+                    {invoice.customerSnapshot?.referralCode ? (
+                      <p className="inv-referral-line">
+                        紹介コード: <strong>{invoice.customerSnapshot.referralCode}</strong>
+                      </p>
+                    ) : null}
                     <p>{invoice.customerSnapshot?.productTitle || "-"}</p>
                     <p>
                       {invoice.customerSnapshot?.completeAddress ||

@@ -195,6 +195,11 @@ const customerSnapshotSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    referralCode: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
   { _id: false },
 );
