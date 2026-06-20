@@ -1155,18 +1155,20 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
   const rawInvoices = await Invoice.find(query)
     .sort({ issuedDate: -1, createdAt: -1 })
     .lean();
-  const hydrated = rawInvoices.map((invoice) => {
-    const serialized = serializeInvoice(invoice);
-    return {
-      ...serialized,
-      status: computeInvoiceStatus(
-        serialized.status,
-        serialized.dueDate,
-        serialized.total,
-        serialized.totalPaid,
-      ),
-    };
-  });
+  const hydrated = await Promise.all(
+    rawInvoices.map(async (invoice) => {
+      const serialized = await serializeInvoiceWithSplits(invoice);
+      return {
+        ...serialized,
+        status: computeInvoiceStatus(
+          serialized.status,
+          serialized.dueDate,
+          serialized.total,
+          serialized.totalPaid,
+        ),
+      };
+    }),
+  );
   const today = startOfDay(new Date());
 
   const filtered = hydrated.filter((invoice) => {

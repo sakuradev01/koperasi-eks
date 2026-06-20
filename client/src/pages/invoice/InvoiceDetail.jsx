@@ -2197,6 +2197,7 @@ export default function InvoiceDetail({
                       <p className="inv-referral-line">
                         Kode referal: <strong>{invoice.customerSnapshot.referralCode}</strong>
                       </p>
+                    ) : null}
                     <p>
                       {invoice.customerSnapshot?.completeAddress ||
                         "Alamat belum diisi"}
@@ -2390,6 +2391,7 @@ export default function InvoiceDetail({
                       <p className="inv-referral-line">
                         紹介コード: <strong>{invoice.customerSnapshot.referralCode}</strong>
                       </p>
+                    ) : null}
                     <p>
                       {invoice.customerSnapshot?.completeAddress ||
                         "住所未入力"}
