@@ -34,47 +34,68 @@ export const getAllOperators = asyncHandler(async (req, res) => {
 });
 
 // POST /api/operators — Create operator baru
-export const createOperator = asyncHandler(async (req, res) => {
-  const { username, password, name, permissions } = req.body;
+export const createOperator = async (req, res) => {
+  try {
+    const { username, password, name, permissions } = req.body;
 
-  // Validasi input
-  if (!username || !password || !name) {
-    throw new ApiError(400, "Username, password, dan nama wajib diisi");
-  }
+    // Validasi input
+    if (!username || !password || !name) {
+      return res.status(400).json({
+        success: false,
+        message: "Username, password, dan nama wajib diisi",
+      });
+    }
 
-  if (password.length < 6) {
-    throw new ApiError(400, "Password minimal 6 karakter");
-  }
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password minimal 6 karakter",
+      });
+    }
 
-  // Cek duplikat username
-  const existing = await User.findOne({ username });
-  if (existing) {
-    throw new ApiError(400, "Username sudah digunakan");
-  }
+    // Cek duplikat username
+    const existing = await User.findOne({ username });
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: "Username sudah digunakan",
+      });
+    }
 
-  // Merge permissions dengan default
-  const mergedPermissions = { ...DEFAULT_OPERATOR_PERMISSIONS };
-  if (permissions && typeof permissions === "object") {
-    for (const [key, val] of Object.entries(permissions)) {
-      if (mergedPermissions[key]) {
-        mergedPermissions[key] = { ...mergedPermissions[key], ...val };
+    // Merge permissions dengan default
+    const mergedPermissions = { ...DEFAULT_OPERATOR_PERMISSIONS };
+    if (permissions && typeof permissions === "object") {
+      for (const [key, val] of Object.entries(permissions)) {
+        if (mergedPermissions[key]) {
+          mergedPermissions[key] = { ...mergedPermissions[key], ...val };
+        }
       }
     }
+
+    const operator = await User.create({
+      username,
+      password,
+      name,
+      role: "operator",
+      permissions: mergedPermissions,
+      isActive: true,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: operator.toJSON(),
+      message: "Operator berhasil dibuat",
+    });
+  } catch (error) {
+    console.error("CREATE OPERATOR ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+      error: error.toString(),
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
   }
-
-  const operator = await User.create({
-    username,
-    password,
-    name,
-    role: "operator",
-    permissions: mergedPermissions,
-    isActive: true,
-  });
-
-  res.status(201).json(
-    new ApiResponse(201, operator.toJSON(), "Operator berhasil dibuat")
-  );
-});
+};
 
 // PUT /api/operators/:id — Update operator
 export const updateOperator = asyncHandler(async (req, res) => {
