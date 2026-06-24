@@ -29,8 +29,21 @@ const userSchema = new Schema(
     },
     role: {
       type: String,
-      enum: ["admin", "staff"],
+      enum: ["admin", "staff", "operator"],
       default: "admin",
+    },
+    permissions: {
+      type: Map,
+      of: new Schema(
+        {
+          view: { type: Boolean, default: false },
+          create: { type: Boolean, default: false },
+          edit: { type: Boolean, default: false },
+          delete: { type: Boolean, default: false },
+        },
+        { _id: false }
+      ),
+      default: {},
     },
     isActive: {
       type: Boolean,

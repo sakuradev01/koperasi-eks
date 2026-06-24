@@ -56,12 +56,13 @@ import {
   deleteDonation,
 } from "../controllers/admin/donation.controller.js";
 import { clearAllData } from "../controllers/admin/system.controller.js";
-import { verifyToken } from "../middlewares/auth.middleware.js";
+import { verifyToken, requireAdmin } from "../middlewares/auth.middleware.js";
 import multer from "multer";
 import productUpgradeRoutes from "./admin/productUpgrade.routes.js";
 import loanRoutes from "./loan.routes.js";
 import loanPaymentRoutes from "./loanPayment.routes.js";
 import loanProductRoutes from "./loanProduct.routes.js";
+import operatorRoutes from "./operator.routes.js";
 import danaDaruratRoutes from "./danaDarurat.routes.js";
 import coaRoutes from "./coa.routes.js";
 import transactionRoutes from "./transaction.routes.js";
@@ -167,6 +168,10 @@ router.use("/loans", loanRoutes);
 router.use("/loan-payments", loanPaymentRoutes);
 router.use("/loan-products", loanProductRoutes);
 router.use("/dana-darurat", danaDaruratRoutes);
+
+// Operator management routes (admin only)
+router.use("/operators", verifyToken, requireAdmin, operatorRoutes);
+
 
 // Accounting routes
 router.use("/coa", verifyToken, coaRoutes);
