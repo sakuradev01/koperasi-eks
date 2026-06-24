@@ -6,7 +6,6 @@ const userSchema = new Schema(
     uuid: {
       type: String,
       unique: true,
-      required: true,
       trim: true,
     },
     username: {
