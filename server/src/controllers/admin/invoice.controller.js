@@ -1151,9 +1151,16 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
       { "customerSnapshot.uuid": regex },
     ];
   }
+  // ponytail: push tag/status to DB query so we paginate at DB level
+  if (tag === "draft") query.status = "draft";
+  else if (tag === "unpaid") query.status = { $nin: ["draft", "paid"] };
+  if (statusFilter && !tag) query.status = statusFilter;
 
+  const totalItems = await Invoice.countDocuments(query);
   const rawInvoices = await Invoice.find(query)
     .sort({ issuedDate: -1, createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit)
     .lean();
   const hydrated = await Promise.all(
     rawInvoices.map(async (invoice) => {
@@ -1171,42 +1178,22 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
   );
   const today = startOfDay(new Date());
 
-  const filtered = hydrated.filter((invoice) => {
-    if (tag === "draft" && invoice.status !== "draft") return false;
-    if (tag === "unpaid" && ["paid", "draft"].includes(invoice.status))
-      return false;
-    if (statusFilter && invoice.status !== statusFilter) return false;
-    if (dueState) {
-      const dueDate = startOfDay(invoice.dueDate);
-      const daysUntilDue = dateDiffInDays(dueDate, today);
-      const isCollectible =
-        !["draft", "paid"].includes(invoice.status) &&
-        clampMoney(invoice.amountDue) > 0;
-
-      if (dueState === "overdue" && !(isCollectible && daysUntilDue < 0)) {
-        return false;
-      }
-      if (dueState === "due_today" && !(isCollectible && daysUntilDue === 0)) {
-        return false;
-      }
-      if (
-        dueState === "due_7" &&
-        !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 7)
-      ) {
-        return false;
-      }
-      if (
-        dueState === "due_30" &&
-        !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 30)
-      ) {
-        return false;
-      }
-      if (dueState === "not_due" && !(isCollectible && daysUntilDue > 0)) {
-        return false;
-      }
-    }
-    return true;
-  });
+  // dueState uses computed status — in-memory filter; may produce fewer items than limit
+  const filtered = dueState
+    ? hydrated.filter((invoice) => {
+        const dueDate = startOfDay(invoice.dueDate);
+        const daysUntilDue = dateDiffInDays(dueDate, today);
+        const isCollectible =
+          !["draft", "paid"].includes(invoice.status) &&
+          clampMoney(invoice.amountDue) > 0;
+        if (dueState === "overdue" && !(isCollectible && daysUntilDue < 0)) return false;
+        if (dueState === "due_today" && !(isCollectible && daysUntilDue === 0)) return false;
+        if (dueState === "due_7" && !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 7)) return false;
+        if (dueState === "due_30" && !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 30)) return false;
+        if (dueState === "not_due" && !(isCollectible && daysUntilDue > 0)) return false;
+        return true;
+      })
+    : hydrated;
 
   const sortKeyMap = {
     status: (invoice) =>
@@ -1231,33 +1218,55 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
       return leftValue > rightValue ? sortDirection : -sortDirection;
     });
   }
-
-  const summary = {
-    totalInvoices: filtered.length,
-    totalDraft: filtered.filter((invoice) => invoice.status === "draft").length,
-    totalPaid: filtered.filter((invoice) => invoice.status === "paid").length,
-    totalOutstanding: clampMoney(
-      filtered.reduce(
-        (sum, invoice) => sum + Math.max(invoice.amountDue || 0, 0),
-        0,
+  // ponytail: summary from countDocuments/aggregation when no dueState filter
+  let summaryResponse;
+  if (dueState) {
+    summaryResponse = {
+      totalInvoices: filtered.length,
+      totalDraft: filtered.filter((inv) => inv.status === "draft").length,
+      totalPaid: filtered.filter((inv) => inv.status === "paid").length,
+      totalOutstanding: clampMoney(
+        filtered.reduce((sum, inv) => sum + Math.max(inv.amountDue || 0, 0), 0),
       ),
-    ),
-    totalValue: clampMoney(
-      filtered.reduce((sum, invoice) => sum + (invoice.total || 0), 0),
-    ),
-  };
-
-  const startIndex = (page - 1) * limit;
-  const paginated = filtered.slice(startIndex, startIndex + limit);
+      totalValue: clampMoney(
+        filtered.reduce((sum, inv) => sum + (inv.total || 0), 0),
+      ),
+    };
+  } else {
+    const [totalDraft, totalPaid, aggregation] = await Promise.all([
+      Invoice.countDocuments({ ...query, status: "draft" }),
+      Invoice.countDocuments({ ...query, status: "paid" }),
+      Invoice.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            totalValue: { $sum: "$total" },
+            totalOutstanding: { $sum: { $subtract: ["$total", "$totalPaid"] } },
+          },
+        },
+      ]),
+    ]);
+    const totals = aggregation[0] || { totalValue: 0, totalOutstanding: 0 };
+    summaryResponse = {
+      totalInvoices: totalItems,
+      totalDraft,
+      totalPaid,
+      totalOutstanding: clampMoney(
+        Math.max(totals.totalOutstanding || 0, 0),
+      ),
+      totalValue: clampMoney(totals.totalValue || 0),
+    };
+  }
 
   res.status(200).json(
     new ApiResponse(200, {
-      invoices: paginated,
-      summary,
+      invoices: filtered,
+      summary: summaryResponse,
       pagination: {
         currentPage: page,
-        totalPages: Math.max(Math.ceil(filtered.length / limit), 1),
-        totalItems: filtered.length,
+        totalPages: Math.max(Math.ceil(totalItems / limit), 1),
+        totalItems,
         itemsPerPage: limit,
       },
     }),
