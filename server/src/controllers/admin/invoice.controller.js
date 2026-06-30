@@ -289,8 +289,7 @@ function normalizeProjections(rawProjections, currentProjections = []) {
 
       return normalizedProjection;
     })
-    .filter(Boolean)
-    .sort((a, b) => new Date(a.estimateDate) - new Date(b.estimateDate));
+    .filter(Boolean);
 }
 
 function normalizePayments(rawPayments) {
@@ -343,7 +342,6 @@ function normalizePayments(rawPayments) {
       return normalizedPayment;
     })
     .filter(Boolean)
-    .sort((a, b) => new Date(a.paymentDate) - new Date(b.paymentDate));
 }
 
 function computeInvoiceStatus(statusInput, dueDate, total, totalPaid) {
