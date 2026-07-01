@@ -609,10 +609,38 @@ const approveMemberAddress = asyncHandler(async (req, res) => {
   });
 });
 
+// Reject member address update with reason.
+const rejectMemberAddress = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+  const { rejectionReason } = req.body;
+  const member = await Member.findOne({ uuid });
+
+  if (!member) return res.status(404).json({ success: false, message: "Member tidak ditemukan" });
+
+  if ((member.addressUpdateStatus || "none") !== "pending") {
+    return res.status(400).json({ success: false, message: "Tidak ada perubahan alamat yang menunggu verifikasi" });
+  }
+
+  if (!rejectionReason || !rejectionReason.trim()) {
+    return res.status(400).json({ success: false, message: "Alasan penolakan wajib diisi" });
+  }
+
+  member.addressUpdateStatus = "rejected";
+  member.addressUpdateRejectionReason = rejectionReason.trim();
+  member.addressUpdateVerifiedAt = new Date();
+  member.addressUpdateVerifiedBy = req.user._id;
+  await member.save();
+
+  const populatedMember = await Member.findById(member._id)
+    .populate("user", "username email isActive")
+    .populate("product", "title depositAmount termDuration returnProfit description");
+
+  res.status(200).json({ success: true, data: populatedMember, message: "Perubahan alamat berhasil ditolak" });
+});
 // Get pending verification count
 const getPendingCount = asyncHandler(async (req, res) => {
   const registrationPending = await Member.countDocuments({ isVerified: false });
-  const addressPending = await Member.countDocuments({ addressUpdateStatus: "pending" });
+  const addressPending = await Member.countDocuments({ addressUpdateStatus: { $in: ["pending", "rejected"] } });
   res.status(200).json({
     success: true,
     data: {
@@ -671,6 +699,7 @@ export {
   verifyMember,
   unverifyMember,
   approveMemberAddress,
+  rejectMemberAddress,
   getPendingCount,
   migrateExistingMembers,
 };

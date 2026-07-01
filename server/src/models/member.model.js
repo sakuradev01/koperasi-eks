@@ -119,7 +119,7 @@ const memberSchema = new Schema(
     },
     addressUpdateStatus: {
       type: String,
-      enum: ["none", "pending", "approved"],
+      enum: ["none", "pending", "approved", "rejected"],
       default: "none",
       index: true,
     },
@@ -134,6 +134,10 @@ const memberSchema = new Schema(
     addressUpdateVerifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      default: null,
+    },
+    addressUpdateRejectionReason: {
+      type: String,
       default: null,
     },
     registrationSource: {

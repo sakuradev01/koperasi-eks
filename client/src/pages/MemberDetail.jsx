@@ -81,6 +81,8 @@ const MemberDetail = () => {
     onConfirm: () => {},
   });
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   useEffect(() => {
     if (uuid) {
@@ -141,6 +143,33 @@ const MemberDetail = () => {
         }
       },
     });
+  };
+
+  const handleRejectAddress = () => {
+    setShowRejectDialog(true);
+    setRejectReason("");
+  };
+
+  const handleConfirmReject = async () => {
+    if (!rejectReason.trim()) {
+      toast.error("Alasan penolakan wajib diisi");
+      return;
+    }
+    setConfirmLoading(true);
+    try {
+      const res = await api.patch(`/api/admin/members/${member.uuid}/address/reject`, {
+        rejectionReason: rejectReason.trim(),
+      });
+      if (res.data.success) {
+        toast.success("Perubahan alamat berhasil ditolak");
+        setShowRejectDialog(false);
+        fetchMemberDetail();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Gagal menolak alamat");
+    } finally {
+      setConfirmLoading(false);
+    }
   };
 
   const fetchMemberSavings = async () => {
@@ -1629,13 +1658,52 @@ const MemberDetail = () => {
                 </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={handleApproveAddress}
-              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-semibold text-sm whitespace-nowrap"
-            >
-              Verifikasi Alamat
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleRejectAddress}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold text-sm whitespace-nowrap"
+              >
+                ✕ Tolak
+              </button>
+              <button
+                type="button"
+                onClick={handleApproveAddress}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-semibold text-sm whitespace-nowrap"
+              >
+                ✓ Verifikasi Alamat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRejectDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Tolak Perubahan Alamat</h3>
+            <p className="text-sm text-gray-600 mb-4">Berikan alasan penolakan agar student bisa memperbaiki alamatnya.</p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Contoh: Alamat tidak lengkap, RT/RW kurang..."
+              className="w-full border border-gray-300 rounded-lg p-3 text-sm min-h-[100px] resize-y"
+            />
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => setShowRejectDialog(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium text-sm"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleConfirmReject}
+                disabled={confirmLoading}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm disabled:opacity-50"
+              >
+                {confirmLoading ? "Memproses..." : "Ya, Tolak"}
+              </button>
+            </div>
           </div>
         </div>
       )}

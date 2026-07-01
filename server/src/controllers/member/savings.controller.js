@@ -107,12 +107,14 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
       });
     }
 
-    if ((member.addressUpdateStatus || "none") === "pending") {
+    if (["pending", "rejected"].includes(member.addressUpdateStatus || "none")) {
       await discardUploadedProof(req.file);
       return res.status(409).json({
         success: false,
-        code: "ADDRESS_PENDING_VERIFICATION",
-        message: "Alamat terbaru sedang menunggu verifikasi admin. Upload pembayaran aktif kembali setelah disetujui.",
+        code: member.addressUpdateStatus === "rejected" ? "ADDRESS_REJECTED" : "ADDRESS_PENDING_VERIFICATION",
+        message: member.addressUpdateStatus === "rejected"
+          ? `Alamat ditolak: ${member.addressUpdateRejectionReason || "Silakan perbaiki dan kirim ulang."}`
+          : "Alamat terbaru sedang menunggu verifikasi admin. Upload pembayaran aktif kembali setelah disetujui.",
       });
     }
 

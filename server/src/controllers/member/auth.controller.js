@@ -16,10 +16,11 @@ const getAddressState = (member) => ({
   addressUpdateStatus: member.addressUpdateStatus || "none",
   addressUpdateRequestedAt: member.addressUpdateRequestedAt || null,
   addressUpdateVerifiedAt: member.addressUpdateVerifiedAt || null,
+  addressUpdateRejectionReason: member.addressUpdateRejectionReason || null,
   requiresAddressCompletion:
     member.isVerified &&
     (isBlankAddress(member.completeAddress) ||
-      (member.addressUpdateStatus || "none") === "pending"),
+      ["pending", "rejected"].includes(member.addressUpdateStatus || "none")),
 });
 
 // Member Login - UUID based authentication

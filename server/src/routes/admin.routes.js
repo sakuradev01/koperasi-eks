@@ -26,6 +26,7 @@ import {
   verifyMember,
   unverifyMember,
   approveMemberAddress,
+  rejectMemberAddress,
   getPendingCount,
   migrateExistingMembers
 } from "../controllers/admin/member.controller.js";
@@ -133,6 +134,7 @@ router.patch("/members/:uuid/uncomplete", verifyToken, unmarkAsCompleted);
 router.patch("/members/:uuid/verify", verifyToken, verifyMember);
 router.patch("/members/:uuid/unverify", verifyToken, unverifyMember);
 router.patch("/members/:uuid/address/approve", verifyToken, approveMemberAddress);
+router.patch("/members/:uuid/address/reject", verifyToken, rejectMemberAddress);
 
 // Savings management routes
 router.get("/savings", verifyToken, getAllSavings);
