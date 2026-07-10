@@ -640,7 +640,7 @@ const rejectMemberAddress = asyncHandler(async (req, res) => {
 // Get pending verification count
 const getPendingCount = asyncHandler(async (req, res) => {
   const registrationPending = await Member.countDocuments({ isVerified: false });
-  const addressPending = await Member.countDocuments({ addressUpdateStatus: { $in: ["pending", "rejected"] } });
+  const addressPending = await Member.countDocuments({ addressUpdateStatus: "pending" });
   res.status(200).json({
     success: true,
     data: {

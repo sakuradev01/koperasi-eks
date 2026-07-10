@@ -1154,9 +1154,19 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
   else if (tag === "unpaid") query.status = { $nin: ["draft", "paid"] };
   if (statusFilter && !tag) query.status = statusFilter;
 
+  let dbSort = { issuedDate: -1, createdAt: -1 }; // Default urutan jika filter kosongan
+  
+  if (order === "due" || order === "duedate") {
+    dbSort = { dueDate: sortDirection, _id: -1 }; // _id memastikan urutan konsisten jika tanggal kembar
+  } else if (order === "issued" || order === "issueddate") {
+    dbSort = { issuedDate: sortDirection, _id: -1 };
+  } else if (order === "status") {
+    dbSort = { status: sortDirection, _id: -1 };
+  }
+
   const totalItems = await Invoice.countDocuments(query);
   const rawInvoices = await Invoice.find(query)
-    .sort({ issuedDate: -1, createdAt: -1 })
+    .sort(dbSort) // 👈 GANTI objek hardcode tadi menjadi variabel dbSort
     .skip((page - 1) * limit)
     .limit(limit)
     .lean();
