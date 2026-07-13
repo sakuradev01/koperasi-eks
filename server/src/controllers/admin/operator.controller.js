@@ -128,13 +128,19 @@ export const updateOperator = asyncHandler(async (req, res) => {
   }
 
   // Update permissions
+  // Mixed type needs a NEW object reference + markModified, otherwise
+  // Mongoose treats same-ref assign as "not modified" and skips persist.
   if (permissions && typeof permissions === "object") {
-    const currentPerms = operator.permissions || {};
+    const source = operator.permissions || {};
+    const currentPerms = {};
+    for (const [key, val] of Object.entries(source)) {
+      currentPerms[key] =
+        val && typeof val === "object" ? { ...val } : val;
+    }
     for (const [key, val] of Object.entries(permissions)) {
-      if (currentPerms[key]) {
+      if (currentPerms[key] && typeof currentPerms[key] === "object") {
         currentPerms[key] = { ...currentPerms[key], ...val };
       } else {
-        // Jika feature baru, merge dari default
         const defaultPerm = DEFAULT_OPERATOR_PERMISSIONS[key];
         currentPerms[key] = defaultPerm
           ? { ...defaultPerm, ...val }
@@ -142,6 +148,7 @@ export const updateOperator = asyncHandler(async (req, res) => {
       }
     }
     operator.permissions = currentPerms;
+    operator.markModified("permissions");
   }
 
   await operator.save();
