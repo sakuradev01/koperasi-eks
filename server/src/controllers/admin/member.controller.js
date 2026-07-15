@@ -651,6 +651,151 @@ const getPendingCount = asyncHandler(async (req, res) => {
   });
 });
 
+// Export members to Excel (TSV-as-XLS, batched savings aggregation)
+const exportMembersExcel = asyncHandler(async (req, res) => {
+  const { verified, addressUpdateStatus, isCompleted, productId, search } = req.query;
+  let filter = {};
+  if (verified === "true") filter.isVerified = true;
+  else if (verified === "false") filter.isVerified = false;
+  if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
+  if (isCompleted === "true") filter.isCompleted = true;
+  else if (isCompleted === "false") filter.isCompleted = false;
+  if (productId) filter.productId = productId;
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { uuid: { $regex: search, $options: "i" } },
+      { phone: { $regex: search, $options: "i" } },
+      { nik: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const members = await Member.find(filter)
+    .populate("user", "username email")
+    .populate("product", "title depositAmount")
+    .populate({
+      path: "currentUpgradeId",
+      populate: [{ path: "newProductId", select: "title" }],
+    })
+    .sort({ createdAt: -1 });
+
+  const memberIds = members.map((m) => m._id);
+  const savingsAgg = memberIds.length
+    ? await Savings.aggregate([
+        {
+          $match: {
+            memberId: { $in: memberIds },
+            type: "Setoran",
+            status: "Approved",
+          },
+        },
+        { $group: { _id: "$memberId", total: { $sum: "$amount" } } },
+      ])
+    : [];
+  const savingsMap = new Map(savingsAgg.map((s) => [String(s._id), s.total]));
+
+  const esc = (v) => String(v ?? "").replace(/[\t\n\r]+/g, " ").trim();
+  const fmt = (d) => {
+    if (!d) return "";
+    try {
+      return new Date(d).toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return String(d);
+    }
+  };
+  const fmtDateOnly = (d) => {
+    if (!d) return "";
+    try {
+      return new Date(d).toLocaleDateString("id-ID");
+    } catch {
+      return String(d);
+    }
+  };
+
+  const headers = [
+    "No",
+    "UUID",
+    "Nama Lengkap",
+    "Gender",
+    "Phone",
+    "Email",
+    "Tempat Lahir",
+    "Tanggal Lahir",
+    "NIK",
+    "Kota",
+    "Alamat Lengkap",
+    "No Rekening",
+    "Nama Bank",
+    "Atas Nama",
+    "Username",
+    "Sumber Registrasi",
+    "Produk",
+    "Upgrade Produk",
+    "Total Tabungan (IDR)",
+    "Status Verifikasi",
+    "Status Alamat",
+    "Alasan Tolak Alamat",
+    "Status Lunas",
+    "Tanggal Daftar",
+    "Mulai Tabungan",
+    "Tanggal Verifikasi",
+    "Tanggal Lunas",
+    "Tgl Update Alamat Diminta",
+    "Tgl Update Alamat Verifikasi",
+  ];
+
+  const rows = members.map((m, idx) => {
+    const total = savingsMap.get(String(m._id)) || 0;
+    return [
+      idx + 1,
+      m.uuid,
+      m.name,
+      m.gender,
+      m.phone,
+      m.email,
+      m.birthPlace,
+      fmtDateOnly(m.birthDate),
+      m.nik,
+      m.city,
+      m.completeAddress,
+      m.accountNumber,
+      m.bankName,
+      m.accountHolderName,
+      m.user?.username || "",
+      m.registrationSource,
+      m.product?.title || "",
+      m.currentUpgradeId?.newProductId?.title || (m.hasUpgraded ? "Ya" : ""),
+      total,
+      m.isVerified ? "Terverifikasi" : "Belum",
+      m.addressUpdateStatus,
+      m.addressUpdateRejectionReason || "",
+      m.isCompleted ? "Lunas" : "Belum Lunas",
+      fmt(m.createdAt),
+      fmt(m.savingsStartDate),
+      fmt(m.verifiedAt),
+      fmt(m.completedAt),
+      fmt(m.addressUpdateRequestedAt),
+      fmt(m.addressUpdateVerifiedAt),
+    ]
+      .map(esc)
+      .join("\t");
+  });
+
+  const tsv = "\uFEFF" + [headers.map(esc).join("\t"), ...rows].join("\n");
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `anggota_export_${dateStr}.xls`;
+
+  res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+  return res.status(200).send(tsv);
+});
+
 // Migration: set all existing members as verified
 const migrateExistingMembers = asyncHandler(async (req, res) => {
   const result = await Member.updateMany(
@@ -701,5 +846,6 @@ export {
   approveMemberAddress,
   rejectMemberAddress,
   getPendingCount,
+  exportMembersExcel,
   migrateExistingMembers,
 };

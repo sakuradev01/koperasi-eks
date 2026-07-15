@@ -51,6 +51,7 @@ const Members = () => {
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
   const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
+  const [exporting, setExporting] = useState(false);
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -79,7 +80,6 @@ const Members = () => {
     productId: "",
     savingsStartDate: "", // Tanggal mulai tabungan
   });
-
   useEffect(() => {
     // Read URL query param for filter
     const filterParam = searchParams.get("filter");
@@ -367,7 +367,6 @@ const Members = () => {
       },
     });
   };
-
   const handleAddNew = () => {
     setEditingMember(null);
     // 🔴 NEW: reset uuid juga
@@ -400,6 +399,43 @@ const Members = () => {
     setShowModal(true);
   };
 
+  const handleExportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterStatus === "completed") params.set("isCompleted", "true");
+      else if (filterStatus === "not_completed") params.set("isCompleted", "false");
+      if (filterVerification === "verified") params.set("verified", "true");
+      else if (filterVerification === "unverified") params.set("verified", "false");
+      else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
+      if (filterProduct) params.set("productId", filterProduct);
+      if (searchTerm) params.set("search", searchTerm);
+
+      // axios blob request via same instance (auth handled by interceptor)
+      const res = await api.get(`/api/admin/members/export?${params.toString()}`, {
+        responseType: "blob",
+      });
+
+      const blob = new Blob([res.data], { type: "application/vnd.ms-excel" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.download = `anggota_export_${dateStr}.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("📥 Export berhasil");
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Gagal export anggota");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const openAttachmentPreview = (item) => {
     if (!item?.value) return;
     setAttachmentPreview(item);
@@ -408,7 +444,6 @@ const Members = () => {
   const closeAttachmentPreview = () => {
     setAttachmentPreview(null);
   };
-
   // Search and filter logic with useMemo for performance
   const filteredMembers = useMemo(() => {
     let result = members;
@@ -531,12 +566,21 @@ const Members = () => {
         <h1 className="text-2xl sm:3xl font-bold text-gray-900">
           🌸 Manajemen Anggota
         </h1>
-        <button
-          onClick={handleAddNew}
-          className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
-        >
-          ➕ Tambah Anggota
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="bg-white border border-pink-200 text-pink-600 px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:bg-pink-50 transition-all duration-200 font-medium text-sm sm:text-base shadow-sm disabled:opacity-60"
+          >
+            {exporting ? "⏳ Export..." : "📊 Export Excel"}
+          </button>
+          <button
+            onClick={handleAddNew}
+            className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
+          >
+            ➕ Tambah Anggota
+          </button>
+        </div>
       </div>
 
       {/* Search & Filter Section */}

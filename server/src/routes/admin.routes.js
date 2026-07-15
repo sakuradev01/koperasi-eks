@@ -28,6 +28,7 @@ import {
   approveMemberAddress,
   rejectMemberAddress,
   getPendingCount,
+  exportMembersExcel,
   migrateExistingMembers
 } from "../controllers/admin/member.controller.js";
 import { 
@@ -120,8 +121,8 @@ router.post("/products", verifyToken, createProduct);
 router.put("/products/:id", verifyToken, updateProduct);
 router.delete("/products/:id", verifyToken, deleteProduct);
 router.patch("/products/:id/toggle-status", verifyToken, toggleProductStatus);
-
 // Member management routes
+router.get("/members/export", verifyToken, exportMembersExcel);
 router.get("/members", verifyToken, getAllMembers);
 router.get("/members/pending-count", verifyToken, getPendingCount);
 router.post("/members/migrate-verified", verifyToken, migrateExistingMembers);
