@@ -52,6 +52,9 @@ const Members = () => {
   const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [exporting, setExporting] = useState(false);
+  const [verifyMember, setVerifyMember] = useState(null);
+  const [verifyConfirmed, setVerifyConfirmed] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -320,7 +323,45 @@ const Members = () => {
     });
   };
 
+  const openVerifyPreview = (member) => {
+    setVerifyMember(member);
+    setVerifyConfirmed(false);
+  };
+
+  const closeVerifyPreview = () => {
+    setVerifyMember(null);
+    setVerifyConfirmed(false);
+    setVerifyLoading(false);
+  };
+
+  const handleDoVerify = async () => {
+    if (!verifyMember) return;
+    if (!verifyConfirmed) {
+      toast.error("Centang konfirmasi pemeriksaan terlebih dahulu");
+      return;
+    }
+    setVerifyLoading(true);
+    try {
+      const response = await api.patch(`/api/admin/members/${verifyMember.uuid}/verify`);
+      if (response.data.success) {
+        toast.success("✅ Anggota berhasil diverifikasi");
+        fetchMembers();
+        closeVerifyPreview();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Gagal memverifikasi anggota");
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
   const handleVerify = (uuid, memberName) => {
+    const m = members.find((x) => x.uuid === uuid);
+    if (m) {
+      openVerifyPreview(m);
+      return;
+    }
+    // fallback old behavior
     setConfirmDialog({
       isOpen: true,
       title: "Verifikasi Anggota",
@@ -843,10 +884,10 @@ const Members = () => {
                       </span>
                     ) : (
                       <button
-                        onClick={() => handleVerify(member.uuid, member.name)}
+                        onClick={() => openVerifyPreview(member)}
                         className="px-3 py-1 bg-blue-500 text-white rounded-full text-xs font-semibold hover:bg-blue-600 transition-colors"
                       >
-                        Verifikasi
+                        🔍 Preview & Verifikasi
                       </button>
                     )}
                     {member.registrationSource === "student_dashboard" && (
@@ -1356,7 +1397,157 @@ const Members = () => {
         </div>
       )}
 
-      {/* Confirm Dialog */}
+
+      {/* Verify Member Preview Modal */}
+      {verifyMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600">Verifikasi Anggota Baru</p>
+                <h3 className="mt-1 text-lg font-bold text-slate-900">🔍 Preview & Verifikasi — {verifyMember.name}</h3>
+                <p className="mt-1 text-xs text-slate-500 font-mono">{verifyMember.uuid} • {verifyMember.user?.username || "-"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVerifyPreview}
+                className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-white hover:text-slate-700"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+              {/* Info pribadi */}
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <h4 className="text-sm font-semibold text-slate-800 mb-3">👤 Data Pribadi</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-slate-500">Nama:</span> <span className="font-medium">{verifyMember.name || "-"}</span></div>
+                  <div><span className="text-slate-500">NIK:</span> <span className="font-mono">{verifyMember.nik || "-"}</span></div>
+                  <div><span className="text-slate-500">Gender:</span> {verifyMember.gender === 'L' ? '👨 Laki-laki' : verifyMember.gender === 'P' ? '👩 Perempuan' : '-'}</div>
+                  <div><span className="text-slate-500">Tempat Lahir:</span> {verifyMember.birthPlace || "-"}</div>
+                  <div><span className="text-slate-500">Tgl Lahir:</span> {verifyMember.birthDate ? new Date(verifyMember.birthDate).toLocaleDateString('id-ID') : "-"}</div>
+                  <div><span className="text-slate-500">Email:</span> {verifyMember.email || "-"}</div>
+                  <div><span className="text-slate-500">Phone:</span> {verifyMember.phone || "-"}</div>
+                  <div><span className="text-slate-500">Kota:</span> {verifyMember.city || "-"}</div>
+                  <div className="md:col-span-2"><span className="text-slate-500">Alamat:</span> <span>{verifyMember.completeAddress || "-"}</span></div>
+                </div>
+              </div>
+
+              {/* Info rekening & produk */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <h4 className="text-sm font-semibold text-slate-800 mb-3">🏦 Data Rekening & Akun</h4>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="text-slate-500">Bank:</span> <span className="font-medium">{verifyMember.bankName || "-"}</span></div>
+                    <div><span className="text-slate-500">No Rekening:</span> <span className="font-mono">{verifyMember.accountNumber || "-"}</span></div>
+                    <div><span className="text-slate-500">Atas Nama:</span> {verifyMember.accountHolderName || "-"}</div>
+                    <div><span className="text-slate-500">Username:</span> <span className="font-mono">{verifyMember.user?.username || "-"}</span></div>
+                    <div><span className="text-slate-500">Sumber:</span> <span className="px-2 py-0.5 rounded text-[11px] bg-indigo-50 text-indigo-700">{verifyMember.registrationSource || "-"}</span></div>
+                    <div><span className="text-slate-500">Tgl Daftar:</span> {verifyMember.createdAt ? new Date(verifyMember.createdAt).toLocaleString('id-ID') : "-"}</div>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <h4 className="text-sm font-semibold text-slate-800 mb-3">🌸 Produk & Status</h4>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="text-slate-500">Produk:</span> <span className="font-medium">{verifyMember.product?.title || "-"}</span></div>
+                    <div><span className="text-slate-500">Deposit:</span> {verifyMember.product?.depositAmount ? `Rp ${Number(verifyMember.product.depositAmount).toLocaleString('id-ID')}` : "-"}</div>
+                    <div><span className="text-slate-500">Total Tabungan:</span> <span className="font-semibold text-green-600">{verifyMember.totalSavings ? `Rp ${Number(verifyMember.totalSavings).toLocaleString('id-ID')}` : "Rp 0"}</span></div>
+                    <div><span className="text-slate-500">Status Lunas:</span> {verifyMember.isCompleted ? "✅ Lunas" : "⏳ Belum"}</div>
+                    <div><span className="text-slate-500">RIPL:</span> {verifyMember.riplVersion || "-"} {verifyMember.faceMatchScore != null ? `• Face ${verifyMember.faceMatchScore}%` : ""}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dokumen foto */}
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-slate-800">📸 Dokumen Verifikasi</h4>
+                  <span className="text-[11px] text-slate-500">Klik foto untuk preview besar</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[
+                    { key: 'ktpImage', label: 'Foto KTP', hint: 'Dokumen identitas' },
+                    { key: 'selfieImage', label: 'Selfie + KTP', hint: 'Wajah memegang KTP' },
+                    { key: 'livenessLeftImage', label: 'Liveness Kiri', hint: 'Menoleh kiri' },
+                    { key: 'livenessRightImage', label: 'Liveness Kanan', hint: 'Menoleh kanan' },
+                    { key: 'signatureImage', label: 'Tanda Tangan', hint: 'Digital signature' },
+                  ].map((doc) => {
+                    const val = verifyMember[doc.key];
+                    return (
+                      <div key={doc.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-slate-700">{doc.label}</p>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${val ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{val ? 'Ada' : 'Kosong'}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mb-2">{doc.hint}</p>
+                        {val ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachmentPreview({ label: doc.label, hint: doc.hint, value: val });
+                            }}
+                            className="block w-full group"
+                          >
+                            <img src={val} alt={doc.label} className="h-36 w-full rounded-lg border border-slate-200 object-cover group-hover:opacity-90" />
+                          </button>
+                        ) : (
+                          <div className="h-36 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-[11px] text-slate-400">Tidak ada foto</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {verifyMember.riplText && (
+                  <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <p className="text-[11px] font-semibold text-slate-600 mb-1">📋 Teks RIPL</p>
+                    <p className="text-xs text-slate-700 whitespace-pre-wrap leading-5">{verifyMember.riplText}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer with checkbox + actions */}
+            <div className="border-t border-slate-200 px-6 py-4 bg-slate-50 space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={verifyConfirmed}
+                  onChange={(e) => setVerifyConfirmed(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-700 group-hover:text-slate-900">
+                  Saya sudah memeriksa <span className="font-semibold">data pribadi, dokumen foto KTP/selfie/liveness, dan data rekening</span> anggota ini dengan teliti dan memastikan data benar.
+                </span>
+              </label>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeVerifyPreview}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-100 text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDoVerify}
+                  disabled={!verifyConfirmed || verifyLoading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold shadow"
+                >
+                  {verifyLoading ? "⏳ Memverifikasi..." : "✅ Verifikasi Anggota Ini"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+            {/* Confirm Dialog */}
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}
         onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
