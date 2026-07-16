@@ -9,63 +9,46 @@ import fs from "fs/promises";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
-// Get all members
+// Get all members — optimized: exclude heavy base64 images from list, single aggregate for savings
 const getAllMembers = asyncHandler(async (req, res) => {
   // Filter by verification status
-  const { verified, addressUpdateStatus } = req.query;
+  const { verified, addressUpdateStatus, isCompleted, productId } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
   else if (verified === "false") filter.isVerified = false;
-  if (addressUpdateStatus) {
-    filter.addressUpdateStatus = addressUpdateStatus;
-  }
+  if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
+  if (isCompleted === "true") filter.isCompleted = true;
+  else if (isCompleted === "false") filter.isCompleted = false;
+  if (productId) filter.productId = productId;
 
   const members = await Member.find(filter)
+    .select("-ktpImage -selfieImage -livenessLeftImage -livenessRightImage -signatureImage -riplText")
     .populate("user", "username email isActive")
     .populate("product", "title depositAmount termDuration returnProfit description")
     .populate({
       path: "currentUpgradeId",
       populate: [
         { path: "oldProductId", select: "title depositAmount" },
-        { path: "newProductId", select: "title depositAmount" }
-      ]
+        { path: "newProductId", select: "title depositAmount" },
+      ],
     })
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
-  // Calculate total savings for each member
-  const membersWithSavings = await Promise.all(
-    members.map(async (member) => {
-      // Method 1: Try to find by current member._id
-      let approvedSavings = await Savings.find({
-        memberId: member._id,
-        type: "Setoran",
-        status: "Approved",
-      });
+  // Batched savings total — single aggregate, no N+1
+  const memberIds = members.map((m) => m._id);
+  const savingsAgg = memberIds.length
+    ? await Savings.aggregate([
+        { $match: { memberId: { $in: memberIds }, type: "Setoran", status: "Approved" } },
+        { $group: { _id: "$memberId", total: { $sum: "$amount" } } },
+      ])
+    : [];
+  const savingsMap = new Map(savingsAgg.map((s) => [String(s._id), s.total]));
 
-      // Method 2: If no savings found, try to find by populating member and matching UUID
-      if (approvedSavings.length === 0) {
-        const allSavings = await Savings.find({
-          type: "Setoran",
-          status: "Approved"
-        }).populate('memberId', 'uuid name');
-        
-        approvedSavings = allSavings.filter(saving => 
-          saving.memberId && saving.memberId.uuid === member.uuid
-        );
-      }
-
-      // Calculate total using simple reduce
-      const totalSavings = approvedSavings.reduce(
-        (sum, saving) => sum + saving.amount,
-        0
-      );
-
-      return {
-        ...member.toObject(),
-        totalSavings: totalSavings,
-      };
-    })
-  );
+  const membersWithSavings = members.map((m) => ({
+    ...m,
+    totalSavings: savingsMap.get(String(m._id)) || 0,
+  }));
 
   res.status(200).json({
     success: true,
@@ -191,6 +174,7 @@ const createMember = asyncHandler(async (req, res) => {
     })();
 
   // Create member — admin-created members are auto-verified
+  // Keep image fields as sent (base64/URL/path) — same as before; list endpoint excludes them
   const member = new Member({
     name,
     gender,
@@ -671,13 +655,15 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
   }
 
   const members = await Member.find(filter)
+    .select("-ktpImage -selfieImage -livenessLeftImage -livenessRightImage -signatureImage -riplText")
     .populate("user", "username email")
     .populate("product", "title depositAmount")
     .populate({
       path: "currentUpgradeId",
       populate: [{ path: "newProductId", select: "title" }],
     })
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   const memberIds = members.map((m) => m._id);
   const savingsAgg = memberIds.length

@@ -1170,20 +1170,21 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
     .skip((page - 1) * limit)
     .limit(limit)
     .lean();
-  const hydrated = await Promise.all(
-    rawInvoices.map(async (invoice) => {
-      const serialized = await serializeInvoiceWithSplits(invoice);
-      return {
-        ...serialized,
-        status: computeInvoiceStatus(
-          serialized.status,
-          serialized.dueDate,
-          serialized.total,
-          serialized.totalPaid,
-        ),
-      };
-    }),
-  );
+  // List page only needs totals/status/customerSnapshot already on the invoice doc.
+  // Skip serializeInvoiceWithSplits (N TransactionSplit queries + N panel referral HTTP).
+  // Detail endpoints still use full serializeInvoiceWithSplits.
+  const hydrated = rawInvoices.map((invoice) => {
+    const serialized = serializeInvoice(invoice);
+    return {
+      ...serialized,
+      status: computeInvoiceStatus(
+        serialized.status,
+        serialized.dueDate,
+        serialized.total,
+        serialized.totalPaid,
+      ),
+    };
+  });
   const today = startOfDay(new Date());
 
   // dueState uses computed status — in-memory filter; may produce fewer items than limit

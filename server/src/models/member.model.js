@@ -212,6 +212,13 @@ memberSchema.virtual("currentUpgrade", {
   justOne: true,
 });
 
+// Indexes untuk filter yang sering dipakai di getAllMembers
+memberSchema.index({ isVerified: 1 });
+memberSchema.index({ isCompleted: 1 });
+memberSchema.index({ productId: 1 });
+memberSchema.index({ createdAt: -1 });
+// hasUpgraded & addressUpdateStatus already indexed above
+
 // Generate UUID sebelum disimpan
 memberSchema.pre("save", async function (next) {
   if (this.isNew && !this.uuid) {
@@ -221,5 +228,3 @@ memberSchema.pre("save", async function (next) {
   }
   next();
 });
-
-export const Member = mongoose.model("Member", memberSchema);
