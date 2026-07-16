@@ -444,7 +444,7 @@ const getOverduePayments = asyncHandler(async (req, res) => {
   const overdueLoans = await Loan.find({
     status: { $in: ["Active", "Overdue"] },
     nextDueDate: { $lt: today },
-  }).populate("memberId")
+  }).populate("memberId", "name uuid phone email")
     .populate("loanProductId");
 
   const overdueData = [];

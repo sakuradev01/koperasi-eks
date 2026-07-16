@@ -163,42 +163,20 @@ const Savings = () => {
   const fetchSavings = async () => {
     try {
       const token = localStorage.getItem("token");
-      // Fetch with higher limit to get all records
-      const response = await axios.get(`${API_URL}/api/admin/savings?limit=100&page=1`, {
+      // Single request (limit 500) — avoid multi-page fan-out that hammers API
+      // Summary totals still come from backend aggregate on all approved rows
+      const response = await axios.get(`${API_URL}/api/admin/savings?limit=500&page=1`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
-      let allSavings = [];
-      const firstPageData = response.data?.data?.savings || response.data?.savings || response.data?.data || response.data || [];
-      allSavings = Array.isArray(firstPageData) ? [...firstPageData] : [];
-      
-      // Check if there are more pages
-      const totalItems = response.data?.data?.pagination?.totalItems;
-      const totalPages = response.data?.data?.pagination?.totalPages;
-      
-      if (totalPages && totalPages > 1) {
-        // Fetch remaining pages
-        const pagePromises = [];
-        for (let page = 2; page <= totalPages; page++) {
-          pagePromises.push(
-            axios.get(`${API_URL}/api/admin/savings?limit=100&page=${page}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-          );
-        }
-        
-        const additionalResponses = await Promise.all(pagePromises);
-        additionalResponses.forEach(resp => {
-          const pageData = resp.data?.data?.savings || resp.data?.savings || resp.data?.data || resp.data || [];
-          if (Array.isArray(pageData)) {
-            allSavings.push(...pageData);
-          }
-        });
-      }
-      
-      setSavings(allSavings);
-      
-      // Set summary from backend response
+
+      const pageData =
+        response.data?.data?.savings ||
+        response.data?.savings ||
+        response.data?.data ||
+        response.data ||
+        [];
+      setSavings(Array.isArray(pageData) ? pageData : []);
+
       if (response.data?.data?.summary) {
         setSummary(response.data.data.summary);
       }

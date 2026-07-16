@@ -580,11 +580,28 @@ export const getSubmenusLegacy = async (req, res) => {
  */
 export const getAllCategories = async (req, res) => {
   try {
-    const categories = [];
-    const masters = await CoaMaster.find({ isActive: true }).sort({
-      masterName: 1,
-    });
+    // Batch read: 3 queries instead of nested N+1 finds
+    const [masters, submenus, accounts] = await Promise.all([
+      CoaMaster.find({ isActive: true }).sort({ masterName: 1 }).lean(),
+      CoaSubmenu.find({ isActive: true }).sort({ submenuName: 1 }).lean(),
+      CoaAccount.find({ isActive: true }).lean(),
+    ]);
 
+    const subsByMaster = new Map();
+    for (const sub of submenus) {
+      const key = String(sub.masterId);
+      if (!subsByMaster.has(key)) subsByMaster.set(key, []);
+      subsByMaster.get(key).push(sub);
+    }
+
+    const accsBySub = new Map();
+    for (const acc of accounts) {
+      const key = String(acc.submenuId);
+      if (!accsBySub.has(key)) accsBySub.set(key, []);
+      accsBySub.get(key).push(acc);
+    }
+
+    const categories = [];
     for (const master of masters) {
       categories.push({
         id: master._id,
@@ -592,21 +609,17 @@ export const getAllCategories = async (req, res) => {
         type: "master",
       });
 
-      const submenus = await CoaSubmenu.find({
-        masterId: master._id,
-        isActive: true,
-      }).sort({ submenuName: 1 });
-      for (const sub of submenus) {
+      for (const sub of subsByMaster.get(String(master._id)) || []) {
         categories.push({
           id: sub._id,
           name: sub.submenuName,
           type: "submenu",
         });
 
-        const accounts = sortAccountsByCode(
-          await CoaAccount.find({ submenuId: sub._id, isActive: true }),
+        const sortedAccs = sortAccountsByCode(
+          accsBySub.get(String(sub._id)) || [],
         );
-        for (const acc of accounts) {
+        for (const acc of sortedAccs) {
           categories.push({
             id: acc._id,
             name: acc.accountName,
@@ -639,12 +652,25 @@ export const getAssetsAccounts = async (req, res) => {
     const rawSubmenus = await CoaSubmenu.find({
       masterId: master._id,
       isActive: true,
-    });
+    }).lean();
     const submenus = sortSubmenus("Assets", rawSubmenus);
+    const submenuIds = submenus.map((s) => s._id);
+    const allAccounts = submenuIds.length
+      ? await CoaAccount.find({
+          submenuId: { $in: submenuIds },
+          isActive: true,
+        }).lean()
+      : [];
+    const accsBySub = new Map();
+    for (const acc of allAccounts) {
+      const key = String(acc.submenuId);
+      if (!accsBySub.has(key)) accsBySub.set(key, []);
+      accsBySub.get(key).push(acc);
+    }
     const grouped = {};
     for (const sub of submenus) {
       grouped[sub.submenuName] = sortAccountsByCode(
-        await CoaAccount.find({ submenuId: sub._id, isActive: true }),
+        accsBySub.get(String(sub._id)) || [],
       );
     }
 

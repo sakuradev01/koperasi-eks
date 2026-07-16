@@ -142,40 +142,92 @@ async function resolveCategoryName(categoryId, categoryType) {
 export const getTransactions = async (req, res) => {
   try {
     const { account } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const filter = {};
     if (account) filter.accountId = account;
 
-    const transactions = await AccountingTransaction.find(filter)
-      .populate("accountId", "accountName accountCode currency balance")
-      .populate("salesTaxId", "taxName abbreviation taxRate")
-      .populate("customerId", "name uuid email")
-      .sort({ transactionDate: -1, createdAt: -1 });
+    // List read: paginate + batch enrich (no per-row N+1)
+    const [totalItems, transactions] = await Promise.all([
+      AccountingTransaction.countDocuments(filter),
+      AccountingTransaction.find(filter)
+        .populate("accountId", "accountName accountCode currency balance")
+        .populate("salesTaxId", "taxName abbreviation taxRate")
+        .populate("customerId", "name uuid email")
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
 
-    // Enrich with category names and splits
-    const enriched = [];
-    for (const txn of transactions) {
-      const obj = txn.toObject();
-      obj.categoryName = await resolveCategoryName(obj.categoryId, obj.categoryType);
+    const txnIds = transactions.map((t) => t._id);
+    const splitTxnIds = transactions.filter((t) => t.isSplit).map((t) => t._id);
 
-      if (obj.isSplit) {
-        const splits = await TransactionSplit.find({ transactionId: obj._id });
-        const enrichedSplits = [];
-        for (const sp of splits) {
-          const spObj = sp.toObject();
-          spObj.categoryName = await resolveCategoryName(spObj.categoryId, spObj.categoryType);
-          enrichedSplits.push(spObj);
-        }
-        obj.splitCategories = enrichedSplits;
-      }
+    const [allSplits, reconItems, masters, submenus, accounts] = await Promise.all([
+      splitTxnIds.length
+        ? TransactionSplit.find({ transactionId: { $in: splitTxnIds } })
+            .sort({ createdAt: 1, _id: 1 })
+            .lean()
+        : [],
+      txnIds.length
+        ? BankReconciliationItem.find({
+            transactionId: { $in: txnIds },
+            isMatched: true,
+          })
+            .select("transactionId")
+            .lean()
+        : [],
+      CoaMaster.find({}).select("_id masterName").lean(),
+      CoaSubmenu.find({}).select("_id submenuName").lean(),
+      CoaAccount.find({}).select("_id accountName").lean(),
+    ]);
 
-      // Check if reconciled
-      const reconItem = await BankReconciliationItem.findOne({ transactionId: obj._id, isMatched: true });
-      obj.isReconciled = !!reconItem;
+    const masterMap = new Map(masters.map((m) => [String(m._id), m.masterName]));
+    const submenuMap = new Map(submenus.map((s) => [String(s._id), s.submenuName]));
+    const accountMap = new Map(accounts.map((a) => [String(a._id), a.accountName]));
+    const nameFor = (categoryId, categoryType) => {
+      if (!categoryId) return null;
+      const id = String(categoryId);
+      if (categoryType === "master") return masterMap.get(id) || null;
+      if (categoryType === "submenu") return submenuMap.get(id) || null;
+      if (categoryType === "account") return accountMap.get(id) || null;
+      return accountMap.get(id) || submenuMap.get(id) || masterMap.get(id) || null;
+    };
 
-      enriched.push(obj);
+    const splitsByTxn = new Map();
+    for (const sp of allSplits) {
+      const key = String(sp.transactionId);
+      if (!splitsByTxn.has(key)) splitsByTxn.set(key, []);
+      splitsByTxn.get(key).push({
+        ...sp,
+        categoryName: nameFor(sp.categoryId, sp.categoryType),
+      });
     }
 
-    res.status(200).json({ success: true, data: enriched });
+    const reconciledSet = new Set(
+      reconItems.map((r) => String(r.transactionId)),
+    );
+
+    const enriched = transactions.map((txn) => {
+      const obj = { ...txn };
+      obj.categoryName = nameFor(obj.categoryId, obj.categoryType);
+      obj.splitCategories = obj.isSplit
+        ? splitsByTxn.get(String(obj._id)) || []
+        : [];
+      obj.isReconciled = reconciledSet.has(String(obj._id));
+      return obj;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: enriched,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.max(Math.ceil(totalItems / limit), 1),
+        totalItems,
+        itemsPerPage: limit,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

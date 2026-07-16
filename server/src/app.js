@@ -23,14 +23,22 @@ app.use(express.urlencoded({ limit: BODY_LIMIT, extended: true }));
 app.use(
   cors({
     origin: [
-      "http://localhost:5173", 
+      "http://localhost:5173",
       "http://localhost:3000",
-      "http://localhost:8080",  // Added for CI4 to MERN webhook
+      "http://localhost:8080",
       "https://admin.samitcoop.com",
-      "https://student.samit.co.id"  // Student dashboard DOKU webhook
+      "https://student.samit.co.id",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+    ],
+    optionsSuccessStatus: 204,
   })
 );
 

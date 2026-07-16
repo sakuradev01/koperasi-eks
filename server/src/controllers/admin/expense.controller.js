@@ -314,7 +314,10 @@ export const getExpenseReport = async (req, res) => {
     const [lines, attachments] = await Promise.all([
       expenseIds.length ? ExpenseLine.find({ expenseId: { $in: expenseIds } }).select("expenseId").lean() : [],
       expenseIds.length
-        ? ExpenseAttachment.find({ expenseId: { $in: expenseIds } }).sort({ createdAt: 1, _id: 1 }).lean()
+        ? ExpenseAttachment.find({ expenseId: { $in: expenseIds } })
+            .select("_id expenseId originalName mimeType size createdAt")
+            .sort({ createdAt: 1, _id: 1 })
+            .lean()
         : [],
     ]);
 
