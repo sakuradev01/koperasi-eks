@@ -1282,6 +1282,227 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
   );
 });
 
+function formatDueAging(dueDate) {
+  if (!dueDate) return "-";
+  try {
+    const today = startOfDay(new Date());
+    const due = startOfDay(dueDate);
+    if (Number.isNaN(due.getTime())) return "-";
+    const days = dateDiffInDays(due, today);
+    if (days === 0) return "Due today";
+    const label = Math.abs(days) === 1 ? "day" : "days";
+    if (days > 0) return `In ${days} ${label}`;
+    return `${Math.abs(days)} ${label} ago`;
+  } catch {
+    return "-";
+  }
+}
+
+function formatExportDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function escTsv(value) {
+  return String(value ?? "")
+    .replace(/[\t\n\r]+/g, " ")
+    .trim();
+}
+
+function buildPublicInvoiceUrl(invoiceNumber) {
+  const base = String(
+    process.env.CLIENT_URL ||
+      process.env.FRONTEND_URL ||
+      "https://admin.samitcoop.com",
+  ).replace(/\/+$/, "");
+  return `${base}/public/invoice/${encodeURIComponent(invoiceNumber || "")}`;
+}
+
+/**
+ * Download All — same filters as list (search/status/tag/dates/order).
+ * Columns mirror samitbank Admin/report.php.
+ */
+export const exportAllInvoices = asyncHandler(async (req, res) => {
+  const search = normalizeString(req.query.search);
+  const memberId = normalizeString(req.query.memberId);
+  const statusFilter = normalizeString(req.query.status).toLowerCase();
+  const tag = normalizeString(req.query.tag || "unpaid").toLowerCase();
+  const issuedFrom = normalizeString(req.query.issuedFrom);
+  const issuedTo = normalizeString(req.query.issuedTo);
+  const dueFrom = normalizeString(req.query.dueFrom);
+  const dueTo = normalizeString(req.query.dueTo);
+  const dueState = normalizeString(req.query.dueState).toLowerCase();
+  const order = normalizeString(
+    req.query.order || req.query.sortBy,
+  ).toLowerCase();
+  const by = normalizeString(req.query.by || req.query.sortDir).toLowerCase();
+  const sortDirection = by === "asc" ? 1 : -1;
+
+  const query = {};
+  if (memberId && mongoose.Types.ObjectId.isValid(memberId)) {
+    query.memberId = memberId;
+  }
+  if (issuedFrom || issuedTo) {
+    query.issuedDate = {};
+    if (issuedFrom) query.issuedDate.$gte = startOfDay(issuedFrom);
+    if (issuedTo) query.issuedDate.$lte = endOfDay(issuedTo);
+  }
+  if (dueFrom || dueTo) {
+    query.dueDate = {};
+    if (dueFrom) query.dueDate.$gte = startOfDay(dueFrom);
+    if (dueTo) query.dueDate.$lte = endOfDay(dueTo);
+  }
+  if (search) {
+    const regex = new RegExp(
+      search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "i",
+    );
+    query.$or = [
+      { invoiceNumber: regex },
+      { salesCode: regex },
+      { "customerSnapshot.name": regex },
+      { "customerSnapshot.uuid": regex },
+    ];
+  }
+  // Exact mirror of getAllInvoices (same tag/status semantics as list page)
+  if (tag === "draft") query.status = "draft";
+  else if (tag === "unpaid") query.status = { $nin: ["draft", "paid"] };
+  if (statusFilter && !tag) query.status = statusFilter;
+
+  let dbSort = { issuedDate: -1, createdAt: -1 };
+  if (order === "due" || order === "duedate") {
+    dbSort = { dueDate: sortDirection, _id: -1 };
+  } else if (order === "issued" || order === "issueddate") {
+    dbSort = { issuedDate: sortDirection, _id: -1 };
+  } else if (order === "status") {
+    dbSort = { status: sortDirection, _id: -1 };
+  }
+
+  const rawInvoices = await Invoice.find(query).sort(dbSort).lean();
+  const hydrated = rawInvoices.map((invoice) => {
+    const serialized = serializeInvoice(invoice);
+    return {
+      ...serialized,
+      status: computeInvoiceStatus(
+        serialized.status,
+        serialized.dueDate,
+        serialized.total,
+        serialized.totalPaid,
+      ),
+    };
+  });
+
+  const today = startOfDay(new Date());
+  let filtered = dueState
+    ? hydrated.filter((invoice) => {
+        const dueDate = startOfDay(invoice.dueDate);
+        const daysUntilDue = dateDiffInDays(dueDate, today);
+        const isCollectible =
+          !["draft", "paid"].includes(invoice.status) &&
+          clampMoney(invoice.amountDue) > 0;
+        if (dueState === "overdue" && !(isCollectible && daysUntilDue < 0))
+          return false;
+        if (dueState === "due_today" && !(isCollectible && daysUntilDue === 0))
+          return false;
+        if (
+          dueState === "due_7" &&
+          !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 7)
+        )
+          return false;
+        if (
+          dueState === "due_30" &&
+          !(isCollectible && daysUntilDue >= 0 && daysUntilDue <= 30)
+        )
+          return false;
+        if (dueState === "not_due" && !(isCollectible && daysUntilDue > 0))
+          return false;
+        return true;
+      })
+    : hydrated;
+
+  const sortKeyMap = {
+    status: (invoice) =>
+      ({ draft: 1, sent: 2, partial: 3, overdue: 4, paid: 5 }[invoice.status] ||
+        99),
+    due: (invoice) => new Date(invoice.dueDate).getTime(),
+    duedate: (invoice) => new Date(invoice.dueDate).getTime(),
+    issued: (invoice) => new Date(invoice.issuedDate).getTime(),
+    issueddate: (invoice) => new Date(invoice.issuedDate).getTime(),
+  };
+  const sorter = sortKeyMap[order];
+  if (sorter) {
+    filtered = [...filtered].sort((left, right) => {
+      const leftValue = sorter(left);
+      const rightValue = sorter(right);
+      if (leftValue === rightValue) {
+        return String(left.invoiceNumber || "").localeCompare(
+          String(right.invoiceNumber || ""),
+        );
+      }
+      return leftValue > rightValue ? sortDirection : -sortDirection;
+    });
+  }
+
+  // samitbank report.php columns
+  const headers = [
+    "Customer",
+    "Reff",
+    "Invoice Number",
+    "Issued Date",
+    "Invoice Total",
+    "Invoice Paid",
+    "Invoice Due",
+    "Due Date",
+    "Status",
+    "Due Aging",
+    "Invoice",
+    "Notes",
+  ];
+
+  const rows = filtered.map((inv) => {
+    const customer = inv.customerSnapshot?.name || "";
+    const reff =
+      inv.salesCode ||
+      inv.customerSnapshot?.uuid ||
+      inv.customerSnapshot?.additionalTag ||
+      "";
+    const invoiceNumber = inv.invoiceNumber || "";
+    const invoiceUrl = buildPublicInvoiceUrl(invoiceNumber);
+    return [
+      customer,
+      reff,
+      invoiceUrl,
+      formatExportDate(inv.issuedDate),
+      inv.total ?? inv.subTotal ?? 0,
+      inv.totalPaid ?? 0,
+      inv.amountDue ?? Math.max((inv.total || 0) - (inv.totalPaid || 0), 0),
+      formatExportDate(inv.dueDate),
+      inv.status || "",
+      formatDueAging(inv.dueDate),
+      invoiceNumber,
+      inv.notes || "",
+    ]
+      .map(escTsv)
+      .join("\t");
+  });
+
+  const tsv = "\uFEFF" + [headers.map(escTsv).join("\t"), ...rows].join("\n");
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `all-invoice-report-${dateStr}.xls`;
+
+  res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`,
+  );
+  return res.status(200).send(tsv);
+});
+
 export const getInvoiceByNumber = asyncHandler(async (req, res) => {
   const invoiceNumber = String(req.params.invoiceNumber || "")
     .trim()

@@ -7,6 +7,7 @@ import {
   createInvoice,
   deleteInvoice,
   deleteInvoicePayment,
+  exportAllInvoices,
   getAllInvoices,
   getInvoiceByNumber,
   getInvoiceMeta,
@@ -54,6 +55,7 @@ const uploadPaymentAttachment = upload.fields([
 
 router.get("/meta", getInvoiceMeta);
 router.get("/validate-number", validateInvoiceNumber);
+router.get("/export", exportAllInvoices);
 router.get("/", getAllInvoices);
 router.get("/:invoiceNumber", getInvoiceByNumber);
 router.post("/", createInvoice);

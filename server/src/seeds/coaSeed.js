@@ -70,7 +70,7 @@ const submenuData = {
     { submenuName: "Loss On Foreign Exchange", submenuCode: "EXP-LFE", description: "Foreign exchange losses" },
   ],
   Equity: [
-    { submenuName: "Business Owner Contribution and Drawing", submenuCode: "EQU-BCD", description: "Owner investments and drawings" },
+    { submenuName: "Equity", submenuCode: "EQU-BCD", description: "Owner equity / investments and drawings" },
     { submenuName: "Retained Earnings: Profit", submenuCode: "EQU-REP", description: "Accumulated profits and losses" },
   ],
 };

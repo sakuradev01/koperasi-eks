@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getMembers } from "../../api/accountingApi.jsx";
-import { getInvoices } from "../../api/invoiceApi.jsx";
+import { exportInvoices, getInvoices } from "../../api/invoiceApi.jsx";
 import "./invoice.css";
 
 const formatMoney = (amount, currency = "IDR") => {
@@ -50,6 +50,7 @@ export default function Invoices() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [members, setMembers] = useState([]);
   const [payload, setPayload] = useState(null);
@@ -120,6 +121,53 @@ export default function Invoices() {
     setSearchParams({ tag: "unpaid", page: "1" });
   };
 
+  const handleDownloadAll = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setError("");
+    try {
+      // Same filters as list (search/status/tag/dates/order) — no page/limit
+      const params = {
+        search: filters.search || undefined,
+        memberId: filters.memberId || undefined,
+        status: filters.status || undefined,
+        issuedFrom: filters.issuedFrom || undefined,
+        issuedTo: filters.issuedTo || undefined,
+        dueFrom: filters.dueFrom || undefined,
+        dueTo: filters.dueTo || undefined,
+        dueState: filters.dueState || undefined,
+        order: filters.order || undefined,
+        by: filters.by || undefined,
+        tag: filters.tag || "unpaid",
+      };
+      Object.keys(params).forEach((key) => {
+        if (params[key] === undefined || params[key] === "") delete params[key];
+      });
+
+      const res = await exportInvoices(params);
+      const blob = new Blob([res.data], {
+        type: "application/vnd.ms-excel;charset=utf-8",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.download = `all-invoice-report-${dateStr}.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(
+        err?.response?.data?.message ||
+          err.message ||
+          "Gagal download invoice",
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const setSort = (column) => {
     const next = new URLSearchParams(searchParams);
     const nextDirection =
@@ -156,6 +204,15 @@ export default function Invoices() {
           </div>
         </div>
         <div className="inv-actions">
+          <button
+            type="button"
+            className="inv-btn-ghost"
+            onClick={handleDownloadAll}
+            disabled={exporting || loading}
+            title="Download semua invoice sesuai filter aktif (search/status/tag)"
+          >
+            {exporting ? "Downloading..." : "Download All"}
+          </button>
           <button
             type="button"
             className="inv-btn"

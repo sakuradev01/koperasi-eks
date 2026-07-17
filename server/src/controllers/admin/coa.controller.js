@@ -61,7 +61,7 @@ const SUBMENU_ORDER = {
     "Loss On Foreign Exchange",
   ],
   Equity: [
-    "Business Owner Contribution and Drawing",
+    "Equity",
     "Retained Earnings: Profit",
   ],
 };

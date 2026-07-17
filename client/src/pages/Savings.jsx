@@ -10,6 +10,7 @@ import { API_URL } from "../api/config";
 import { getAssetsAccounts, getAllCategories } from "../api/accountingApi";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import SearchableDropdown from "../components/SearchableDropdown.jsx";
 
 const downloadBlob = (blob, filename) => {
   const url = URL.createObjectURL(blob);
@@ -301,6 +302,52 @@ const Savings = () => {
     () => Object.values(assetsAccounts || {}).flatMap((items) => items || []),
     [assetsAccounts]
   );
+
+  // Master / submenu as non-selectable separators; accounts selectable + searchable
+  const categoryDropdownOptions = useMemo(() => {
+    const opts = [];
+    (categories || []).forEach((cat) => {
+      const type = cat.type || "account";
+      const rawName = String(cat.name || "").replace(/^-+\s*/, "").trim();
+      const code = cat.code ? ` (${cat.code})` : "";
+      const cid = cat.id || cat._id;
+      if (type === "master") {
+        opts.push({ label: rawName || "Master", disabled: true, indent: 0 });
+      } else if (type === "submenu") {
+        opts.push({
+          label: rawName || "Submenu",
+          disabled: true,
+          indent: 1,
+        });
+      } else {
+        opts.push({
+          value: `${type}|${cid}`,
+          label: `${rawName}${code}`,
+          indent: 2,
+        });
+      }
+    });
+    return opts;
+  }, [categories]);
+
+  const accountDropdownOptions = useMemo(() => {
+    const groups = [];
+    Object.entries(assetsAccounts || {}).forEach(([groupName, accounts]) => {
+      groups.push({
+        label: groupName,
+        items: (accounts || []).map((a) => {
+          const code = a.accountCode || a.account_code || "";
+          const name = a.accountName || a.account_name || "Account";
+          const id = a._id || a.id;
+          return {
+            value: String(id),
+            label: [code, name].filter(Boolean).join(" - "),
+          };
+        }),
+      });
+    });
+    return groups;
+  }, [assetsAccounts]);
 
   const selectFormCategory = (value) => {
     const [categoryType, categoryId] = (value || "|").split("|");
@@ -2081,25 +2128,17 @@ const Savings = () => {
                     <label className="block text-sm font-medium text-gray-700">
                       Record Account
                     </label>
-                    <select
-                      value={formData.accountId || ""}
-                      onChange={(e) =>
-                        setFormData({ ...formData, accountId: e.target.value })
-                      }
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="">Pilih akun pencatatan</option>
-                      {flatAssetAccounts.map((account) => {
-                        const code = account.accountCode || account.account_code || "";
-                        const name = account.accountName || account.account_name || "Account";
-                        const id = account._id || account.id;
-                        return (
-                          <option key={id} value={id}>
-                            {[code, name].filter(Boolean).join(" - ")}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="mt-1">
+                      <SearchableDropdown
+                        value={formData.accountId ? String(formData.accountId) : ""}
+                        onChange={(v) =>
+                          setFormData({ ...formData, accountId: v || "" })
+                        }
+                        options={accountDropdownOptions}
+                        grouped
+                        placeholder="Pilih akun pencatatan"
+                      />
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       Opsional saat buat/edit; wajib saat approve
                     </p>
@@ -2108,27 +2147,21 @@ const Savings = () => {
                     <label className="block text-sm font-medium text-gray-700">
                       Category
                     </label>
-                    <select
-                      value={
-                        formData.categoryId
-                          ? `${formData.categoryType || "account"}|${formData.categoryId}`
-                          : ""
-                      }
-                      onChange={(e) => selectFormCategory(e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="">Pilih kategori</option>
-                      {(categories || []).map((category) => {
-                        const type = category.type || "account";
-                        const code = category.code ? ` (${category.code})` : "";
-                        const cid = category.id || category._id;
-                        return (
-                          <option key={`${type}-${cid}`} value={`${type}|${cid}`}>
-                            {`${String(category.name || "").replace(/^-+\s*/, "")}${code}`}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="mt-1">
+                      <SearchableDropdown
+                        value={
+                          formData.categoryId
+                            ? `${formData.categoryType || "account"}|${formData.categoryId}`
+                            : ""
+                        }
+                        onChange={selectFormCategory}
+                        options={categoryDropdownOptions}
+                        placeholder="Pilih kategori (cari master/submenu/akun)"
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Master & submenu sebagai pemisah; pilih akun di bawahnya
+                    </p>
                   </div>
                 </div>
 
@@ -2374,57 +2407,39 @@ const Savings = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Record Account <span className="text-red-500">*</span>
                     </label>
-                    <select
-                      value={approveModal.accountId || ""}
-                      onChange={(e) =>
+                    <SearchableDropdown
+                      value={approveModal.accountId ? String(approveModal.accountId) : ""}
+                      onChange={(v) =>
                         setApproveModal((prev) => ({
                           ...prev,
-                          accountId: e.target.value,
+                          accountId: v || "",
                         }))
                       }
+                      options={accountDropdownOptions}
+                      grouped
                       disabled={approveLoading}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                    >
-                      <option value="">Pilih akun pencatatan</option>
-                      {flatAssetAccounts.map((account) => {
-                        const code = account.accountCode || account.account_code || "";
-                        const name = account.accountName || account.account_name || "Account";
-                        const id = account._id || account.id;
-                        return (
-                          <option key={id} value={id}>
-                            {[code, name].filter(Boolean).join(" - ")}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Pilih akun pencatatan"
+                    />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Category <span className="text-red-500">*</span>
                     </label>
-                    <select
+                    <SearchableDropdown
                       value={
                         approveModal.categoryId
                           ? `${approveModal.categoryType || "account"}|${approveModal.categoryId}`
                           : ""
                       }
-                      onChange={(e) => selectApproveCategory(e.target.value)}
+                      onChange={selectApproveCategory}
+                      options={categoryDropdownOptions}
                       disabled={approveLoading}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                    >
-                      <option value="">Pilih kategori</option>
-                      {(categories || []).map((category) => {
-                        const type = category.type || "account";
-                        const code = category.code ? ` (${category.code})` : "";
-                        const cid = category.id || category._id;
-                        return (
-                          <option key={`${type}-${cid}`} value={`${type}|${cid}`}>
-                            {`${String(category.name || "").replace(/^-+\s*/, "")}${code}`}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Pilih kategori (cari master/submenu/akun)"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Header = COA master / submenu (tidak bisa dipilih)
+                    </p>
                   </div>
 
                   <div>

@@ -26,6 +26,14 @@ export const getInvoices = async (params = {}) => {
   return response.data;
 };
 
+export const exportInvoices = async (params = {}) => {
+  const response = await api.get("/api/admin/invoices/export", {
+    params,
+    responseType: "blob",
+  });
+  return response;
+};
+
 export const getInvoice = async (invoiceNumber) => {
   const response = await api.get(
     `/api/admin/invoices/${encodeURIComponent(invoiceNumber)}`,
