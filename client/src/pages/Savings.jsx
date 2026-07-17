@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { format } from "date-fns";
@@ -7,6 +7,7 @@ import { toast } from "react-toastify";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import { API_URL } from "../api/config";
+import { getAssetsAccounts, getAllCategories } from "../api/accountingApi";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 
@@ -75,6 +76,9 @@ const Savings = () => {
     paymentType: "Full",
     notes: "",
     proofFile: null,
+    accountId: "",
+    categoryId: "",
+    categoryType: "",
   });
 
   const [lastPeriod, setLastPeriod] = useState(0);
@@ -114,6 +118,19 @@ const Savings = () => {
   // Proof modal state (view proof before action)
   const [showProofModal, setShowProofModal] = useState(false);
   const [selectedSaving, setSelectedSaving] = useState(null);
+
+  // COA options + approve modal (Record Account / Category)
+  const [assetsAccounts, setAssetsAccounts] = useState({});
+  const [categories, setCategories] = useState([]);
+  const [approveModal, setApproveModal] = useState({
+    open: false,
+    id: null,
+    accountId: "",
+    categoryId: "",
+    categoryType: "",
+    notes: "",
+  });
+  const [approveLoading, setApproveLoading] = useState(false);
 
   // Existing proof file state (for edit mode)
   const [existingProofFile, setExistingProofFile] = useState(null);
@@ -215,10 +232,30 @@ const Savings = () => {
     }
   };
 
+  const fetchAccountingOptions = async () => {
+    try {
+      const [accountsRes, categoriesRes] = await Promise.all([
+        getAssetsAccounts(),
+        getAllCategories(),
+      ]);
+      setAssetsAccounts(accountsRes?.data || {});
+      setCategories(categoriesRes?.data || []);
+    } catch {
+      // COA optional until approve; don't block savings page
+      setAssetsAccounts({});
+      setCategories([]);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchSavings(), fetchMembers(), fetchProducts()]);
+      await Promise.all([
+        fetchSavings(),
+        fetchMembers(),
+        fetchProducts(),
+        fetchAccountingOptions(),
+      ]);
       setLoading(false);
     };
     loadData();
@@ -258,6 +295,29 @@ const Savings = () => {
       currency: "IDR",
       minimumFractionDigits: 0,
     }).format(amount);
+  };
+
+  const flatAssetAccounts = useMemo(
+    () => Object.values(assetsAccounts || {}).flatMap((items) => items || []),
+    [assetsAccounts]
+  );
+
+  const selectFormCategory = (value) => {
+    const [categoryType, categoryId] = (value || "|").split("|");
+    setFormData((prev) => ({
+      ...prev,
+      categoryType: categoryType || "",
+      categoryId: categoryId || "",
+    }));
+  };
+
+  const selectApproveCategory = (value) => {
+    const [categoryType, categoryId] = (value || "|").split("|");
+    setApproveModal((prev) => ({
+      ...prev,
+      categoryType: categoryType || "",
+      categoryId: categoryId || "",
+    }));
   };
 
   // Auto-calc next installment period based on last saved period
@@ -504,6 +564,9 @@ const Savings = () => {
       paymentType: "Full",
       notes: "",
       proofFile: null,
+      accountId: "",
+      categoryId: "",
+      categoryType: "",
     });
     setLastPeriod(0);
     setOriginalSelection({ memberId: "", productId: "" });
@@ -550,30 +613,72 @@ const Savings = () => {
     });
   };
 
-  const handleApprove = (id) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: "Setujui Simpanan",
-      message: "Apakah Anda yakin ingin menyetujui simpanan ini?",
-      type: "success",
-      onConfirm: async () => {
-        setConfirmLoading(true);
-        try {
-          const token = localStorage.getItem("token");
-          await axios.patch(`${API_URL}/api/admin/savings/${id}/approve`, 
-            { notes: "" }, 
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          toast.success("✅ Simpanan berhasil disetujui");
-          fetchSavings();
-        } catch {
-          toast.error("Gagal menyetujui simpanan");
-        } finally {
-          setConfirmLoading(false);
-          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-        }
-      },
+  const handleApprove = (savingOrId) => {
+    const saving =
+      savingOrId && typeof savingOrId === "object"
+        ? savingOrId
+        : savings.find((s) => s._id === savingOrId) ||
+          (selectedSaving && selectedSaving._id === savingOrId ? selectedSaving : null);
+
+    const accountId =
+      saving?.accountId?._id || saving?.accountId || "";
+    const categoryId =
+      saving?.categoryId?._id || saving?.categoryId || "";
+    const categoryType = saving?.categoryType || "";
+
+    setApproveModal({
+      open: true,
+      id: saving?._id || savingOrId,
+      accountId: accountId ? String(accountId) : "",
+      categoryId: categoryId ? String(categoryId) : "",
+      categoryType: categoryType || "",
+      notes: "",
     });
+  };
+
+  const handleApproveSubmit = async () => {
+    if (!approveModal.id) return;
+    if (!approveModal.accountId) {
+      toast.error("Record Account wajib dipilih");
+      return;
+    }
+    if (!approveModal.categoryId || !approveModal.categoryType) {
+      toast.error("Category wajib dipilih");
+      return;
+    }
+
+    setApproveLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.patch(
+        `${API_URL}/api/admin/savings/${approveModal.id}/approve`,
+        {
+          notes: approveModal.notes || "",
+          accountId: approveModal.accountId,
+          categoryId: approveModal.categoryId,
+          categoryType: approveModal.categoryType,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success("✅ Simpanan berhasil disetujui");
+      setApproveModal({
+        open: false,
+        id: null,
+        accountId: "",
+        categoryId: "",
+        categoryType: "",
+        notes: "",
+      });
+      fetchSavings();
+    } catch (error) {
+      const msg =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        "Gagal menyetujui simpanan";
+      toast.error(msg);
+    } finally {
+      setApproveLoading(false);
+    }
   };
 
   // Open proof modal (view proof before action)
@@ -635,6 +740,9 @@ const Savings = () => {
       description: saving.description || "",
       status: saving.status || "Pending",
       proofFile: null,
+      accountId: saving.accountId?._id || saving.accountId || "",
+      categoryId: saving.categoryId?._id || saving.categoryId || "",
+      categoryType: saving.categoryType || "",
     });
     // Store existing proof file for preview
     setExistingProofFile(saving.proofFile || null);
@@ -1968,6 +2076,62 @@ const Savings = () => {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Record Account
+                    </label>
+                    <select
+                      value={formData.accountId || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, accountId: e.target.value })
+                      }
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    >
+                      <option value="">Pilih akun pencatatan</option>
+                      {flatAssetAccounts.map((account) => {
+                        const code = account.accountCode || account.account_code || "";
+                        const name = account.accountName || account.account_name || "Account";
+                        const id = account._id || account.id;
+                        return (
+                          <option key={id} value={id}>
+                            {[code, name].filter(Boolean).join(" - ")}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Opsional saat buat/edit; wajib saat approve
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Category
+                    </label>
+                    <select
+                      value={
+                        formData.categoryId
+                          ? `${formData.categoryType || "account"}|${formData.categoryId}`
+                          : ""
+                      }
+                      onChange={(e) => selectFormCategory(e.target.value)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    >
+                      <option value="">Pilih kategori</option>
+                      {(categories || []).map((category) => {
+                        const type = category.type || "account";
+                        const code = category.code ? ` (${category.code})` : "";
+                        const cid = category.id || category._id;
+                        return (
+                          <option key={`${type}-${cid}`} value={`${type}|${cid}`}>
+                            {`${String(category.name || "").replace(/^-+\s*/, "")}${code}`}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Keterangan
@@ -2180,6 +2344,156 @@ const Savings = () => {
         </div>
       )}
 
+      {/* Approve Modal — requires Record Account + Category */}
+      {approveModal.open && (
+        <div className="fixed inset-0 z-[9999] overflow-y-auto">
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+            onClick={() =>
+              !approveLoading &&
+              setApproveModal((prev) => ({ ...prev, open: false }))
+            }
+          />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="relative transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all w-full max-w-md">
+              <div className="p-6">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+                    <span className="text-3xl">✅</span>
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-center text-gray-900 mb-2">
+                  Setujui Simpanan
+                </h3>
+                <p className="text-center text-gray-600 mb-4">
+                  Pilih Record Account dan Category untuk jurnal akuntansi
+                </p>
+
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Record Account <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={approveModal.accountId || ""}
+                      onChange={(e) =>
+                        setApproveModal((prev) => ({
+                          ...prev,
+                          accountId: e.target.value,
+                        }))
+                      }
+                      disabled={approveLoading}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="">Pilih akun pencatatan</option>
+                      {flatAssetAccounts.map((account) => {
+                        const code = account.accountCode || account.account_code || "";
+                        const name = account.accountName || account.account_name || "Account";
+                        const id = account._id || account.id;
+                        return (
+                          <option key={id} value={id}>
+                            {[code, name].filter(Boolean).join(" - ")}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Category <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={
+                        approveModal.categoryId
+                          ? `${approveModal.categoryType || "account"}|${approveModal.categoryId}`
+                          : ""
+                      }
+                      onChange={(e) => selectApproveCategory(e.target.value)}
+                      disabled={approveLoading}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="">Pilih kategori</option>
+                      {(categories || []).map((category) => {
+                        const type = category.type || "account";
+                        const code = category.code ? ` (${category.code})` : "";
+                        const cid = category.id || category._id;
+                        return (
+                          <option key={`${type}-${cid}`} value={`${type}|${cid}`}>
+                            {`${String(category.name || "").replace(/^-+\s*/, "")}${code}`}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Catatan
+                    </label>
+                    <textarea
+                      value={approveModal.notes || ""}
+                      onChange={(e) =>
+                        setApproveModal((prev) => ({
+                          ...prev,
+                          notes: e.target.value,
+                        }))
+                      }
+                      rows={2}
+                      disabled={approveLoading}
+                      placeholder="Opsional"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setApproveModal({
+                        open: false,
+                        id: null,
+                        accountId: "",
+                        categoryId: "",
+                        categoryType: "",
+                        notes: "",
+                      })
+                    }
+                    disabled={approveLoading}
+                    className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApproveSubmit}
+                    disabled={
+                      approveLoading ||
+                      !approveModal.accountId ||
+                      !approveModal.categoryId
+                    }
+                    className="flex-1 px-4 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                  >
+                    {approveLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Loading...
+                      </span>
+                    ) : (
+                      "Ya, Setujui"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Proof Modal - View proof before action */}
       {showProofModal && selectedSaving && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -2271,7 +2585,7 @@ const Savings = () => {
                   <button
                     onClick={() => {
                       closeProofModal();
-                      handleApprove(selectedSaving._id);
+                      handleApprove(selectedSaving);
                     }}
                     className="px-6 py-2.5 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors flex items-center gap-2 shadow-md"
                   >

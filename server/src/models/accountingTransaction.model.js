@@ -21,6 +21,11 @@ const accountingTransactionSchema = new mongoose.Schema(
       ref: "Expense",
       default: null,
     },
+    savingsId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Savings",
+      default: null,
+    },
     transactionType: {
       type: String,
       enum: ["Deposit", "Withdrawal"],
@@ -120,6 +125,7 @@ accountingTransactionSchema.index({ accountId: 1, transactionDate: -1 });
 accountingTransactionSchema.index({ transactionDate: -1 });
 accountingTransactionSchema.index({ reviewed: 1 });
 accountingTransactionSchema.index({ expenseId: 1 }, { sparse: true });
+accountingTransactionSchema.index({ savingsId: 1 }, { sparse: true });
 accountingTransactionSchema.index({ invoiceNumber: 1 }, { sparse: true });
 accountingTransactionSchema.index({ invoiceProjectionId: 1 }, { sparse: true });
 

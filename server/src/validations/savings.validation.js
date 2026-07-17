@@ -100,6 +100,34 @@ const createSavingsSchema = Joi.object({
       "number.integer": "Urutan partial harus berupa bilangan bulat",
       "number.min": "Urutan partial minimal 1",
     }),
+  accountId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Account ID harus berupa hex string",
+    "string.length": "Account ID harus 24 karakter",
+  }),
+  categoryId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Category ID harus berupa hex string",
+    "string.length": "Category ID harus 24 karakter",
+  }),
+  categoryType: Joi.string()
+    .valid("master", "submenu", "account")
+    .optional()
+    .allow(null, "")
+    .messages({
+      "any.only": "Category type harus salah satu dari: master, submenu, account",
+    }),
+  isSplit: Joi.boolean().optional().messages({
+    "boolean.base": "isSplit harus berupa boolean",
+  }),
+  transactionId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Transaction ID harus berupa hex string",
+    "string.length": "Transaction ID harus 24 karakter",
+  }),
+  senderName: Joi.string().max(200).optional().allow("").messages({
+    "string.max": "Sender name maksimal 200 karakter",
+  }),
+  splits: Joi.alternatives()
+    .try(Joi.array().items(Joi.object().unknown(true)), Joi.string())
+    .optional(),
 });
 
 const updateSavingsSchema = Joi.object({
@@ -142,6 +170,37 @@ const updateSavingsSchema = Joi.object({
   description: Joi.string().max(500).optional().allow("").messages({
     "string.base": "Deskripsi harus berupa string",
     "string.max": "Deskripsi maksimal 500 karakter",
+  }),
+  accountId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Account ID harus berupa hex string",
+    "string.length": "Account ID harus 24 karakter",
+  }),
+  categoryId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Category ID harus berupa hex string",
+    "string.length": "Category ID harus 24 karakter",
+  }),
+  categoryType: Joi.string()
+    .valid("master", "submenu", "account")
+    .optional()
+    .allow(null, "")
+    .messages({
+      "any.only": "Category type harus salah satu dari: master, submenu, account",
+    }),
+  isSplit: Joi.boolean().optional().messages({
+    "boolean.base": "isSplit harus berupa boolean",
+  }),
+  transactionId: Joi.string().hex().length(24).optional().allow(null, "").messages({
+    "string.hex": "Transaction ID harus berupa hex string",
+    "string.length": "Transaction ID harus 24 karakter",
+  }),
+  senderName: Joi.string().max(200).optional().allow("").messages({
+    "string.max": "Sender name maksimal 200 karakter",
+  }),
+  splits: Joi.alternatives()
+    .try(Joi.array().items(Joi.object().unknown(true)), Joi.string())
+    .optional(),
+  notes: Joi.string().max(1000).optional().allow("").messages({
+    "string.max": "Catatan maksimal 1000 karakter",
   }),
 });
 

@@ -87,6 +87,29 @@ const savingsSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    accountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CoaAccount",
+      default: null,
+    },
+    categoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    categoryType: {
+      type: String,
+      enum: ["master", "submenu", "account", null],
+      default: null,
+    },
+    isSplit: {
+      type: Boolean,
+      default: false,
+    },
+    transactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AccountingTransaction",
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -115,6 +138,8 @@ savingsSchema.virtual("product", {
 savingsSchema.index({ memberId: 1, createdAt: -1 });
 savingsSchema.index({ productId: 1, createdAt: -1 });
 savingsSchema.index({ status: 1, createdAt: -1 });
+savingsSchema.index({ transactionId: 1 }, { sparse: true });
+savingsSchema.index({ accountId: 1 });
 
 // Pre-save hook untuk generate UUID
 savingsSchema.pre("save", async function (next) {

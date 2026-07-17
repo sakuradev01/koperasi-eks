@@ -11,6 +11,12 @@ import {
   updateSavingsSchema,
   querySavingsSchema,
 } from "../../validations/savings.validation.js";
+import {
+  resolveSavingsCoaInput,
+  syncSavingsAccountingTransaction,
+  reverseSavingsAccountingTransaction,
+  normalizeObjectId,
+} from "../../services/savingsAccounting.service.js";
 
 // Get all savings
 const getAllSavings = asyncHandler(async (req, res) => {
@@ -28,6 +34,7 @@ const getAllSavings = asyncHandler(async (req, res) => {
   const savings = await Savings.find(query)
     .populate("memberId", "name email phone")
     .populate("productId", "title depositAmount returnProfit termDuration")
+    .populate("accountId", "accountName accountCode")
     .sort({ createdAt: -1 })
     .limit(limit)
     .skip((page - 1) * limit);
@@ -125,6 +132,10 @@ const createSavings = asyncHandler(async (req, res) => {
     status,
     paymentType,
     notes,
+    accountId,
+    categoryId,
+    categoryType,
+    isSplit,
   } = value;
 
   // Validate member exists
@@ -184,6 +195,10 @@ const createSavings = asyncHandler(async (req, res) => {
     partialSequence: partialSequence,
     notes: notes || "",
     proofFile: req.file ? req.file.filename : null, // Only store filename, not full path
+    accountId: accountId || null,
+    categoryId: categoryId || null,
+    categoryType: categoryType || null,
+    isSplit: Boolean(isSplit),
   });
 
   await savings.save();
@@ -223,6 +238,12 @@ const updateSavings = asyncHandler(async (req, res) => {
 
   const updateData = { ...value };
 
+  // Empty strings for ObjectId fields → null
+  ["accountId", "categoryId", "transactionId"].forEach((key) => {
+    if (updateData[key] === "") updateData[key] = null;
+  });
+  if (updateData.categoryType === "") updateData.categoryType = null;
+
   // Handle file upload jika ada
   if (req.file) {
     updateData.proofFile = req.file.filename; // Only store filename, not full path (consistent with create)
@@ -256,7 +277,58 @@ const updateSavings = asyncHandler(async (req, res) => {
     }
   }
 
-  const savings = await Savings.findByIdAndUpdate(id, updateData, {
+  // Persist COA fields from body when present
+  const hasCoaBody =
+    req.body.accountId !== undefined ||
+    req.body.account_id !== undefined ||
+    req.body.categoryId !== undefined ||
+    req.body.category_id !== undefined ||
+    req.body.categoryType !== undefined ||
+    req.body.category_type !== undefined ||
+    req.body.isSplit !== undefined ||
+    req.body.splits !== undefined;
+
+  let resolvedCoa = null;
+  if (hasCoaBody) {
+    resolvedCoa = resolveSavingsCoaInput(
+      {
+        accountId: req.body.accountId ?? req.body.account_id ?? existingSaving.accountId,
+        categoryId:
+          req.body.categoryId ?? req.body.category_id ?? existingSaving.categoryId,
+        categoryType:
+          req.body.categoryType ??
+          req.body.category_type ??
+          existingSaving.categoryType,
+        isSplit: req.body.isSplit ?? existingSaving.isSplit,
+        splits: req.body.splits ?? req.body.split_data,
+        senderName: req.body.senderName ?? req.body.sender_name,
+      },
+      { requireAccount: false },
+    );
+    if (resolvedCoa.accountId) {
+      updateData.accountId = resolvedCoa.accountId;
+      updateData.categoryId = resolvedCoa.isSplit ? null : resolvedCoa.categoryId;
+      updateData.categoryType = resolvedCoa.isSplit
+        ? null
+        : resolvedCoa.categoryType;
+      updateData.isSplit = Boolean(resolvedCoa.isSplit);
+    }
+  }
+
+  const previousStatus = existingSaving.status;
+  const nextStatus = updateData.status || previousStatus;
+
+  // Leaving Approved → reverse journal
+  if (
+    previousStatus === "Approved" &&
+    nextStatus !== "Approved" &&
+    existingSaving.transactionId
+  ) {
+    await reverseSavingsAccountingTransaction(existingSaving);
+    updateData.transactionId = null;
+  }
+
+  let savings = await Savings.findByIdAndUpdate(id, updateData, {
     new: true,
     runValidators: true,
   })
@@ -265,6 +337,45 @@ const updateSavings = asyncHandler(async (req, res) => {
 
   if (!savings) {
     throw new ApiError(404, "Data simpanan tidak ditemukan");
+  }
+
+  // Approved with accountId → create/update linked AccountingTransaction
+  const accountIdForSync =
+    normalizeObjectId(savings.accountId) ||
+    (resolvedCoa && resolvedCoa.accountId) ||
+    null;
+
+  if (savings.status === "Approved" && accountIdForSync) {
+    const coaForSync =
+      resolvedCoa ||
+      resolveSavingsCoaInput(
+        {
+          accountId: savings.accountId,
+          categoryId: savings.categoryId,
+          categoryType: savings.categoryType,
+          isSplit: savings.isSplit,
+        },
+        { requireAccount: true },
+      );
+
+    const transaction = await syncSavingsAccountingTransaction(savings, coaForSync);
+    if (
+      !savings.transactionId ||
+      String(savings.transactionId) !== String(transaction._id)
+    ) {
+      savings.transactionId = transaction._id;
+      savings.accountId = coaForSync.accountId;
+      savings.categoryId = coaForSync.isSplit ? null : coaForSync.categoryId;
+      savings.categoryType = coaForSync.isSplit ? null : coaForSync.categoryType;
+      savings.isSplit = Boolean(coaForSync.isSplit);
+      await savings.save();
+    }
+
+    savings = await Savings.findById(savings._id)
+      .populate("memberId", "name email phone")
+      .populate("productId")
+      .populate("accountId", "accountName accountCode currency balance")
+      .populate("transactionId");
   }
 
   res
@@ -281,18 +392,23 @@ const deleteSavings = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Data simpanan tidak ditemukan");
   }
 
+  // Reverse linked accounting transaction if any
+  if (savings.transactionId || savings.status === "Approved") {
+    await reverseSavingsAccountingTransaction(savings);
+  }
+
   // Delete proof file if exists
   if (savings.proofFile) {
     try {
       const fs = await import("fs");
-      const filePath = resolveUploadedFilePath(savings.proofFile, { defaultSubdir: "simpanan" });
+      const filePath = resolveUploadedFilePath(savings.proofFile, {
+        defaultSubdir: "simpanan",
+      });
 
       if (filePath && fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        console.log(`File bukti deleted: ${filePath}`);
       }
     } catch (error) {
-      console.error("Error deleting proof file:", error);
       // Continue with deletion even if file removal fails
     }
   }
