@@ -72,6 +72,7 @@ const Members = () => {
   const [verifyMember, setVerifyMember] = useState(null);
   const [verifyConfirmed, setVerifyConfirmed] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyLoadingDetail, setVerifyLoadingDetail] = useState(false);
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -281,7 +282,7 @@ const Members = () => {
     }
   };
 
-  const handleEdit = (member) => {
+  const handleEdit = async (member) => {
     setEditingMember(member);
     setFormData({
       uuid: member.uuid,
@@ -309,9 +310,32 @@ const Members = () => {
       username: member.user?.username || "",
       password: "",
       productId: member.productId || "",
-      savingsStartDate: member.savingsStartDate ? member.savingsStartDate.split('T')[0] : "",
+      savingsStartDate: member.savingsStartDate ? member.savingsStartDate.split("T")[0] : "",
     });
     setShowModal(true);
+    // List API strips base64 docs for perf — reload full member for edit form images
+    try {
+      const res = await api.get(`/api/admin/members/${member.uuid}`);
+      if (res.data?.success && res.data.data) {
+        const full = res.data.data;
+        setEditingMember(full);
+        setFormData((prev) => ({
+          ...prev,
+          riplText: full.riplText || "",
+          riplVersion: full.riplVersion || "",
+          riplAgreedAt: full.riplAgreedAt || "",
+          signatureImage: full.signatureImage || "",
+          ktpImage: full.ktpImage || "",
+          selfieImage: full.selfieImage || "",
+          livenessLeftImage: full.livenessLeftImage || "",
+          livenessRightImage: full.livenessRightImage || "",
+          faceMatchScore: full.faceMatchScore ?? null,
+        }));
+      }
+    } catch (err) {
+      console.error("Load member detail for edit:", err);
+      toast.error("Gagal memuat foto/dokumen anggota (data teks tetap bisa diedit)");
+    }
   };
 
   const handleDelete = (uuid, memberName) => {
@@ -340,15 +364,29 @@ const Members = () => {
     });
   };
 
-  const openVerifyPreview = (member) => {
+  const openVerifyPreview = async (member) => {
     setVerifyMember(member);
     setVerifyConfirmed(false);
+    setVerifyLoadingDetail(true);
+    try {
+      // List intentionally omits ktp/selfie/liveness/signature/ripl — detail has full docs
+      const res = await api.get(`/api/admin/members/${member.uuid}`);
+      if (res.data?.success && res.data.data) {
+        setVerifyMember({ ...member, ...res.data.data, totalSavings: member.totalSavings });
+      }
+    } catch (err) {
+      console.error("Load member detail for verify:", err);
+      toast.error("Gagal memuat dokumen verifikasi — coba buka detail anggota");
+    } finally {
+      setVerifyLoadingDetail(false);
+    }
   };
 
   const closeVerifyPreview = () => {
     setVerifyMember(null);
     setVerifyConfirmed(false);
     setVerifyLoading(false);
+    setVerifyLoadingDetail(false);
   };
 
   const handleDoVerify = async () => {
@@ -1484,8 +1522,15 @@ const Members = () => {
               <div className="rounded-2xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-semibold text-slate-800">📸 Dokumen Verifikasi</h4>
-                  <span className="text-[11px] text-slate-500">Klik foto untuk preview besar</span>
+                  <span className="text-[11px] text-slate-500">
+                    {verifyLoadingDetail ? "Memuat dokumen..." : "Klik foto untuk preview besar"}
+                  </span>
                 </div>
+                {verifyLoadingDetail && (
+                  <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                    Mengambil KTP / selfie / liveness dari server...
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {[
                     { key: 'ktpImage', label: 'Foto KTP', hint: 'Dokumen identitas' },
@@ -1552,10 +1597,10 @@ const Members = () => {
                 <button
                   type="button"
                   onClick={handleDoVerify}
-                  disabled={!verifyConfirmed || verifyLoading}
+                  disabled={!verifyConfirmed || verifyLoading || verifyLoadingDetail}
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold shadow"
                 >
-                  {verifyLoading ? "⏳ Memverifikasi..." : "✅ Verifikasi Anggota Ini"}
+                  {verifyLoadingDetail ? "⏳ Memuat dokumen..." : verifyLoading ? "⏳ Memverifikasi..." : "✅ Verifikasi Anggota Ini"}
                 </button>
               </div>
             </div>
