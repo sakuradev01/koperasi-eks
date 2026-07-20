@@ -135,7 +135,7 @@ export default function SearchableDropdown({
         </svg>
       </button>
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl z-[10050] max-h-72 flex flex-col">
+        <div className="absolute left-0 top-full z-[10050] mt-1 flex max-h-72 w-full flex-col rounded-lg border border-gray-200 bg-white shadow-xl">
           <div className="p-2 border-b border-gray-100">
             <input
               ref={inputRef}

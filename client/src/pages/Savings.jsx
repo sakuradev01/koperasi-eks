@@ -233,18 +233,42 @@ const Savings = () => {
     }
   };
 
-  const fetchAccountingOptions = async () => {
+  const fetchAccountingOptions = async ({ silent = true } = {}) => {
     try {
       const [accountsRes, categoriesRes] = await Promise.all([
         getAssetsAccounts(),
         getAllCategories(),
       ]);
-      setAssetsAccounts(accountsRes?.data || {});
-      setCategories(categoriesRes?.data || []);
-    } catch {
-      // COA optional until approve; don't block savings page
+      const accountsData =
+        accountsRes?.data && typeof accountsRes.data === "object"
+          ? accountsRes.data
+          : {};
+      const categoriesData = Array.isArray(categoriesRes?.data)
+        ? categoriesRes.data
+        : Array.isArray(categoriesRes)
+          ? categoriesRes
+          : [];
+      setAssetsAccounts(accountsData);
+      setCategories(categoriesData);
+      const accountCount = Object.values(accountsData).reduce(
+        (n, items) => n + (Array.isArray(items) ? items.length : 0),
+        0
+      );
+      if (!silent && accountCount === 0 && categoriesData.length === 0) {
+        toast.warn("Data COA kosong — cek Chart of Accounts / permission");
+      }
+      return { accountCount, categoryCount: categoriesData.length };
+    } catch (err) {
+      console.error("fetchAccountingOptions", err);
       setAssetsAccounts({});
       setCategories([]);
+      if (!silent) {
+        toast.error(
+          err?.response?.data?.message ||
+            "Gagal memuat COA (Record Account / Category). Coba refresh."
+        );
+      }
+      return { accountCount: 0, categoryCount: 0 };
     }
   };
 
@@ -310,16 +334,21 @@ const Savings = () => {
       const type = cat.type || "account";
       const rawName = String(cat.name || "").replace(/^-+\s*/, "").trim();
       const code = cat.code ? ` (${cat.code})` : "";
-      const cid = cat.id || cat._id;
+      const cid = cat.id != null ? String(cat.id) : cat._id != null ? String(cat._id) : "";
       if (type === "master") {
-        opts.push({ label: rawName || "Master", disabled: true, indent: 0 });
+        opts.push({
+          label: rawName || "Master",
+          disabled: true,
+          indent: 0,
+          type: "header",
+        });
       } else if (type === "submenu") {
         opts.push({
           label: rawName || "Submenu",
           disabled: true,
           indent: 1,
         });
-      } else {
+      } else if (cid) {
         opts.push({
           value: `${type}|${cid}`,
           label: `${rawName}${code}`,
@@ -333,18 +362,21 @@ const Savings = () => {
   const accountDropdownOptions = useMemo(() => {
     const groups = [];
     Object.entries(assetsAccounts || {}).forEach(([groupName, accounts]) => {
-      groups.push({
-        label: groupName,
-        items: (accounts || []).map((a) => {
+      const items = (accounts || [])
+        .map((a) => {
           const code = a.accountCode || a.account_code || "";
           const name = a.accountName || a.account_name || "Account";
-          const id = a._id || a.id;
+          const id = a._id != null ? String(a._id) : a.id != null ? String(a.id) : "";
+          if (!id) return null;
           return {
-            value: String(id),
+            value: id,
             label: [code, name].filter(Boolean).join(" - "),
           };
-        }),
-      });
+        })
+        .filter(Boolean);
+      if (items.length > 0) {
+        groups.push({ label: groupName, items });
+      }
     });
     return groups;
   }, [assetsAccounts]);
@@ -660,7 +692,7 @@ const Savings = () => {
     });
   };
 
-  const handleApprove = (savingOrId) => {
+  const handleApprove = async (savingOrId) => {
     const saving =
       savingOrId && typeof savingOrId === "object"
         ? savingOrId
@@ -672,6 +704,15 @@ const Savings = () => {
     const categoryId =
       saving?.categoryId?._id || saving?.categoryId || "";
     const categoryType = saving?.categoryType || "";
+
+    // Re-load COA if empty (silent fail on page load left dropdown blank)
+    const hasAccounts = Object.values(assetsAccounts || {}).some(
+      (items) => Array.isArray(items) && items.length > 0
+    );
+    const hasCategories = Array.isArray(categories) && categories.length > 0;
+    if (!hasAccounts || !hasCategories) {
+      await fetchAccountingOptions({ silent: false });
+    }
 
     setApproveModal({
       open: true,
@@ -774,8 +815,10 @@ const Savings = () => {
 
 
   // Handle edit
-  const handleEdit = (saving) => {
+  const handleEdit = async (saving) => {
     setEditingId(saving._id);
+    const accountId = saving.accountId?._id || saving.accountId || "";
+    const categoryId = saving.categoryId?._id || saving.categoryId || "";
     setFormData({
       installmentPeriod: saving.installmentPeriod || 1,
       memberId: saving.memberId?._id || saving.memberId || "",
@@ -787,8 +830,8 @@ const Savings = () => {
       description: saving.description || "",
       status: saving.status || "Pending",
       proofFile: null,
-      accountId: saving.accountId?._id || saving.accountId || "",
-      categoryId: saving.categoryId?._id || saving.categoryId || "",
+      accountId: accountId ? String(accountId) : "",
+      categoryId: categoryId ? String(categoryId) : "",
       categoryType: saving.categoryType || "",
     });
     // Store existing proof file for preview
@@ -799,6 +842,14 @@ const Savings = () => {
     });
     setLastPeriod(0);
     setShowModal(true);
+
+    const hasAccounts = Object.values(assetsAccounts || {}).some(
+      (items) => Array.isArray(items) && items.length > 0
+    );
+    const hasCategories = Array.isArray(categories) && categories.length > 0;
+    if (!hasAccounts || !hasCategories) {
+      await fetchAccountingOptions({ silent: false });
+    }
   };
 
   // Get member name
@@ -1139,7 +1190,16 @@ const Savings = () => {
           </button>
           <button
             type="button"
-            onClick={() => setShowModal(true)}
+            onClick={async () => {
+              setShowModal(true);
+              const hasAccounts = Object.values(assetsAccounts || {}).some(
+                (items) => Array.isArray(items) && items.length > 0
+              );
+              const hasCategories = Array.isArray(categories) && categories.length > 0;
+              if (!hasAccounts || !hasCategories) {
+                await fetchAccountingOptions({ silent: false });
+              }
+            }}
             className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
           >
             ➕ Tambah Simpanan
@@ -2388,7 +2448,7 @@ const Savings = () => {
             }
           />
           <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all w-full max-w-md">
+            <div className="relative transform overflow-visible rounded-xl bg-white shadow-2xl transition-all w-full max-w-lg">
               <div className="p-6">
                 <div className="flex justify-center mb-4">
                   <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
