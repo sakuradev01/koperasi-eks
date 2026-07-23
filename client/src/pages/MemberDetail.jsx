@@ -523,49 +523,126 @@ const MemberDetail = () => {
     // Function to add header on each page
     const addHeader = (pageNum, totalPages) => {
       yPos = 20;
-      
+
       // Title
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.text("REKENING SIMPANAN", 20, yPos);
       yPos += 8;
-      
-      // Member info with border
-      const memberInfoStartY = yPos - 2;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text(member.name.toUpperCase(), 22, yPos);
-      yPos += 5;
-      doc.setFont("helvetica", "normal");
-      const address = member.completeAddress && member.completeAddress.trim() !== '-' ? member.completeAddress : "ALAMAT TIDAK TERSEDIA";
-      doc.text(address, 22, yPos);
-      yPos += 5;
-      const phoneNum = member.phone && member.phone.trim() !== '-' ? member.phone : "TELEPON TIDAK TERSEDIA";
-      doc.text(phoneNum, 22, yPos);
-      yPos += 5;
-      doc.text("INDONESIA", 22, yPos);
-      yPos += 5;
-      
-      // Draw border around member info
-      doc.setLineWidth(0.8);
-      doc.setDrawColor(0, 0, 0); // Black color
-      doc.rect(20, memberInfoStartY - 3, 90, yPos - memberInfoStartY, 'S');
-      
-      // Account info on the right with border
-      const accountInfoStartY = 25;
+
+      // Two-column member/account header (fixed widths so text never collides)
+      const marginX = 20;
+      const gap = 4;
+      const leftBoxW = 95;
+      const rightBoxW = pageWidth - marginX * 2 - leftBoxW - gap; // ~71 on A4
+      const leftBoxX = marginX;
+      const rightBoxX = leftBoxX + leftBoxW + gap;
+      const leftPad = 2;
+      const rightPad = 2;
+      const leftTextW = leftBoxW - leftPad * 2;
+      const rightTextW = rightBoxW - rightPad * 2;
+      const headerTop = yPos - 2;
+      const lineH = 4.5;
+
+      const sanitizePdfText = (value, fallback = "-") => {
+        const raw = value == null ? "" : String(value);
+        // Drop control chars that garble Helvetica; keep printable + common punctuation
+        const cleaned = raw
+          .replace(/[\u0000-\u001F\u007F]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!cleaned || cleaned === "-") return fallback;
+        return cleaned;
+      };
+
+      // --- Left column: name, address (wrapped), phone, country ---
       doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
-      const accNum = member.accountNumber && member.accountNumber.trim() !== '-' ? member.accountNumber : "REKENING TIDAK TERSEDIA";
-      doc.text(`NO. REKENING : ${accNum}`, pageWidth - 94, 28);
-      doc.text(`HALAMAN : ${pageNum} / ${totalPages}`, pageWidth - 94, 33);
-      doc.text(`PERIODE : ${currentMonth} ${currentYear}`, pageWidth - 94, 38);
-      doc.text("MATA UANG : IDR", pageWidth - 94, 43);
-      
-      // Draw border around account info
+      const nameLines = doc.splitTextToSize(
+        sanitizePdfText(member.name?.toUpperCase(), "NAMA TIDAK TERSEDIA"),
+        leftTextW
+      );
+
+      doc.setFont("helvetica", "normal");
+      const addressRaw =
+        member.completeAddress && String(member.completeAddress).trim() !== "-"
+          ? member.completeAddress
+          : member.address || "";
+      const addressLines = doc.splitTextToSize(
+        sanitizePdfText(addressRaw, "ALAMAT TIDAK TERSEDIA"),
+        leftTextW
+      );
+      const phoneLine = sanitizePdfText(member.phone, "TELEPON TIDAK TERSEDIA");
+      const countryLine = "INDONESIA";
+
+      let leftY = headerTop + 5;
+      doc.setFont("helvetica", "bold");
+      nameLines.forEach((line) => {
+        doc.text(line, leftBoxX + leftPad, leftY);
+        leftY += lineH;
+      });
+      doc.setFont("helvetica", "normal");
+      addressLines.forEach((line) => {
+        doc.text(line, leftBoxX + leftPad, leftY);
+        leftY += lineH;
+      });
+      doc.text(phoneLine, leftBoxX + leftPad, leftY);
+      leftY += lineH;
+      doc.text(countryLine, leftBoxX + leftPad, leftY);
+      leftY += 3;
+
+      // --- Right column: rekening / halaman / periode / mata uang ---
+      doc.setFontSize(8);
+      const accNum = sanitizePdfText(
+        member.accountNumber && String(member.accountNumber).trim() !== "-"
+          ? member.accountNumber
+          : null,
+        "TIDAK TERSEDIA"
+      );
+      const rightRows = [
+        { label: "NO. REKENING", value: accNum },
+        { label: "HALAMAN", value: `${pageNum} / ${totalPages}` },
+        { label: "PERIODE", value: `${currentMonth} ${currentYear}` },
+        { label: "MATA UANG", value: "IDR" },
+      ];
+
+      // Optional class/product if present (prod sometimes shows KELAS)
+      const kelasVal =
+        member.className ||
+        member.kelas ||
+        member.product?.name ||
+        member.productName ||
+        null;
+      if (kelasVal) {
+        rightRows.splice(1, 0, {
+          label: "KELAS",
+          value: sanitizePdfText(kelasVal, "-"),
+        });
+      }
+
+      let rightY = headerTop + 5;
+      const labelW = 28;
+      rightRows.forEach((row) => {
+        doc.setFont("helvetica", "bold");
+        doc.text(`${row.label} :`, rightBoxX + rightPad, rightY);
+        doc.setFont("helvetica", "normal");
+        const valueLines = doc.splitTextToSize(String(row.value), rightTextW - labelW);
+        valueLines.forEach((vLine, idx) => {
+          doc.text(vLine, rightBoxX + rightPad + labelW, rightY + idx * lineH);
+        });
+        rightY += Math.max(lineH, valueLines.length * lineH);
+      });
+
+      const boxBottom = Math.max(leftY, rightY) + 2;
+      const boxH = Math.max(22, boxBottom - headerTop);
+
       doc.setLineWidth(0.8);
-      doc.rect(pageWidth - 96, accountInfoStartY - 2, 76, 22, 'S');
-      
-      yPos += 5;
+      doc.setDrawColor(0, 0, 0);
+      doc.rect(leftBoxX, headerTop - 3, leftBoxW, boxH, "S");
+      doc.rect(rightBoxX, headerTop - 3, rightBoxW, boxH, "S");
+
+      yPos = headerTop - 3 + boxH + 5;
+
       
       // Notes with 2 column layout and border
       const notesStartY = yPos;
@@ -599,10 +676,10 @@ const MemberDetail = () => {
       // Use splitTextToSize for automatic text wrapping
       const leftLines = doc.splitTextToSize(leftNoteText, textWidth);
       
-      let leftY = notesStartY + 11;
+      let notesLeftY = notesStartY + 11;
       leftLines.forEach(line => {
-        doc.text(line, leftColumnX, leftY);
-        leftY += 3.5;
+        doc.text(line, leftColumnX, notesLeftY);
+        notesLeftY += 3.5;
       });
       
       // Right column note (50% width)
@@ -611,10 +688,10 @@ const MemberDetail = () => {
       // Use splitTextToSize for automatic text wrapping
       const rightLines = doc.splitTextToSize(rightNoteText, textWidth);
       
-      let rightY = notesStartY + 11;
+      let notesRightY = notesStartY + 11;
       rightLines.forEach(line => {
-        doc.text(line, rightColumnX, rightY);
-        rightY += 3.5;
+        doc.text(line, rightColumnX, notesRightY);
+        notesRightY += 3.5;
       });
       
       // Draw vertical line between columns
@@ -743,12 +820,12 @@ const MemberDetail = () => {
     
     doc.text("MUTASI CR :", 20, yPos);
     doc.text(formatCurrency(totalCredit).replace("Rp", "").trim(), 80, yPos, { align: "right" });
-    doc.text(transactions.filter(t => !t.isDebit).length.toString(), 95, yPos);
+    doc.text(`(${transactions.filter(t => !t.isDebit).length} trx)`, 100, yPos);
     yPos += 5;
     
     doc.text("MUTASI DB :", 20, yPos);
     doc.text(formatCurrency(totalDebit).replace("Rp", "").trim(), 80, yPos, { align: "right" });
-    doc.text(transactions.filter(t => t.isDebit).length.toString(), 95, yPos);
+    doc.text(`(${transactions.filter(t => t.isDebit).length} trx)`, 100, yPos);
     yPos += 5;
     
     doc.text("SALDO AKHIR :", 20, yPos);
