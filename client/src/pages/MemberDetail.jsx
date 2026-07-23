@@ -86,33 +86,48 @@ const MemberDetail = () => {
 
   useEffect(() => {
     if (uuid) {
+      // Avoid showing previous anggota saldo/lampiran while new uuid loads
+      setMember(null);
+      setSavings([]);
+      setLoans([]);
+      setDanaDaruratApps([]);
+      setError("");
+      // Full member doc (KTP/selfie/liveness/signature) — list API strips these for perf
       fetchMemberDetail();
-      fetchMemberSavings();
       fetchProducts();
       fetchLoanProducts();
+      // Savings need member._id — loaded in useEffect([member?._id]) below
     }
   }, [uuid]);
 
   useEffect(() => {
     if (member?._id) {
+      fetchMemberSavings();
       fetchMemberLoans();
       fetchDanaDarurat();
     }
-  }, [member]);
+  }, [member?._id]);
 
   const fetchMemberDetail = async () => {
     try {
-      const response = await api.get("/api/admin/members");
-      if (response.data.success) {
-        const foundMember = response.data.data.find(m => m.uuid === uuid);
-        if (foundMember) {
-          setMember(foundMember);
-        } else {
-          setError("Anggota tidak ditemukan");
-        }
+      setLoading(true);
+      setError("");
+      // GET by uuid returns full docs; GET list omits ktp/selfie/liveness/signature/riplText
+      const response = await api.get(`/api/admin/members/${uuid}`);
+      if (response.data.success && response.data.data) {
+        setMember(response.data.data);
+      } else {
+        setError("Anggota tidak ditemukan");
+        setMember(null);
       }
     } catch (err) {
-      setError("Gagal memuat data anggota");
+      const status = err.response?.status;
+      setError(
+        status === 404
+          ? "Anggota tidak ditemukan"
+          : "Gagal memuat data anggota"
+      );
+      setMember(null);
       console.error("Member fetch error:", err);
     } finally {
       setLoading(false);
@@ -421,12 +436,7 @@ const MemberDetail = () => {
     setUpgradeCalculation(null);
   };
 
-  // Re-fetch savings when member data is loaded
-  useEffect(() => {
-    if (member) {
-      fetchMemberSavings();
-    }
-  }, [member]);
+
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("id-ID", {
