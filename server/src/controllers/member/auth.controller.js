@@ -279,6 +279,21 @@ export const updateMemberIdentity = asyncHandler(async (req, res) => {
       `${prefix}-sign`
     );
   }
+  // If disk write failed, util may return original data-URL — never put that in Mongo (16MB BSON).
+  const storedIdentity = [
+    member.ktpImage,
+    member.selfieImage,
+    member.livenessLeftImage,
+    member.livenessRightImage,
+  ];
+  if (storedIdentity.some((v) => String(v || "").startsWith("data:"))) {
+    return res.status(500).json({
+      success: false,
+      code: "IDENTITY_STORAGE_FAILED",
+      message:
+        "Gagal menyimpan foto ke server. Coba lagi atau unggah foto yang lebih kecil.",
+    });
+  }
   if (faceMatchScore !== undefined && faceMatchScore !== null && faceMatchScore !== "") {
     const score = Number(faceMatchScore);
     member.faceMatchScore = Number.isFinite(score) ? score : member.faceMatchScore;
