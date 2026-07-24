@@ -14,6 +14,7 @@ const Topbar = ({ setSidebarOpen }) => {
   // Notification state
   const [pendingMembers, setPendingMembers] = useState([]);
   const [pendingAddressMembers, setPendingAddressMembers] = useState([]);
+  const [pendingIdentityMembers, setPendingIdentityMembers] = useState([]);
   const [pendingSavings, setPendingSavings] = useState([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [readNotifIds, setReadNotifIds] = useState(() => {
@@ -53,6 +54,21 @@ const Topbar = ({ setSidebarOpen }) => {
     }
   };
 
+  const fetchPendingIdentityMembers = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${API_URL}/api/admin/members?identityVerifyStatus=pending`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.data.success) {
+        const members = Array.isArray(response.data.data) ? response.data.data : [];
+        setPendingIdentityMembers(members);
+      }
+    } catch (err) {
+      console.error("Failed to fetch pending identity verifications:", err);
+    }
+  };
+
   // Fetch pending savings as notifications
   const fetchPendingSavings = async () => {
     try {
@@ -72,10 +88,12 @@ const Topbar = ({ setSidebarOpen }) => {
   useEffect(() => {
     fetchPendingMembers();
     fetchPendingAddressMembers();
+    fetchPendingIdentityMembers();
     fetchPendingSavings();
     const interval = setInterval(() => {
       fetchPendingMembers();
       fetchPendingAddressMembers();
+      fetchPendingIdentityMembers();
       fetchPendingSavings();
     }, 30000);
     return () => clearInterval(interval);
@@ -92,10 +110,11 @@ const Topbar = ({ setSidebarOpen }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Combined notifications: members first, then savings
+  // Combined notifications: members, address, identity, then savings
   const allNotifications = [
     ...pendingMembers.map(m => ({ ...m, _notifType: "member" })),
     ...pendingAddressMembers.map(m => ({ ...m, _notifType: "address" })),
+    ...pendingIdentityMembers.map(m => ({ ...m, _notifType: "identity" })),
     ...pendingSavings.map(s => ({ ...s, _notifType: "savings" })),
   ];
 
@@ -112,6 +131,8 @@ const Topbar = ({ setSidebarOpen }) => {
       navigate(`/master/anggota?filter=unverified`);
     } else if (notif._notifType === "address") {
       navigate(`/master/anggota?filter=address-pending`);
+    } else if (notif._notifType === "identity") {
+      navigate(`/master/anggota?filter=identity-pending`);
     } else {
       const memberId = notif.memberId?._id || notif.memberId;
       navigate(`/simpanan?member=${memberId}&status=Pending`);
@@ -210,6 +231,7 @@ const Topbar = ({ setSidebarOpen }) => {
                       const isRead = readNotifIds.includes(notif._id);
                       const isMember = notif._notifType === "member";
                       const isAddress = notif._notifType === "address";
+                      const isIdentity = notif._notifType === "identity";
                       return (
                         <div
                           key={`${notif._notifType}-${notif._id}`}
@@ -219,7 +241,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-blue-500" : isAddress ? "bg-orange-500" : "bg-pink-500") : "bg-gray-300"}`} />
+                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-blue-500" : isAddress ? "bg-orange-500" : isIdentity ? "bg-violet-500" : "bg-pink-500") : "bg-gray-300"}`} />
                             <div className="flex-1 min-w-0">
                               {isMember ? (
                                 <>
@@ -241,6 +263,16 @@ const Topbar = ({ setSidebarOpen }) => {
                                     UUID: {notif.uuid}
                                   </p>
                                 </>
+                              ) : isIdentity ? (
+                                <>
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {notif.name || "Unknown"}
+                                    <span className="text-gray-500 font-normal"> verifikasi wajah/KTP</span>
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    UUID: {notif.uuid} • Anggota lama
+                                  </p>
+                                </>
                               ) : (
                                 <>
                                   <p className="text-sm font-medium text-gray-900 truncate">
@@ -253,7 +285,7 @@ const Topbar = ({ setSidebarOpen }) => {
                                 </>
                               )}
                               <p className="text-xs text-gray-400 mt-1">
-                                {new Date(notif.createdAt).toLocaleDateString("id-ID", {
+                                {new Date(notif.createdAt || notif.identityVerifyRequestedAt || Date.now()).toLocaleDateString("id-ID", {
                                   day: "numeric",
                                   month: "short",
                                   hour: "2-digit",
@@ -266,9 +298,11 @@ const Topbar = ({ setSidebarOpen }) => {
                                 ? "bg-blue-100 text-blue-800"
                                 : isAddress
                                   ? "bg-orange-100 text-orange-800"
+                                  : isIdentity
+                                    ? "bg-violet-100 text-violet-800"
                                 : "bg-yellow-100 text-yellow-800"
                             }`}>
-                              {isMember ? "Baru" : isAddress ? "Alamat" : "Pending"}
+                              {isMember ? "Baru" : isAddress ? "Alamat" : isIdentity ? "Wajah" : "Pending"}
                             </span>
                           </div>
                         </div>
@@ -299,6 +333,17 @@ const Topbar = ({ setSidebarOpen }) => {
                         className="flex-1 text-center text-xs text-orange-600 hover:text-orange-800 py-1"
                       >
                         {pendingAddressMembers.length} alamat pending
+                      </button>
+                    )}
+                    {pendingIdentityMembers.length > 0 && (
+                      <button
+                        onClick={() => {
+                          navigate("/master/anggota?filter=identity-pending");
+                          setShowNotifDropdown(false);
+                        }}
+                        className="flex-1 text-center text-xs text-violet-600 hover:text-violet-800 py-1"
+                      >
+                        {pendingIdentityMembers.length} wajah pending
                       </button>
                     )}
                     {pendingSavings.length > 0 && (

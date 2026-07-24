@@ -27,6 +27,8 @@ import {
   unverifyMember,
   approveMemberAddress,
   rejectMemberAddress,
+  approveMemberIdentity,
+  rejectMemberIdentity,
   getPendingCount,
   exportMembersExcel,
   migrateExistingMembers
@@ -136,6 +138,8 @@ router.patch("/members/:uuid/verify", verifyToken, verifyMember);
 router.patch("/members/:uuid/unverify", verifyToken, unverifyMember);
 router.patch("/members/:uuid/address/approve", verifyToken, approveMemberAddress);
 router.patch("/members/:uuid/address/reject", verifyToken, rejectMemberAddress);
+router.patch("/members/:uuid/identity/approve", verifyToken, approveMemberIdentity);
+router.patch("/members/:uuid/identity/reject", verifyToken, rejectMemberIdentity);
 
 // Savings management routes
 router.get("/savings", verifyToken, getAllSavings);

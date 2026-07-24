@@ -12,11 +12,12 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 // Get all members — optimized: exclude heavy base64 images from list, single aggregate for savings
 const getAllMembers = asyncHandler(async (req, res) => {
   // Filter by verification status
-  const { verified, addressUpdateStatus, isCompleted, productId } = req.query;
+  const { verified, addressUpdateStatus, identityVerifyStatus, isCompleted, productId } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
   else if (verified === "false") filter.isVerified = false;
   if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
+  if (identityVerifyStatus) filter.identityVerifyStatus = identityVerifyStatus;
   if (isCompleted === "true") filter.isCompleted = true;
   else if (isCompleted === "false") filter.isCompleted = false;
   if (productId) filter.productId = productId;
@@ -621,16 +622,111 @@ const rejectMemberAddress = asyncHandler(async (req, res) => {
 
   res.status(200).json({ success: true, data: populatedMember, message: "Perubahan alamat berhasil ditolak" });
 });
+
+const hasIdentityDocs = (member) => {
+  return [
+    member?.ktpImage,
+    member?.selfieImage,
+    member?.livenessLeftImage,
+    member?.livenessRightImage,
+  ].every((v) => String(v || "").trim().length > 10);
+};
+
+// Approve identity docs for legacy members (KTP/selfie/liveness)
+const approveMemberIdentity = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+  const member = await Member.findOne({ uuid });
+
+  if (!member) {
+    return res.status(404).json({ success: false, message: "Member tidak ditemukan" });
+  }
+
+  if ((member.identityVerifyStatus || "none") !== "pending") {
+    return res.status(400).json({
+      success: false,
+      message: "Tidak ada verifikasi wajah yang menunggu persetujuan",
+    });
+  }
+
+  if (!hasIdentityDocs(member)) {
+    return res.status(400).json({
+      success: false,
+      message: "Dokumen KTP/selfie/liveness belum lengkap",
+    });
+  }
+
+  member.identityVerifyStatus = "approved";
+  member.identityVerifyVerifiedAt = new Date();
+  member.identityVerifyVerifiedBy = req.user._id;
+  member.identityVerifyRejectionReason = null;
+  await member.save();
+
+  const populatedMember = await Member.findById(member._id)
+    .populate("user", "username email isActive")
+    .populate("product", "title depositAmount termDuration returnProfit description");
+
+  res.status(200).json({
+    success: true,
+    data: populatedMember,
+    message: "Verifikasi wajah member berhasil disetujui",
+  });
+});
+
+// Reject identity verification with reason
+const rejectMemberIdentity = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+  const { rejectionReason } = req.body;
+  const member = await Member.findOne({ uuid });
+
+  if (!member) {
+    return res.status(404).json({ success: false, message: "Member tidak ditemukan" });
+  }
+
+  if ((member.identityVerifyStatus || "none") !== "pending") {
+    return res.status(400).json({
+      success: false,
+      message: "Tidak ada verifikasi wajah yang menunggu persetujuan",
+    });
+  }
+
+  if (!rejectionReason || !String(rejectionReason).trim()) {
+    return res.status(400).json({ success: false, message: "Alasan penolakan wajib diisi" });
+  }
+
+  member.identityVerifyStatus = "rejected";
+  member.identityVerifyRejectionReason = String(rejectionReason).trim();
+  member.identityVerifyVerifiedAt = new Date();
+  member.identityVerifyVerifiedBy = req.user._id;
+  // Clear images so student must re-upload
+  member.ktpImage = "";
+  member.selfieImage = "";
+  member.livenessLeftImage = "";
+  member.livenessRightImage = "";
+  await member.save();
+
+  const populatedMember = await Member.findById(member._id)
+    .populate("user", "username email isActive")
+    .populate("product", "title depositAmount termDuration returnProfit description");
+
+  res.status(200).json({
+    success: true,
+    data: populatedMember,
+    message: "Verifikasi wajah berhasil ditolak",
+  });
+});
+
 // Get pending verification count
 const getPendingCount = asyncHandler(async (req, res) => {
   const registrationPending = await Member.countDocuments({ isVerified: false });
   const addressPending = await Member.countDocuments({ addressUpdateStatus: "pending" });
+  const identityPending = await Member.countDocuments({ identityVerifyStatus: "pending" });
   res.status(200).json({
     success: true,
     data: {
-      count: registrationPending + addressPending,
+      count: registrationPending + addressPending + identityPending,
       registrationPending,
       addressPending,
+      identityPending,
     },
   });
 });
@@ -831,6 +927,8 @@ export {
   unverifyMember,
   approveMemberAddress,
   rejectMemberAddress,
+  approveMemberIdentity,
+  rejectMemberIdentity,
   getPendingCount,
   exportMembersExcel,
   migrateExistingMembers,

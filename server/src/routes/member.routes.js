@@ -5,6 +5,7 @@ import {
   getCurrentMember, 
   logoutMember,
   updateMemberAddress,
+  updateMemberIdentity,
 } from "../controllers/member/auth.controller.js";
 import { 
   getMemberSavings, 
@@ -72,7 +73,7 @@ router.post("/auth/login", loginMember);
 router.post("/auth/logout", verifyMemberToken, logoutMember);
 router.get("/auth/me", verifyMemberToken, getCurrentMember);
 router.patch("/profile/address", verifyMemberToken, updateMemberAddress);
-
+router.patch("/profile/identity", verifyMemberToken, updateMemberIdentity);
 // Savings routes
 router.get("/savings", verifyMemberToken, getMemberSavings);
 router.post("/savings", verifyMemberToken, upload.single("proofFile"), createMemberSaving);

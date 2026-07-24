@@ -83,6 +83,7 @@ const MemberDetail = () => {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [rejectKind, setRejectKind] = useState("address"); // address | identity
 
   useEffect(() => {
     if (uuid) {
@@ -161,6 +162,38 @@ const MemberDetail = () => {
   };
 
   const handleRejectAddress = () => {
+    setRejectKind("address");
+    setShowRejectDialog(true);
+    setRejectReason("");
+  };
+
+  const handleApproveIdentity = () => {
+    if (!member) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: "Verifikasi Wajah / KTP",
+      message: `Setujui dokumen verifikasi wajah untuk ${member.name}? Setelah disetujui, student bisa upload pembayaran simpanan.`,
+      type: "success",
+      onConfirm: async () => {
+        setConfirmLoading(true);
+        try {
+          const response = await api.patch(`/api/admin/members/${member.uuid}/identity/approve`);
+          if (response.data.success) {
+            toast.success("Verifikasi wajah member berhasil disetujui");
+            fetchMemberDetail();
+          }
+        } catch (err) {
+          toast.error(err.response?.data?.message || "Gagal menyetujui verifikasi wajah");
+        } finally {
+          setConfirmLoading(false);
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        }
+      },
+    });
+  };
+
+  const handleRejectIdentity = () => {
+    setRejectKind("identity");
     setShowRejectDialog(true);
     setRejectReason("");
   };
@@ -172,16 +205,29 @@ const MemberDetail = () => {
     }
     setConfirmLoading(true);
     try {
-      const res = await api.patch(`/api/admin/members/${member.uuid}/address/reject`, {
+      const path =
+        rejectKind === "identity"
+          ? `/api/admin/members/${member.uuid}/identity/reject`
+          : `/api/admin/members/${member.uuid}/address/reject`;
+      const res = await api.patch(path, {
         rejectionReason: rejectReason.trim(),
       });
       if (res.data.success) {
-        toast.success("Perubahan alamat berhasil ditolak");
+        toast.success(
+          rejectKind === "identity"
+            ? "Verifikasi wajah berhasil ditolak"
+            : "Perubahan alamat berhasil ditolak"
+        );
         setShowRejectDialog(false);
         fetchMemberDetail();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Gagal menolak alamat");
+      toast.error(
+        err.response?.data?.message ||
+          (rejectKind === "identity"
+            ? "Gagal menolak verifikasi wajah"
+            : "Gagal menolak alamat")
+      );
     } finally {
       setConfirmLoading(false);
     }
@@ -1765,11 +1811,56 @@ const MemberDetail = () => {
         </div>
       )}
 
+      {member.identityVerifyStatus === "pending" && (
+        <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-violet-900 mb-1">
+                🤳 Verifikasi wajah / KTP menunggu persetujuan
+              </h3>
+              <p className="text-sm text-violet-800">
+                Anggota lama mengirim KTP, selfie, dan liveness. Setujui agar upload pembayaran simpanan aktif.
+              </p>
+              {member.identityVerifyRequestedAt && (
+                <p className="text-xs text-violet-700 mt-2">
+                  Diajukan: {formatMemberDate(member.identityVerifyRequestedAt)}
+                </p>
+              )}
+              <p className="text-xs text-violet-700 mt-1">
+                Cek lampiran registrasi di bawah (KTP / selfie / liveness).
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleRejectIdentity}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold text-sm whitespace-nowrap"
+              >
+                ✕ Tolak
+              </button>
+              <button
+                type="button"
+                onClick={handleApproveIdentity}
+                className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 font-semibold text-sm whitespace-nowrap"
+              >
+                ✓ Setujui Wajah
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRejectDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Tolak Perubahan Alamat</h3>
-            <p className="text-sm text-gray-600 mb-4">Berikan alasan penolakan agar student bisa memperbaiki alamatnya.</p>
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              {rejectKind === "identity" ? "Tolak Verifikasi Wajah" : "Tolak Perubahan Alamat"}
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {rejectKind === "identity"
+                ? "Berikan alasan penolakan agar student bisa mengirim ulang dokumen wajah."
+                : "Berikan alasan penolakan agar student bisa memperbaiki alamatnya."}
+            </p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}

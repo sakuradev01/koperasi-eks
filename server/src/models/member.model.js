@@ -140,6 +140,30 @@ const memberSchema = new Schema(
       type: String,
       default: null,
     },
+    // Legacy members missing KTP/liveness — mirror address verification before pay
+    identityVerifyStatus: {
+      type: String,
+      enum: ["none", "pending", "approved", "rejected"],
+      default: "none",
+      index: true,
+    },
+    identityVerifyRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    identityVerifyVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    identityVerifyVerifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    identityVerifyRejectionReason: {
+      type: String,
+      default: null,
+    },
     registrationSource: {
       type: String,
       enum: ["admin", "student_dashboard"],

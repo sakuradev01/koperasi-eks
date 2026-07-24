@@ -11,6 +11,16 @@ const generateToken = (memberId) => {
 
 const isBlankAddress = (value) => !String(value || "").trim();
 
+const hasIdentityDocs = (member) => {
+  const fields = [
+    member?.ktpImage,
+    member?.selfieImage,
+    member?.livenessLeftImage,
+    member?.livenessRightImage,
+  ];
+  return fields.every((v) => String(v || "").trim().length > 10);
+};
+
 const getAddressState = (member) => ({
   completeAddress: member.completeAddress || "",
   addressUpdateStatus: member.addressUpdateStatus || "none",
@@ -22,6 +32,22 @@ const getAddressState = (member) => ({
     (isBlankAddress(member.completeAddress) ||
       ["pending", "rejected"].includes(member.addressUpdateStatus || "none")),
 });
+
+const getIdentityState = (member) => {
+  const status = member.identityVerifyStatus || "none";
+  const docsOk = hasIdentityDocs(member);
+  return {
+    hasIdentityDocs: docsOk,
+    identityVerifyStatus: status,
+    identityVerifyRequestedAt: member.identityVerifyRequestedAt || null,
+    identityVerifyVerifiedAt: member.identityVerifyVerifiedAt || null,
+    identityVerifyRejectionReason: member.identityVerifyRejectionReason || null,
+    // Gate pay when docs missing or update waiting/rejected (mirror address)
+    requiresIdentityVerification:
+      Boolean(member.isVerified) &&
+      (!docsOk || ["pending", "rejected"].includes(status)),
+  };
+};
 
 // Member Login - UUID based authentication
 export const loginMember = asyncHandler(async (req, res) => {
@@ -90,6 +116,7 @@ export const loginMember = asyncHandler(async (req, res) => {
           phone: member.phone,
           city: member.city,
           ...getAddressState(member),
+          ...getIdentityState(member),
           productId: member.productId, // Include productId in response
           hasUpgraded: member.hasUpgraded || false,
           currentUpgradeId: member.currentUpgradeId || null,
@@ -141,6 +168,7 @@ export const getCurrentMember = asyncHandler(async (req, res) => {
           phone: member.phone,
           city: member.city,
           ...getAddressState(member),
+          ...getIdentityState(member),
           productId: member.productId, // Include productId
           hasUpgraded: member.hasUpgraded || false,
           currentUpgradeId: member.currentUpgradeId || null,
@@ -197,6 +225,67 @@ export const updateMemberAddress = asyncHandler(async (req, res) => {
         uuid: member.uuid,
         name: member.name,
         ...getAddressState(member),
+      },
+    },
+  });
+});
+
+// Submit KTP + selfie + liveness for legacy members (before savings pay)
+export const updateMemberIdentity = asyncHandler(async (req, res) => {
+  const member = await Member.findById(req.member.memberId);
+
+  if (!member) {
+    return res.status(404).json({
+      success: false,
+      message: "Member tidak ditemukan",
+    });
+  }
+
+  const ktpImage = String(req.body?.ktpImage || "").trim();
+  const selfieImage = String(req.body?.selfieImage || "").trim();
+  const livenessLeftImage = String(req.body?.livenessLeftImage || "").trim();
+  const livenessRightImage = String(req.body?.livenessRightImage || "").trim();
+  const signatureImage = String(req.body?.signatureImage || "").trim();
+  const faceMatchScore = req.body?.faceMatchScore;
+
+  if (!ktpImage || !selfieImage || !livenessLeftImage || !livenessRightImage) {
+    return res.status(400).json({
+      success: false,
+      code: "IDENTITY_DOCS_REQUIRED",
+      message:
+        "Foto KTP, selfie memegang KTP, dan verifikasi wajah kiri/kanan wajib diisi.",
+    });
+  }
+
+  member.ktpImage = ktpImage;
+  member.selfieImage = selfieImage;
+  member.livenessLeftImage = livenessLeftImage;
+  member.livenessRightImage = livenessRightImage;
+  if (signatureImage) member.signatureImage = signatureImage;
+  if (faceMatchScore !== undefined && faceMatchScore !== null && faceMatchScore !== "") {
+    const score = Number(faceMatchScore);
+    member.faceMatchScore = Number.isFinite(score) ? score : member.faceMatchScore;
+  }
+
+  member.identityVerifyStatus = "pending";
+  member.identityVerifyRequestedAt = new Date();
+  member.identityVerifyVerifiedAt = null;
+  member.identityVerifyVerifiedBy = null;
+  member.identityVerifyRejectionReason = null;
+
+  await member.save();
+
+  res.status(200).json({
+    success: true,
+    message:
+      "Dokumen verifikasi wajah berhasil dikirim. Mohon tunggu verifikasi admin sebelum upload pembayaran.",
+    data: {
+      member: {
+        _id: member._id,
+        uuid: member.uuid,
+        name: member.name,
+        ...getAddressState(member),
+        ...getIdentityState(member),
       },
     },
   });

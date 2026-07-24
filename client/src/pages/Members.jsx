@@ -66,7 +66,7 @@ const Members = () => {
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
-  const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending
+  const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending, identity-pending
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [exporting, setExporting] = useState(false);
   const [verifyMember, setVerifyMember] = useState(null);
@@ -108,6 +108,8 @@ const Members = () => {
       setFilterVerification("unverified");
     } else if (filterParam === "address-pending") {
       setFilterVerification("address-pending");
+    } else if (filterParam === "identity-pending") {
+      setFilterVerification("identity-pending");
     }
     fetchMembers();
     fetchProducts();
@@ -505,6 +507,7 @@ const Members = () => {
       if (filterVerification === "verified") params.set("verified", "true");
       else if (filterVerification === "unverified") params.set("verified", "false");
       else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
+      else if (filterVerification === "identity-pending") params.set("identityVerifyStatus", "pending");
       if (filterProduct) params.set("productId", filterProduct);
       if (searchTerm) params.set("search", searchTerm);
 
@@ -558,6 +561,8 @@ const Members = () => {
       result = result.filter(member => !member.isVerified);
     } else if (filterVerification === "address-pending") {
       result = result.filter(member => member.addressUpdateStatus === "pending");
+    } else if (filterVerification === "identity-pending") {
+      result = result.filter(member => member.identityVerifyStatus === "pending");
     }
 
     // Filter by product
@@ -741,6 +746,7 @@ const Members = () => {
               <option value="verified">✅ Terverifikasi</option>
               <option value="unverified">🕐 Belum Verifikasi</option>
               <option value="address-pending">📍 Alamat Pending</option>
+              <option value="identity-pending">🤳 Wajah Pending</option>
             </select>
           </div>
 
@@ -781,11 +787,13 @@ const Members = () => {
                   </span>
                 )}
                 {filterVerification !== "all" && (
-                  <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}>
+                  <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : filterVerification === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
                     {filterVerification === "verified"
                       ? "✅ Terverifikasi"
                       : filterVerification === "address-pending"
                         ? "📍 Alamat Pending"
+                        : filterVerification === "identity-pending"
+                          ? "🤳 Wajah Pending"
                         : "🕐 Belum Verifikasi"}
                   </span>
                 )}
@@ -953,6 +961,11 @@ const Members = () => {
                     {member.addressUpdateStatus === "pending" && (
                       <span className="px-2 py-0.5 bg-orange-50 text-orange-700 rounded text-[10px]">
                         📍 Alamat pending
+                      </span>
+                    )}
+                    {member.identityVerifyStatus === "pending" && (
+                      <span className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded text-[10px]">
+                        🤳 Wajah pending
                       </span>
                     )}
                   </div>

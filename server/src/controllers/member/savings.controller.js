@@ -118,6 +118,42 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
       });
     }
 
+    // Legacy members without KTP/liveness — must complete identity verification before pay
+    const identityStatus = member.identityVerifyStatus || "none";
+    const hasIdentityDocs = [
+      member.ktpImage,
+      member.selfieImage,
+      member.livenessLeftImage,
+      member.livenessRightImage,
+    ].every((v) => String(v || "").trim().length > 10);
+
+    if (!hasIdentityDocs || ["pending", "rejected"].includes(identityStatus)) {
+      await discardUploadedProof(req.file);
+      if (identityStatus === "pending") {
+        return res.status(409).json({
+          success: false,
+          code: "IDENTITY_PENDING_VERIFICATION",
+          message:
+            "Dokumen verifikasi wajah sedang menunggu verifikasi admin. Upload pembayaran aktif kembali setelah disetujui.",
+        });
+      }
+      if (identityStatus === "rejected") {
+        return res.status(409).json({
+          success: false,
+          code: "IDENTITY_REJECTED",
+          message: `Verifikasi wajah ditolak: ${
+            member.identityVerifyRejectionReason || "Silakan kirim ulang dokumen."
+          }`,
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        code: "IDENTITY_DOCS_REQUIRED",
+        message:
+          "Akun lama wajib melengkapi verifikasi wajah (KTP, selfie, liveness kiri/kanan) sebelum upload pembayaran.",
+      });
+    }
+
     // Jika tidak ada productId, skip untuk sementara karena required di model
     if (!productId && !member.productId) {
       return res.status(400).json({

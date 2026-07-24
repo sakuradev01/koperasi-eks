@@ -530,6 +530,23 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       user: user._id,
       isVerified: false,
       registrationSource: "student_dashboard",
+      // New registrations with full face docs skip legacy identity gate after admin verifies membership
+      identityVerifyStatus: [
+        ktpImage,
+        selfieImage,
+        livenessLeftImage,
+        livenessRightImage,
+      ].every((v) => String(v || "").trim().length > 10)
+        ? "approved"
+        : "none",
+      identityVerifyVerifiedAt: [
+        ktpImage,
+        selfieImage,
+        livenessLeftImage,
+        livenessRightImage,
+      ].every((v) => String(v || "").trim().length > 10)
+        ? new Date()
+        : null,
     });
     await member.save();
 
