@@ -1,6 +1,8 @@
 import { Member } from "../../models/member.model.js";
 import jwt from "jsonwebtoken";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import { saveBase64ImageToFile } from "../../utils/uploadsDir.js";
+
 
 // Generate JWT Token for Member
 const generateToken = (memberId) => {
@@ -256,12 +258,27 @@ export const updateMemberIdentity = asyncHandler(async (req, res) => {
         "Foto KTP, selfie memegang KTP, dan verifikasi wajah kiri/kanan wajib diisi.",
     });
   }
-
-  member.ktpImage = ktpImage;
-  member.selfieImage = selfieImage;
-  member.livenessLeftImage = livenessLeftImage;
-  member.livenessRightImage = livenessRightImage;
-  if (signatureImage) member.signatureImage = signatureImage;
+  // Write raw image bytes to disk (no re-encode). Mongo 16MB limit breaks on 4 phone photos as data-URLs.
+  const prefix = String(member.uuid || member._id || "member").slice(0, 24);
+  member.ktpImage = saveBase64ImageToFile(ktpImage, "members", `${prefix}-ktp`);
+  member.selfieImage = saveBase64ImageToFile(selfieImage, "members", `${prefix}-selfie`);
+  member.livenessLeftImage = saveBase64ImageToFile(
+    livenessLeftImage,
+    "members",
+    `${prefix}-live-l`
+  );
+  member.livenessRightImage = saveBase64ImageToFile(
+    livenessRightImage,
+    "members",
+    `${prefix}-live-r`
+  );
+  if (signatureImage) {
+    member.signatureImage = saveBase64ImageToFile(
+      signatureImage,
+      "members",
+      `${prefix}-sign`
+    );
+  }
   if (faceMatchScore !== undefined && faceMatchScore !== null && faceMatchScore !== "") {
     const score = Number(faceMatchScore);
     member.faceMatchScore = Number.isFinite(score) ? score : member.faceMatchScore;
