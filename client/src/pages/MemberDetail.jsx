@@ -492,11 +492,13 @@ const MemberDetail = () => {
 
 
   const formatCurrency = (amount) => {
+    const num = Number(amount);
+    if (isNaN(num)) return "Rp0";
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
-    }).format(amount);
+    }).format(num);
   };
 
   // Generate PDF Mutasi Simpanan
@@ -1589,17 +1591,19 @@ const MemberDetail = () => {
 
   // Handle proof image modal
   const handleShowProof = (transaction) => {
-    if (transaction.proofFile) {
-      setCurrentProofImage(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/uploads/simpanan/${transaction.proofFile}`);
-      setCurrentTransactionInfo({
-        amount: transaction.amount,
-        date: transaction.savingsDate,
-        status: transaction.status,
-        description: transaction.description,
-        rejectionReason: transaction.rejectionReason
-      });
-      setShowProofModal(true);
-    }
+    const proofUrl = transaction.proofFile
+      ? `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/uploads/simpanan/${transaction.proofFile}`
+      : null;
+    setCurrentProofImage(proofUrl);
+    setCurrentTransactionInfo({
+      amount: Number(transaction.amount) || 0,
+      date: transaction.savingsDate || transaction.createdAt || null,
+      status: transaction.status || "-",
+      description: transaction.description || transaction.notes || "",
+      rejectionReason: transaction.rejectionReason || null,
+      proofFile: transaction.proofFile || null,
+    });
+    setShowProofModal(true);
   };
 
   const closeProofModal = () => {
@@ -2506,13 +2510,13 @@ const MemberDetail = () => {
                                         <div className="flex items-center justify-between">
                                           <div className="flex items-center space-x-2">
                                             <button
-                                              onClick={tx.proofFile ? () => handleShowProof(tx) : undefined}
+                                              onClick={() => handleShowProof(tx)}
                                               className={`inline-flex items-center px-1 py-0.5 rounded text-white text-xs ${
                                                 tx.status === 'Approved' ? 'bg-green-500' :
                                                 tx.status === 'Pending' ? 'bg-yellow-500' :
                                                 'bg-red-500'
-                                              } ${tx.proofFile ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}
-                                              title={tx.proofFile ? 'Klik untuk lihat bukti pembayaran' : tx.status}
+                                              } hover:opacity-80 cursor-pointer`}
+                                              title="Klik untuk detail transaksi"
                                             >
                                               {tx.status}
                                               {tx.proofFile && (
@@ -3030,7 +3034,7 @@ const MemberDetail = () => {
 
             {/* Modal Body */}
             <div className="p-4">
-              {currentProofImage && (
+              {currentProofImage ? (
                 <div className="text-center">
                   {/* Check if file is PDF or Word document */}
                   {currentProofImage.toLowerCase().match(/\.pdf(\?|$)/) ? (
@@ -3074,6 +3078,13 @@ const MemberDetail = () => {
                       }}
                     />
                   )}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="w-24 h-24 bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+                    <span className="text-5xl">🖼️</span>
+                  </div>
+                  <p className="text-gray-500">Tidak ada bukti pembayaran</p>
                 </div>
               )}
 
