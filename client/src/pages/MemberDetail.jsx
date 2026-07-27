@@ -12,6 +12,19 @@ import autoTable from "jspdf-autotable";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+const getMemberImageUrl = (val) => {
+  if (!val) return "";
+  const raw = String(val).trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:")) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/uploads/")) {
+    const base = API_URL.replace(/\/+$/, "");
+    return `${base}${raw}`;
+  }
+  return raw;
+};
+
 const formatMemberDate = (value) => {
   if (!value) return "-";
 
@@ -1614,7 +1627,7 @@ const MemberDetail = () => {
 
   const openRegistrationAttachmentPreview = (item) => {
     if (!item?.value) return;
-    setCurrentProofImage(item.value);
+    setCurrentProofImage(getMemberImageUrl(item.value));
     setCurrentTransactionInfo({
       isAttachmentPreview: true,
       label: item.label,
@@ -2186,7 +2199,7 @@ const MemberDetail = () => {
                   className="group block w-full text-left"
                 >
                   <img
-                    src={item.value}
+                    src={getMemberImageUrl(item.value)}
                     alt={item.label}
                     className={`h-48 w-full rounded-xl border border-slate-200 bg-slate-50 transition-transform duration-300 group-hover:scale-[1.01] ${
                       item.fit === "contain" ? "object-contain p-3" : "object-cover"
@@ -3089,7 +3102,7 @@ const MemberDetail = () => {
               )}
 
               {/* Transaction Details */}
-              {currentTransactionInfo && (
+              {currentTransactionInfo && !currentTransactionInfo.isAttachmentPreview && (
                 <div className="mt-4 bg-gray-50 rounded-lg p-4">
                   <h4 className="font-semibold text-gray-900 mb-2">Detail Transaksi</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
