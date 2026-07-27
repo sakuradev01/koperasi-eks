@@ -159,6 +159,10 @@ const invoicePaymentSchema = new mongoose.Schema(
       ref: "AccountingTransaction",
       default: null,
     },
+    coveredProjectionIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      default: [],
+    },
   },
   { _id: true },
 );

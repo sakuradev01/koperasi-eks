@@ -68,6 +68,7 @@ const buildCsv = (report) => {
       "Total Unpaid",
       "Invoice Count",
       "Projection Count",
+      "Payment Reputation",
     ],
   ];
 
@@ -79,6 +80,7 @@ const buildCsv = (report) => {
       row.totalUnpaid || 0,
       row.invoiceCount || 0,
       row.projectionCount || 0,
+      row.paymentReputation?.label || "-",
     ]);
   }
 
@@ -157,6 +159,7 @@ const exportPdf = (report) => {
     "Customer",
     ...buckets.map((bucket) => bucket.shortLabel || bucket.label),
     "Total Unpaid",
+    "Reputation",
   ]];
   const body = (report?.rows || []).map((row) => [
     row.customerName,
@@ -168,6 +171,7 @@ const exportPdf = (report) => {
       return `${formatMoney(bucketData.amount || 0)}${countText}`;
     }),
     formatMoney(row.totalUnpaid || 0),
+    row.paymentReputation?.label || "-",
   ]);
   body.push([
     "Total Unpaid",
@@ -179,6 +183,7 @@ const exportPdf = (report) => {
       return `${formatMoney(bucketData.amount || 0)}${countText}`;
     }),
     formatMoney(report?.totals?.totalUnpaid || 0),
+    "",
   ]);
 
   doc.autoTable({
@@ -386,6 +391,32 @@ export default function AgedReceivables() {
                     >
                       <strong>{row.customerName}</strong>
                       <span>{row.customerCode || row.customerPhone || "-"}</span>
+                      {row.paymentReputation?.label && row.paymentReputation.label !== "-" ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            marginTop: "2px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            fontSize: "0.75em",
+                            fontWeight: 600,
+                            background:
+                              row.paymentReputation.label === "Pembayaran Cepat"
+                                ? "#d4edda"
+                                : row.paymentReputation.label === "Tepat Waktu"
+                                  ? "#fff3cd"
+                                  : "#f8d7da",
+                            color:
+                              row.paymentReputation.label === "Pembayaran Cepat"
+                                ? "#155724"
+                                : row.paymentReputation.label === "Tepat Waktu"
+                                  ? "#856404"
+                                  : "#721c24",
+                          }}
+                        >
+                          {row.paymentReputation.label}
+                        </span>
+                      ) : null}
                     </button>
                   </td>
                   {buckets.map((bucket) => renderBucketCell(row, bucket))}

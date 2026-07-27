@@ -487,6 +487,7 @@ export default function InvoiceDetail({
     senderName: "",
     notes: "",
   });
+  const [selectedProjectionIds, setSelectedProjectionIds] = useState([]);
 
   const getInvoicePrintFileName = useCallback(
     (prefix = "INVOICE") =>
@@ -1038,6 +1039,7 @@ export default function InvoiceDetail({
     setExistingPaymentAttachment(null);
     setPaymentSplitMode(false);
     setEditingPaymentId("");
+    setSelectedProjectionIds([]);
   };
 
   const switchDetailTab = (tabName) => {
@@ -1195,6 +1197,21 @@ export default function InvoiceDetail({
       };
     });
   };
+
+  const toggleProjectionSelection = (projectionId) => {
+    setSelectedProjectionIds((prev) => {
+      const exists = prev.some((id) => String(id) === String(projectionId));
+      if (exists) return prev.filter((id) => String(id) !== String(projectionId));
+      return [...prev, projectionId];
+    });
+  };
+
+  const multiProjectionTotal = useMemo(() => {
+    if (selectedProjectionIds.length <= 1) return 0;
+    return (invoice?.projections || [])
+      .filter((p) => selectedProjectionIds.some((id) => String(id) === String(p._id)))
+      .reduce((sum, p) => sum + Number(p.remainingAmount ?? p.amount ?? 0), 0);
+  }, [invoice, selectedProjectionIds]);
 
   const getProjectionAgingLabel = (projection) => {
     const hasRealization = (projection.realizations || []).length > 0;
@@ -1397,93 +1414,114 @@ export default function InvoiceDetail({
 
   const submitPayment = async () => {
     setError("");
+    const isMultiProjection =
+      !editingPaymentId && selectedProjectionIds.length > 1;
     const amount = Number(paymentForm.amount || 0);
 
-    if (amount <= 0) {
-      toast.error("Amount tidak valid");
-      return;
-    }
-    if ((invoice?.projections || []).length && !paymentForm.projectionId) {
-      toast.error("Pilih cicilan/proyeksi pembayaran");
-      return;
-    }
-    if (
-      selectedPaymentProjection &&
-      amount > selectedProjectionEditableRemaining + 0.01
-    ) {
-      toast.error(
-        `Amount melebihi sisa cicilan. Sisa: ${formatMoney(
-          selectedProjectionEditableRemaining,
-          invoice.currency,
-        )}`,
-      );
-      return;
-    }
-    if (!paymentForm.accountId) {
-      toast.error("Record Account wajib dipilih");
-      return;
-    }
-    if (paymentSplitMode) {
-      if (paymentSplits.length < 2) {
-        toast.error("Split transaction minimal 2 baris");
+    if (isMultiProjection) {
+      // Multi-cicilan: backend calculates amount per projection
+      if (!paymentForm.accountId) {
+        toast.error("Record Account wajib dipilih");
         return;
       }
-
-      const invalidSplit = paymentSplits.some(
-        (split) =>
-          Number(split.amount || 0) <= 0 ||
-          !split.categoryId ||
-          !split.categoryType,
-      );
-      if (invalidSplit) {
-        toast.error("Semua split wajib punya amount dan category");
+      if (!paymentForm.categoryId || !paymentForm.categoryType) {
+        toast.error("Category wajib dipilih");
         return;
       }
-      if (Math.abs(splitRemaining) > 0.01) {
+    } else {
+      if (amount <= 0) {
+        toast.error("Amount tidak valid");
+        return;
+      }
+      if ((invoice?.projections || []).length && !paymentForm.projectionId) {
+        toast.error("Pilih cicilan/proyeksi pembayaran");
+        return;
+      }
+      if (
+        selectedPaymentProjection &&
+        amount > selectedProjectionEditableRemaining + 0.01
+      ) {
         toast.error(
-          `Split belum balance. Remaining: ${formatMoney(
-            splitRemaining,
+          `Amount melebihi sisa cicilan. Sisa: ${formatMoney(
+            selectedProjectionEditableRemaining,
             invoice.currency,
           )}`,
         );
         return;
       }
-    } else if (
-      !(editingPaymentId && currentEditingPayment?.isSplit) &&
-      (!paymentForm.categoryId || !paymentForm.categoryType)
-    ) {
-      toast.error("Category wajib dipilih");
-      return;
+      if (!paymentForm.accountId) {
+        toast.error("Record Account wajib dipilih");
+        return;
+      }
+      if (paymentSplitMode) {
+        if (paymentSplits.length < 2) {
+          toast.error("Split transaction minimal 2 baris");
+          return;
+        }
+
+        const invalidSplit = paymentSplits.some(
+          (split) =>
+            Number(split.amount || 0) <= 0 ||
+            !split.categoryId ||
+            !split.categoryType,
+        );
+        if (invalidSplit) {
+          toast.error("Semua split wajib punya amount dan category");
+          return;
+        }
+        if (Math.abs(splitRemaining) > 0.01) {
+          toast.error(
+            `Split belum balance. Remaining: ${formatMoney(
+              splitRemaining,
+              invoice.currency,
+            )}`,
+          );
+          return;
+        }
+      } else if (
+        !(editingPaymentId && currentEditingPayment?.isSplit) &&
+        (!paymentForm.categoryId || !paymentForm.categoryType)
+      ) {
+        toast.error("Category wajib dipilih");
+        return;
+      }
     }
 
     try {
       const payload = new FormData();
       payload.append("paymentDate", paymentForm.paymentDate);
-      payload.append("amount", String(amount));
       payload.append("accountId", paymentForm.accountId);
       payload.append("method", paymentForm.method || "Bank");
       payload.append("senderName", paymentForm.senderName || "");
       payload.append("notes", paymentForm.notes || "");
-      if (paymentForm.projectionId) {
-        payload.append("projectionId", paymentForm.projectionId);
-        payload.append("projectionIndex", paymentForm.projectionIndex || "");
-      }
 
-      if (paymentSplitMode) {
-        payload.append(
-          "splits",
-          JSON.stringify(
-            paymentSplits.map((split) => ({
-              amount: Number(split.amount || 0),
-              categoryId: split.categoryId,
-              categoryType: split.categoryType || "account",
-              description: split.description || "",
-            })),
-          ),
-        );
-      } else if (!(editingPaymentId && currentEditingPayment?.isSplit)) {
+      if (isMultiProjection) {
+        payload.append("projectionIds", JSON.stringify(selectedProjectionIds));
         payload.append("categoryId", paymentForm.categoryId);
         payload.append("categoryType", paymentForm.categoryType);
+      } else {
+        payload.append("amount", String(amount));
+        if (paymentForm.projectionId) {
+          payload.append("projectionId", paymentForm.projectionId);
+          payload.append("projectionIndex", paymentForm.projectionIndex || "");
+        }
+
+        if (paymentSplitMode) {
+          payload.append(
+            "splits",
+            JSON.stringify(
+              paymentSplits.map((split) => ({
+                amount: Number(split.amount || 0),
+                categoryId: split.categoryId,
+                categoryType: split.categoryType || "account",
+                description: split.description || "",
+              })),
+            ),
+          );
+        } else if (!(editingPaymentId && currentEditingPayment?.isSplit)) {
+          payload.append("categoryId", paymentForm.categoryId);
+          payload.append("categoryType", paymentForm.categoryType);
+        }
       }
 
       if (paymentAttachment) {
@@ -1495,7 +1533,13 @@ export default function InvoiceDetail({
         : await addInvoicePayment(invoiceNumber, payload);
       if (!res?.success)
         throw new Error(res?.message || "Failed to save payment");
-      toast.success(editingPaymentId ? "Payment updated" : "Payment added");
+      toast.success(
+        editingPaymentId
+          ? "Payment updated"
+          : isMultiProjection
+            ? `${selectedProjectionIds.length} cicilan berhasil dibayar`
+            : "Payment added",
+      );
       setInvoice(res.data);
       resetPaymentState();
       setAddingPayment(false);
@@ -2697,55 +2741,104 @@ export default function InvoiceDetail({
                             <label className="inv-label">
                               Untuk Cicilan/Proyeksi{" "}
                               <span className="inv-required">*</span>
-                              {selectedPaymentProjection &&
-                              suggestedPaymentProjection &&
-                              String(selectedPaymentProjection._id) ===
-                                String(suggestedPaymentProjection._id) ? (
+                              {!editingPaymentId ? (
                                 <span className="inv-suggested-label">
-                                  Suggested
+                                  Bisa pilih lebih dari 1
                                 </span>
                               ) : null}
                             </label>
-                            <PaymentSearchSelect
-                              value={paymentForm.projectionId}
-                              options={projectionOptions}
-                              placeholder="Search cicilan/proyeksi..."
-                              emptyText="Tidak ada cicilan yang masih punya sisa."
-                              onChange={selectPaymentProjection}
-                            />
-                            {selectedPaymentProjection ? (
-                              <div className="inv-payment-target-hint">
-                                <strong>
-                                  Cicilan{" "}
-                                  {selectedPaymentProjection.projectionIndex ||
-                                    paymentForm.projectionIndex}
-                                </strong>
-                                <span>
-                                  Sisa{" "}
-                                  {formatMoney(
-                                    selectedPaymentProjection.remainingAmount ??
-                                      selectedPaymentProjection.amount,
-                                    invoice.currency,
-                                  )}
-                                </span>
-                                <span>
-                                  Due{" "}
-                                  {formatDate(
-                                    selectedPaymentProjection.estimateDate,
-                                  )}
-                                </span>
-                                {selectedPaymentProjection &&
-                                suggestedPaymentProjection &&
-                                String(selectedPaymentProjection._id) ===
-                                  String(suggestedPaymentProjection._id) ? (
-                                  <span>
-                                    {getProjectionSuggestionReason(
-                                      selectedPaymentProjection,
-                                    )}
-                                  </span>
+                            {editingPaymentId ? (
+                              <>
+                                <PaymentSearchSelect
+                                  value={paymentForm.projectionId}
+                                  options={projectionOptions}
+                                  placeholder="Search cicilan/proyeksi..."
+                                  emptyText="Tidak ada cicilan yang masih punya sisa."
+                                  onChange={selectPaymentProjection}
+                                />
+                                {selectedPaymentProjection ? (
+                                  <div className="inv-payment-target-hint">
+                                    <strong>
+                                      Cicilan{" "}
+                                      {selectedPaymentProjection.projectionIndex ||
+                                        paymentForm.projectionIndex}
+                                    </strong>
+                                    <span>
+                                      Sisa{" "}
+                                      {formatMoney(
+                                        selectedPaymentProjection.remainingAmount ??
+                                          selectedPaymentProjection.amount,
+                                        invoice.currency,
+                                      )}
+                                    </span>
+                                    <span>
+                                      Due{" "}
+                                      {formatDate(
+                                        selectedPaymentProjection.estimateDate,
+                                      )}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                {outstandingProjections.map((projection, index) => {
+                                  const projectionIndex = projection.projectionIndex || index + 1;
+                                  const isSelected = selectedProjectionIds.some(
+                                    (id) => String(id) === String(projection._id),
+                                  );
+                                  const remaining = Number(projection.remainingAmount ?? projection.amount ?? 0);
+                                  return (
+                                    <label
+                                      key={projection._id}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        padding: "8px 10px",
+                                        border: isSelected ? "2px solid var(--primary, #4361ee)" : "1px solid #ddd",
+                                        borderRadius: "6px",
+                                        cursor: "pointer",
+                                        background: isSelected ? "rgba(67,97,238,0.06)" : "#fff",
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleProjectionSelection(projection._id)}
+                                        style={{ width: "16px", height: "16px" }}
+                                      />
+                                      <span style={{ flex: 1 }}>
+                                        <strong>Cicilan {projectionIndex}</strong>{" "}
+                                        {projection.description || "Projection"}
+                                      </span>
+                                      <span style={{ fontSize: "0.85em", color: "#666" }}>
+                                        Sisa {formatMoney(remaining, invoice.currency)}
+                                      </span>
+                                      <span style={{ fontSize: "0.85em", color: "#999" }}>
+                                        Due {formatDate(projection.estimateDate)}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                                {selectedProjectionIds.length > 1 ? (
+                                  <div className="inv-payment-target-hint">
+                                    <strong>
+                                      {selectedProjectionIds.length} cicilan dipilih
+                                    </strong>
+                                    <span>
+                                      Total {formatMoney(multiProjectionTotal, invoice.currency)}
+                                    </span>
+                                    <span>Amount akan dihitung otomatis per cicilan</span>
+                                  </div>
+                                ) : null}
+                                {!outstandingProjections.length ? (
+                                  <div style={{ color: "#999", padding: "8px 0" }}>
+                                    Tidak ada cicilan yang masih punya sisa.
+                                  </div>
                                 ) : null}
                               </div>
-                            ) : null}
+                            )}
                           </div>
                         ) : null}
                         {editingPaymentId && currentEditingPayment?.isSplit ? (
@@ -2771,24 +2864,35 @@ export default function InvoiceDetail({
                             }
                           />
                         </div>
-                        <div className="inv-grid-6">
-                          <label className="inv-label">
-                            Amount ({invoice.currency || "IDR"})
-                          </label>
-                          <input
-                            className="inv-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={paymentForm.amount}
-                            onChange={(event) =>
-                              setPaymentForm((prev) => ({
-                                ...prev,
-                                amount: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
+                        {selectedProjectionIds.length > 1 && !editingPaymentId ? (
+                          <div className="inv-grid-6">
+                            <label className="inv-label">
+                              Amount ({invoice.currency || "IDR"})
+                            </label>
+                            <div className="inv-input" style={{ background: "#f0f0f0", color: "#666" }}>
+                              {formatMoney(multiProjectionTotal, invoice.currency)} (otomatis per cicilan)
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="inv-grid-6">
+                            <label className="inv-label">
+                              Amount ({invoice.currency || "IDR"})
+                            </label>
+                            <input
+                              className="inv-input"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={paymentForm.amount}
+                              onChange={(event) =>
+                                setPaymentForm((prev) => ({
+                                  ...prev,
+                                  amount: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        )}
                         <div className="inv-grid-12">
                           <label className="inv-label">
                             Record Account{" "}

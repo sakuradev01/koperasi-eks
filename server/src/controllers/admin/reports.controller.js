@@ -200,6 +200,7 @@ function createAgedReceivableCustomerRow(invoice) {
     invoiceNumbers: new Set(),
     projectionCount: 0,
     totalUnpaid: 0,
+    paymentReputation: { earlyCount: 0, onTimeCount: 0, lateCount: 0, totalPaid: 0 },
   };
 }
 
@@ -289,6 +290,54 @@ function countUnassignedPaymentsUntilAsOf(invoice, asOfDate) {
     .reduce((sum, payment) => sum + roundMoney(payment.amount), 0);
 }
 
+function computePaymentReputation(invoice) {
+  const payments = invoice.payments || [];
+  const projections = invoice.projections || [];
+  if (!projections.length || !payments.length) {
+    return { earlyCount: 0, onTimeCount: 0, lateCount: 0, totalPaid: 0 };
+  }
+
+  let earlyCount = 0;
+  let onTimeCount = 0;
+  let lateCount = 0;
+  let totalPaid = 0;
+
+  for (const projection of projections) {
+    const dueDate = new Date(projection.estimateDate);
+    if (Number.isNaN(dueDate.getTime())) continue;
+
+    const matchingPayments = payments.filter((payment) =>
+      payment.projectionId
+        ? isSameObjectId(payment.projectionId, projection._id)
+        : Number(payment.projectionIndex || 0) > 0 &&
+          Number(payment.projectionIndex) ===
+            (projections.indexOf(projection) + 1),
+    );
+
+    for (const payment of matchingPayments) {
+      const payDate = new Date(payment.paymentDate);
+      if (Number.isNaN(payDate.getTime())) continue;
+      totalPaid += roundMoney(payment.amount);
+
+      const diffDays = dateDiffDays(payDate, dueDate);
+      if (diffDays < 0) earlyCount += 1;
+      else if (diffDays === 0) onTimeCount += 1;
+      else lateCount += 1;
+    }
+  }
+
+  return { earlyCount, onTimeCount, lateCount, totalPaid: roundMoney(totalPaid) };
+}
+
+function getPaymentReputationLabel(reputation) {
+  const total = reputation.earlyCount + reputation.onTimeCount + reputation.lateCount;
+  if (total === 0) return "-";
+  const earlyRatio = (reputation.earlyCount + reputation.onTimeCount) / total;
+  if (earlyRatio >= 0.8) return "Pembayaran Cepat";
+  if (earlyRatio >= 0.5) return "Tepat Waktu";
+  return "Sering Terlambat";
+}
+
 async function buildAgedReceivablesPayload(options = {}) {
   const todayText = formatYmd(new Date());
   const asOfText = options.asOf || options.as_of || todayText;
@@ -321,6 +370,11 @@ async function buildAgedReceivablesPayload(options = {}) {
     for (const detail of details) {
       addAgedReceivableDetail(row, detail.bucketKey, detail);
     }
+    const reputation = computePaymentReputation(invoice);
+    row.paymentReputation.earlyCount += reputation.earlyCount;
+    row.paymentReputation.onTimeCount += reputation.onTimeCount;
+    row.paymentReputation.lateCount += reputation.lateCount;
+    row.paymentReputation.totalPaid += reputation.totalPaid;
   }
 
   const totals = {
@@ -363,6 +417,11 @@ async function buildAgedReceivablesPayload(options = {}) {
             .filter((bucket) => bucket.key !== "notYetDue")
             .reduce((sum, bucket) => sum + (row.buckets[bucket.key]?.amount || 0), 0),
         ),
+        paymentReputation: {
+          ...row.paymentReputation,
+          totalPaid: roundMoney(row.paymentReputation.totalPaid),
+          label: getPaymentReputationLabel(row.paymentReputation),
+        },
       };
     })
     .sort((a, b) => {

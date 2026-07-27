@@ -330,6 +330,9 @@ function normalizePayments(rawPayments) {
           payment?.attachmentOriginalName,
         ),
         transactionId: normalizeObjectId(payment?.transactionId),
+        coveredProjectionIds: parseFlexibleArray(payment?.coveredProjectionIds)
+          .map((id) => normalizeObjectId(id))
+          .filter(Boolean),
       };
 
       if (
@@ -819,6 +822,65 @@ function resolveInvoiceProjectionForPayment(
     projectionDueDate: projection.estimateDate,
     remainingAmount,
   };
+}
+
+function resolveMultipleProjectionsForPayment(invoice, projectionIds, excludePaymentId = null) {
+  const projections = invoice?.projections || [];
+  if (!projections.length || !projectionIds.length) {
+    throw new ApiError(400, "Pilih cicilan/proyeksi pembayaran");
+  }
+
+  const resolved = [];
+  for (const rawId of projectionIds) {
+    const projectionId = normalizeObjectId(rawId);
+    if (!projectionId) continue;
+
+    const match = projections
+      .map((projection, index) => ({ projection, projectionIndex: index + 1 }))
+      .find(({ projection }) => sameObjectId(projection._id, projectionId));
+
+    if (!match) {
+      throw new ApiError(404, `Cicilan/proyeksi ${rawId} tidak ditemukan`);
+    }
+
+    const { projection, projectionIndex } = match;
+    const paidAmount = clampMoney(
+      (invoice.payments || [])
+        .filter(
+          (payment) =>
+            !excludePaymentId || String(payment._id) !== String(excludePaymentId),
+        )
+        .filter((payment) =>
+          paymentMatchesProjection(payment, projection, projectionIndex),
+        )
+        .reduce((sum, payment) => sum + clampMoney(payment.amount), 0),
+    );
+    const remainingAmount = clampMoney(
+      Math.max(clampMoney(projection.amount) - paidAmount, 0),
+    );
+
+    if (remainingAmount <= 0) {
+      throw new ApiError(
+        400,
+        `Cicilan ${projectionIndex} sudah lunas`,
+      );
+    }
+
+    resolved.push({
+      projectionId: projection._id,
+      projectionIndex,
+      projectionDescription:
+        normalizeString(projection.description) || `Cicilan ${projectionIndex}`,
+      projectionDueDate: projection.estimateDate,
+      remainingAmount,
+    });
+  }
+
+  if (!resolved.length) {
+    throw new ApiError(400, "Pilih cicilan/proyeksi pembayaran");
+  }
+
+  return resolved;
 }
 
 async function normalizeInvoicePaymentInput(req, invoice, options = {}) {
@@ -1760,21 +1822,139 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
     );
   }
 
-  let createdTransaction = null;
-  let payment = null;
+  const body = req.body || {};
+  const rawProjectionIds = parseFlexibleArray(
+    getPaymentBodyValue(body, ["projectionIds", "projection_ids"]),
+  );
+  const isMultiProjection = rawProjectionIds.length > 1;
+
+  if (!isMultiProjection) {
+    // Single-projection path (backward compatible)
+    let createdTransaction = null;
+    let payment = null;
+    try {
+      const normalized = await normalizeInvoicePaymentInput(req, invoice);
+      payment = normalized.payment;
+      payment._id = payment._id || new mongoose.Types.ObjectId();
+
+      createdTransaction = await createAccountingTransactionFromPayment(
+        invoice,
+        payment,
+        normalized.splitRows,
+      );
+      payment.transactionId = createdTransaction._id;
+
+      invoice.payments.push(payment);
+      const rebuilt = await buildInvoicePayload(invoice.toObject(), {
+        currentInvoice: invoice,
+      });
+      Object.assign(invoice, {
+        ...rebuilt,
+        payments: normalizePayments(invoice.payments),
+        updatedBy: req.user?.userId || null,
+      });
+      await invoice.save();
+    } catch (error) {
+      if (createdTransaction?._id) {
+        await deleteLinkedAccountingTransaction(createdTransaction._id, payment);
+      } else {
+        const uploadedAttachment = getUploadedPaymentAttachment(req);
+        if (uploadedAttachment?.filename) {
+          removeTransactionReceiptFile(uploadedAttachment.filename);
+        }
+      }
+      throw error;
+    }
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          await serializeInvoiceWithSplits(invoice),
+          "Pembayaran berhasil ditambahkan",
+        ),
+      );
+    return;
+  }
+
+  // Multi-projection path: one payment + one transaction per selected cicilan
+  const resolvedProjections = resolveMultipleProjectionsForPayment(
+    invoice,
+    rawProjectionIds,
+  );
+
+  const paymentDate = ensureDate(
+    getPaymentBodyValue(body, ["paymentDate", "payment-date", "date"]),
+    "Tanggal pembayaran",
+  );
+  const method =
+    normalizeString(
+      getPaymentBodyValue(body, ["method", "paymentMethod", "payment-method"]),
+    ) || "Bank";
+  const notes = normalizeString(
+    getPaymentBodyValue(body, ["notes", "paymentNote", "payment-note"]),
+  );
+  const senderName = normalizeString(
+    getPaymentBodyValue(body, ["senderName", "sender_name"]),
+  );
+  const accountId = normalizeObjectId(
+    getPaymentBodyValue(body, ["accountId", "account_id"]),
+  );
+  const categoryId = normalizeObjectId(
+    getPaymentBodyValue(body, ["categoryId", "category_id"]),
+  );
+  const categoryType = normalizeCategoryType(
+    getPaymentBodyValue(body, ["categoryType", "category_type"]),
+  );
+  const uploadedAttachment = getUploadedPaymentAttachment(req);
+
+  if (!accountId) {
+    throw new ApiError(400, "Record Account wajib dipilih");
+  }
+  const account = await CoaAccount.findById(accountId).lean();
+  if (!account) {
+    throw new ApiError(404, "Record Account tidak ditemukan");
+  }
+  if (!categoryId || !categoryType) {
+    throw new ApiError(400, "Category wajib dipilih");
+  }
+
+  const createdTransactions = [];
+  const createdPayments = [];
   try {
-    const normalized = await normalizeInvoicePaymentInput(req, invoice);
-    payment = normalized.payment;
-    payment._id = payment._id || new mongoose.Types.ObjectId();
+    for (const proj of resolvedProjections) {
+      const payment = {
+        _id: new mongoose.Types.ObjectId(),
+        paymentDate,
+        amount: proj.remainingAmount,
+        method,
+        notes,
+        accountId,
+        categoryId,
+        categoryType,
+        projectionId: proj.projectionId,
+        projectionIndex: proj.projectionIndex,
+        projectionDescription: proj.projectionDescription,
+        projectionDueDate: proj.projectionDueDate,
+        isSplit: false,
+        senderName,
+        attachment: uploadedAttachment?.filename || "",
+        attachmentOriginalName: uploadedAttachment?.originalname || "",
+        coveredProjectionIds: [proj.projectionId],
+      };
 
-    createdTransaction = await createAccountingTransactionFromPayment(
-      invoice,
-      payment,
-      normalized.splitRows,
-    );
-    payment.transactionId = createdTransaction._id;
+      const transaction = await createAccountingTransactionFromPayment(
+        invoice,
+        payment,
+        [],
+      );
+      payment.transactionId = transaction._id;
+      createdTransactions.push(transaction);
+      createdPayments.push(payment);
+      invoice.payments.push(payment);
+    }
 
-    invoice.payments.push(payment);
     const rebuilt = await buildInvoicePayload(invoice.toObject(), {
       currentInvoice: invoice,
     });
@@ -1785,13 +1965,12 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
     });
     await invoice.save();
   } catch (error) {
-    if (createdTransaction?._id) {
-      await deleteLinkedAccountingTransaction(createdTransaction._id, payment);
-    } else {
-      const uploadedAttachment = getUploadedPaymentAttachment(req);
-      if (uploadedAttachment?.filename) {
-        removeTransactionReceiptFile(uploadedAttachment.filename);
-      }
+    // Rollback all created transactions on failure
+    for (const txn of createdTransactions) {
+      await deleteLinkedAccountingTransaction(txn._id, null);
+    }
+    if (!createdTransactions.length && uploadedAttachment?.filename) {
+      removeTransactionReceiptFile(uploadedAttachment.filename);
     }
     throw error;
   }
@@ -1802,7 +1981,7 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
       new ApiResponse(
         200,
         await serializeInvoiceWithSplits(invoice),
-        "Pembayaran berhasil ditambahkan",
+        `${createdPayments.length} cicilan berhasil dibayar`,
       ),
     );
 });
