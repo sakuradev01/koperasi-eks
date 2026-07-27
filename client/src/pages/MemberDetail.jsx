@@ -23,6 +23,13 @@ const formatMemberDate = (value) => {
   return format(parsedDate, "dd MMMM yyyy", { locale: id });
 };
 
+const formatDateSafe = (d, fmt = "dd/MM/yyyy") => {
+  if (!d) return "-";
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt.getTime())) return "-";
+  return format(dt, fmt, { locale: id });
+};
+
 const MemberDetail = () => {
   const { uuid } = useParams();
   const navigate = useNavigate();
@@ -562,7 +569,7 @@ const MemberDetail = () => {
       const periodeStr = period ? ` - Periode ${period}` : "";
 
       return {
-        date: paidRaw ? format(new Date(paidRaw), "dd/MM") : "-",
+        date: formatDateSafe(paidRaw, "dd/MM"),
         description: `${(saving.type || "Setoran").toUpperCase()} - ${saving.description || "Simpanan Rutin"}${periodeStr}${saving.notes ? " - " + saving.notes : ""}`,
         type: saving.type,
         amount,
@@ -1206,7 +1213,7 @@ const MemberDetail = () => {
 
     doc.setFontSize(11); doc.text("Data Anggota:", 20, formY); formY += 6;
 
-    const formattedBirthDate = member.birthDate ? format(new Date(member.birthDate), "dd MMMM yyyy", { locale: id }) : "-";
+    const formattedBirthDate = formatDateSafe(member.birthDate, "dd MMMM yyyy");
     const tempatTanggalLahir = `${member.birthPlace || "-"}, ${formattedBirthDate}`;
 
     const formFields = [
@@ -1317,7 +1324,7 @@ const MemberDetail = () => {
     doc.text("Demikian pernyataan ini dibuat dengan sebenarnya untuk dapat dipergunakan sebagaimana semestinya.", 20, formY);
     formY += 12;
 
-    const signatureDateStr = member.riplAgreedAt ? format(new Date(member.riplAgreedAt), "dd MMMM yyyy", { locale: id }) : format(new Date(), "dd MMMM yyyy", { locale: id });
+    const signatureDateStr = member.riplAgreedAt ? formatDateSafe(member.riplAgreedAt, "dd MMMM yyyy") : formatDateSafe(new Date(), "dd MMMM yyyy");
     doc.text(`Tangerang, ${signatureDateStr}`, pageWidth - 75, formY); formY += 6;
     doc.text("Diproses oleh,", 20, formY); doc.text("Disetujui oleh,", pageWidth - 75, formY); formY += 4;
 
@@ -2029,14 +2036,7 @@ const MemberDetail = () => {
                                       <div>
                                         <p className="text-xs text-gray-600">Tanggal Upgrade:</p>
                                         <p className="text-xs font-semibold text-gray-800">
-                                          {member.currentUpgradeId.upgradeDate ? 
-                                            new Date(member.currentUpgradeId.upgradeDate).toLocaleDateString('id-ID', {
-                                              day: 'numeric',
-                                              month: 'short',
-                                              year: 'numeric'
-                                            }) : 
-                                            'N/A'
-                                          }
+                                          {formatDateSafe(member.currentUpgradeId.upgradeDate, "dd MMM yyyy")}
                                         </p>
                                       </div>
                                       
@@ -2209,7 +2209,7 @@ const MemberDetail = () => {
               Versi: {member.riplVersion || "-"}
             </span>
             <span className="rounded-full bg-white px-2 py-1">
-              Disetujui: {member.riplAgreedAt ? format(new Date(member.riplAgreedAt), "dd MMM yyyy HH:mm", { locale: id }) : "-"}
+              Disetujui: {formatDateSafe(member.riplAgreedAt, "dd MMM yyyy HH:mm")}
             </span>
           </div>
           <div className="whitespace-pre-wrap break-words text-xs sm:text-sm">
@@ -2523,7 +2523,7 @@ const MemberDetail = () => {
                                           </div>
                                           <div className="flex items-center space-x-1">
                                             <span className="text-gray-500 text-xs">
-                                              {format(new Date(tx.savingsDate), "dd/MM", { locale: id })}
+                                              {formatDateSafe(tx.savingsDate, "dd/MM")}
                                             </span>
                                           </div>
                                         </div>
@@ -2688,10 +2688,7 @@ const MemberDetail = () => {
                             </span>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                            {loan.nextDueDate ? 
-                              format(new Date(loan.nextDueDate), "dd MMM yyyy", { locale: id }) : 
-                              "-"
-                            }
+                            {formatDateSafe(loan.nextDueDate, "dd MMM yyyy")}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                             <button
@@ -3009,7 +3006,7 @@ const MemberDetail = () => {
                   <div className="text-sm text-gray-600 mt-1">
                     <span className="font-semibold">{formatCurrency(currentTransactionInfo.amount)}</span>
                     <span className="mx-2">•</span>
-                    <span>{format(new Date(currentTransactionInfo.date), "dd MMM yyyy", { locale: id })}</span>
+                    <span>{formatDateSafe(currentTransactionInfo.date, "dd MMM yyyy")}</span>
                     <span className="mx-2">•</span>
                     <span className={`px-2 py-1 rounded text-xs ${
                       currentTransactionInfo.status === 'Approved' ? 'bg-green-100 text-green-800' :
@@ -3091,7 +3088,7 @@ const MemberDetail = () => {
                     </div>
                     <div>
                       <span className="text-gray-600">Tanggal:</span>
-                      <span className="ml-2">{format(new Date(currentTransactionInfo.date), "dd MMMM yyyy", { locale: id })}</span>
+                      <span className="ml-2">{formatDateSafe(currentTransactionInfo.date, "dd MMMM yyyy")}</span>
                     </div>
                     <div>
                       <span className="text-gray-600">Status:</span>
@@ -3287,7 +3284,7 @@ const MemberDetail = () => {
                               <tr key={schedule.period} className="hover:bg-gray-50">
                                 <td className="px-3 py-2 text-gray-900">Bulan {schedule.period}</td>
                                 <td className="px-3 py-2 text-gray-900">
-                                  {format(new Date(schedule.dueDate), "dd MMM yyyy", { locale: id })}
+                                  {formatDateSafe(schedule.dueDate, "dd MMM yyyy")}
                                 </td>
                                 <td className="px-3 py-2 font-medium text-gray-900">
                                   {formatCurrency(schedule.amount)}
@@ -3406,10 +3403,7 @@ const MemberDetail = () => {
                   <div>
                     <p className="text-sm text-gray-600">Tanggal Pengajuan</p>
                     <p className="font-medium">
-                      {selectedLoanDetail.applicationDate ? 
-                        format(new Date(selectedLoanDetail.applicationDate), "dd MMM yyyy", { locale: id }) : 
-                        "-"
-                      }
+                      {formatDateSafe(selectedLoanDetail.applicationDate, "dd MMM yyyy")}
                     </p>
                   </div>
                   <div>
@@ -3468,10 +3462,7 @@ const MemberDetail = () => {
                     <div>
                       <p className="text-sm text-gray-600">Jatuh Tempo Berikutnya</p>
                       <p className="text-lg font-bold">
-                        {selectedLoanDetail.nextDueDate ? 
-                          format(new Date(selectedLoanDetail.nextDueDate), "dd MMM yyyy", { locale: id }) : 
-                          "-"
-                        }
+                        {formatDateSafe(selectedLoanDetail.nextDueDate, "dd MMM yyyy")}
                       </p>
                     </div>
                   </div>
@@ -3501,7 +3492,7 @@ const MemberDetail = () => {
                               Periode {schedule.period}
                             </td>
                             <td className="px-4 py-2 text-sm text-gray-900">
-                              {format(new Date(schedule.dueDate), "dd MMM yyyy", { locale: id })}
+                              {formatDateSafe(schedule.dueDate, "dd MMM yyyy")}
                             </td>
                             <td className="px-4 py-2 text-sm font-medium text-gray-900">
                               {formatCurrency(schedule.expectedAmount)}
@@ -3517,10 +3508,7 @@ const MemberDetail = () => {
                               </span>
                             </td>
                             <td className="px-4 py-2 text-sm text-gray-900">
-                              {schedule.actualPayment ? 
-                                format(new Date(schedule.actualPayment.paymentDate), "dd MMM yyyy", { locale: id }) : 
-                                "-"
-                              }
+                              {formatDateSafe(schedule.actualPayment?.paymentDate, "dd MMM yyyy")}
                             </td>
                             <td className="px-4 py-2 text-sm">
                               {schedule.actualPayment?.proofFile ? (
