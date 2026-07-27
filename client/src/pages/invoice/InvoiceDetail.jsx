@@ -488,6 +488,7 @@ export default function InvoiceDetail({
     notes: "",
   });
   const [selectedProjectionIds, setSelectedProjectionIds] = useState([]);
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const getInvoicePrintFileName = useCallback(
     (prefix = "INVOICE") =>
@@ -1199,11 +1200,17 @@ export default function InvoiceDetail({
   };
 
   const toggleProjectionSelection = (projectionId) => {
-    setSelectedProjectionIds((prev) => {
-      const exists = prev.some((id) => String(id) === String(projectionId));
-      if (exists) return prev.filter((id) => String(id) !== String(projectionId));
-      return [...prev, projectionId];
-    });
+    const exists = selectedProjectionIds.some((id) => String(id) === String(projectionId));
+    const next = exists
+      ? selectedProjectionIds.filter((id) => String(id) !== String(projectionId))
+      : [...selectedProjectionIds, projectionId];
+    setSelectedProjectionIds(next);
+    // Sync single-projection form fields when exactly 1 selected
+    if (next.length === 1) {
+      selectPaymentProjection(next[0]);
+    } else {
+      setPaymentForm((p) => ({ ...p, projectionId: "", projectionIndex: "", amount: "" }));
+    }
   };
 
   const multiProjectionTotal = useMemo(() => {
@@ -1487,6 +1494,7 @@ export default function InvoiceDetail({
       }
     }
 
+    setSavingPayment(true);
     try {
       const payload = new FormData();
       payload.append("paymentDate", paymentForm.paymentDate);
@@ -1544,9 +1552,12 @@ export default function InvoiceDetail({
       resetPaymentState();
       setAddingPayment(false);
     } catch (err) {
-      setError(
-        err?.response?.data?.message || err.message || "Failed to add payment",
-      );
+      const msg =
+        err?.response?.data?.message || err.message || "Failed to add payment";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSavingPayment(false);
     }
   };
 
@@ -3251,8 +3262,9 @@ export default function InvoiceDetail({
                         type="button"
                         className="inv-btn"
                         onClick={submitPayment}
+                        disabled={savingPayment}
                       >
-                        Save
+                        {savingPayment ? "Saving..." : "Save"}
                       </button>
                     </div>
                   </div>
