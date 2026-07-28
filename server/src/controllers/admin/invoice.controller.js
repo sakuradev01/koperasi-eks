@@ -1916,28 +1916,74 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
   if (!account) {
     throw new ApiError(404, "Record Account tidak ditemukan");
   }
-  if (!categoryId || !categoryType) {
+  // Parse optional split rows for multi-projection
+  const rawSplitRows = getPaymentBodyValue(body, ["splits", "split_data"]);
+  const multiSplitRows = normalizeSplitRows(rawSplitRows);
+  const isMultiSplit = multiSplitRows.length > 0;
+
+  if (isMultiSplit) {
+    if (multiSplitRows.length < 2) {
+      throw new ApiError(400, "Split transaction minimal 2 baris");
+    }
+    const totalMulti = resolvedProjections.reduce(
+      (sum, p) => sum + clampMoney(p.remainingAmount),
+      0,
+    );
+    const totalSplit = clampMoney(
+      multiSplitRows.reduce((sum, s) => sum + s.amount, 0),
+    );
+    if (Math.abs(totalSplit - totalMulti) > 0.01) {
+      throw new ApiError(
+        400,
+        `Total split (${totalSplit}) tidak sama dengan total cicilan (${totalMulti})`,
+      );
+    }
+  } else if (!categoryId || !categoryType) {
     throw new ApiError(400, "Category wajib dipilih");
   }
 
   const createdTransactions = [];
   const createdPayments = [];
   try {
+    const totalMulti = resolvedProjections.reduce(
+      (sum, p) => sum + clampMoney(p.remainingAmount),
+      0,
+    );
+
     for (const proj of resolvedProjections) {
+      const projAmount = clampMoney(proj.remainingAmount);
+
+      // Scale split rows proportionally for this cicilan (round all but last)
+      let projSplitRows = [];
+      if (isMultiSplit) {
+        const ratio = totalMulti > 0 ? projAmount / totalMulti : 0;
+        let scaledSum = 0;
+        projSplitRows = multiSplitRows.map((split, idx) => {
+          if (idx === multiSplitRows.length - 1) {
+            // Last row gets remainder to avoid rounding drift
+            const lastAmount = clampMoney(projAmount - scaledSum);
+            return { ...split, amount: lastAmount };
+          }
+          const scaled = clampMoney(split.amount * ratio);
+          scaledSum += scaled;
+          return { ...split, amount: scaled };
+        });
+      }
+
       const payment = {
         _id: new mongoose.Types.ObjectId(),
         paymentDate,
-        amount: proj.remainingAmount,
+        amount: projAmount,
         method,
         notes,
         accountId,
-        categoryId,
-        categoryType,
+        categoryId: isMultiSplit ? null : categoryId,
+        categoryType: isMultiSplit ? null : categoryType,
         projectionId: proj.projectionId,
         projectionIndex: proj.projectionIndex,
         projectionDescription: proj.projectionDescription,
         projectionDueDate: proj.projectionDueDate,
-        isSplit: false,
+        isSplit: isMultiSplit,
         senderName,
         attachment: uploadedAttachment?.filename || "",
         attachmentOriginalName: uploadedAttachment?.originalname || "",
@@ -1947,7 +1993,7 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
       const transaction = await createAccountingTransactionFromPayment(
         invoice,
         payment,
-        [],
+        projSplitRows,
       );
       payment.transactionId = transaction._id;
       createdTransactions.push(transaction);

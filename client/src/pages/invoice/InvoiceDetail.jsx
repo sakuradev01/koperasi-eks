@@ -978,7 +978,16 @@ export default function InvoiceDetail({
   };
   const paymentCurrencyPrefix =
     selectedAccount?.currency || invoice?.currency || "Rp";
-  const paymentAmount = Number(paymentForm.amount || 0);
+  const multiProjectionTotal = useMemo(() => {
+    if (selectedProjectionIds.length <= 1) return 0;
+    return (invoice?.projections || [])
+      .filter((p) => selectedProjectionIds.some((id) => String(id) === String(p._id)))
+      .reduce((sum, p) => sum + Number(p.remainingAmount ?? p.amount ?? 0), 0);
+  }, [invoice, selectedProjectionIds]);
+
+  const paymentAmount = selectedProjectionIds.length > 1 && !editingPaymentId
+    ? multiProjectionTotal
+    : Number(paymentForm.amount || 0);
   const selectedProjectionEditableRemaining = useMemo(() => {
     if (!selectedPaymentProjection) return 0;
     let remaining = Number(
@@ -1213,13 +1222,6 @@ export default function InvoiceDetail({
     }
   };
 
-  const multiProjectionTotal = useMemo(() => {
-    if (selectedProjectionIds.length <= 1) return 0;
-    return (invoice?.projections || [])
-      .filter((p) => selectedProjectionIds.some((id) => String(id) === String(p._id)))
-      .reduce((sum, p) => sum + Number(p.remainingAmount ?? p.amount ?? 0), 0);
-  }, [invoice, selectedProjectionIds]);
-
   const getProjectionAgingLabel = (projection) => {
     const hasRealization = (projection.realizations || []).length > 0;
     if (!hasRealization && String(projection.status || "").toLowerCase() === "unpaid") {
@@ -1431,7 +1433,31 @@ export default function InvoiceDetail({
         toast.error("Record Account wajib dipilih");
         return;
       }
-      if (!paymentForm.categoryId || !paymentForm.categoryType) {
+      if (paymentSplitMode) {
+        if (paymentSplits.length < 2) {
+          toast.error("Split transaction minimal 2 baris");
+          return;
+        }
+        const invalidSplit = paymentSplits.some(
+          (split) =>
+            Number(split.amount || 0) <= 0 ||
+            !split.categoryId ||
+            !split.categoryType,
+        );
+        if (invalidSplit) {
+          toast.error("Semua split wajib punya amount dan category");
+          return;
+        }
+        if (Math.abs(splitRemaining) > 0.01) {
+          toast.error(
+            `Split belum balance. Remaining: ${formatMoney(
+              splitRemaining,
+              invoice.currency,
+            )}`,
+          );
+          return;
+        }
+      } else if (!paymentForm.categoryId || !paymentForm.categoryType) {
         toast.error("Category wajib dipilih");
         return;
       }
@@ -1505,8 +1531,22 @@ export default function InvoiceDetail({
 
       if (isMultiProjection) {
         payload.append("projectionIds", JSON.stringify(selectedProjectionIds));
-        payload.append("categoryId", paymentForm.categoryId);
-        payload.append("categoryType", paymentForm.categoryType);
+        if (paymentSplitMode) {
+          payload.append(
+            "splits",
+            JSON.stringify(
+              paymentSplits.map((split) => ({
+                amount: Number(split.amount || 0),
+                categoryId: split.categoryId,
+                categoryType: split.categoryType || "account",
+                description: split.description || "",
+              })),
+            ),
+          );
+        } else {
+          payload.append("categoryId", paymentForm.categoryId);
+          payload.append("categoryType", paymentForm.categoryType);
+        }
       } else {
         payload.append("amount", String(amount));
         if (paymentForm.projectionId) {
