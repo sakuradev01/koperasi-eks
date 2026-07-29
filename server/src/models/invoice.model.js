@@ -163,6 +163,30 @@ const invoicePaymentSchema = new mongoose.Schema(
       type: [mongoose.Schema.Types.ObjectId],
       default: [],
     },
+    coveredProjectionBreakdown: {
+      type: [
+        {
+          projectionId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+          },
+          projectionIndex: {
+            type: Number,
+            default: null,
+          },
+          amount: {
+            type: Number,
+            default: 0,
+          },
+          description: {
+            type: String,
+            default: "",
+            trim: true,
+          },
+        },
+      ],
+      default: [],
+    },
   },
   { _id: true },
 );

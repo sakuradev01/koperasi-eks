@@ -333,6 +333,22 @@ function normalizePayments(rawPayments) {
         coveredProjectionIds: parseFlexibleArray(payment?.coveredProjectionIds)
           .map((id) => normalizeObjectId(id))
           .filter(Boolean),
+        coveredProjectionBreakdown: Array.isArray(
+          payment?.coveredProjectionBreakdown,
+        )
+          ? payment.coveredProjectionBreakdown
+              .map((row) => ({
+                projectionId: normalizeObjectId(row?.projectionId),
+                projectionIndex:
+                  Number.isFinite(Number(row?.projectionIndex)) &&
+                  Number(row?.projectionIndex) > 0
+                    ? Number(row.projectionIndex)
+                    : null,
+                amount: clampMoney(row?.amount),
+                description: normalizeString(row?.description),
+              }))
+              .filter((row) => row.projectionId || row.projectionIndex)
+          : [],
       };
 
       if (
@@ -385,6 +401,13 @@ function dateDiffInDays(left, right) {
 function paymentMatchesProjection(payment, projection, projectionIndex) {
   if (!payment || !projection) return false;
 
+  const coveredIds = parseFlexibleArray(payment.coveredProjectionIds)
+    .map((id) => normalizeObjectId(id))
+    .filter(Boolean);
+  if (coveredIds.length > 0) {
+    return coveredIds.some((id) => sameObjectId(id, projection._id));
+  }
+
   // projectionId harus jadi source of truth.
   // Kalau projectionId ada, jangan fallback ke projectionIndex.
   if (payment.projectionId) {
@@ -396,6 +419,36 @@ function paymentMatchesProjection(payment, projection, projectionIndex) {
     Number(payment.projectionIndex || 0) > 0 &&
     Number(payment.projectionIndex) === Number(projectionIndex)
   );
+}
+
+/** Amount of a payment that counts toward one cicilan (multi-cover uses breakdown). */
+function paymentContributionToProjection(payment, projection, projectionIndex) {
+  if (!paymentMatchesProjection(payment, projection, projectionIndex)) {
+    return 0;
+  }
+
+  const breakdown = Array.isArray(payment.coveredProjectionBreakdown)
+    ? payment.coveredProjectionBreakdown
+    : [];
+  if (breakdown.length > 0) {
+    const row = breakdown.find(
+      (item) =>
+        sameObjectId(item?.projectionId, projection._id) ||
+        (Number(item?.projectionIndex || 0) > 0 &&
+          Number(item.projectionIndex) === Number(projectionIndex)),
+    );
+    return clampMoney(row?.amount);
+  }
+
+  const coveredIds = parseFlexibleArray(payment.coveredProjectionIds)
+    .map((id) => normalizeObjectId(id))
+    .filter(Boolean);
+  // Legacy multi-cover without breakdown: never attribute full total to each cicilan.
+  if (coveredIds.length > 1) {
+    return 0;
+  }
+
+  return clampMoney(payment.amount);
 }
 
 function enrichProjections(projections, payments) {
@@ -415,7 +468,11 @@ function enrichProjections(projections, payments) {
           : 0,
       }));
     const paidAmount = clampMoney(
-      realizations.reduce((sum, payment) => sum + clampMoney(payment.amount), 0),
+      safePayments.reduce(
+        (sum, payment) =>
+          sum + paymentContributionToProjection(payment, projection, projectionIndex),
+        0,
+      ),
     );
     const projectionAmount = clampMoney(projection.amount);
     const remainingAmount = clampMoney(Math.max(projectionAmount - paidAmount, 0));
@@ -798,10 +855,11 @@ function resolveInvoiceProjectionForPayment(
         (payment) =>
           !excludePaymentId || String(payment._id) !== String(excludePaymentId),
       )
-      .filter((payment) =>
-        paymentMatchesProjection(payment, projection, resolvedIndex),
-      )
-      .reduce((sum, payment) => sum + clampMoney(payment.amount), 0),
+      .reduce(
+        (sum, payment) =>
+          sum + paymentContributionToProjection(payment, projection, resolvedIndex),
+        0,
+      ),
   );
   const remainingAmount = clampMoney(
     Math.max(clampMoney(projection.amount) - paidAmount, 0),
@@ -850,10 +908,12 @@ function resolveMultipleProjectionsForPayment(invoice, projectionIds, excludePay
           (payment) =>
             !excludePaymentId || String(payment._id) !== String(excludePaymentId),
         )
-        .filter((payment) =>
-          paymentMatchesProjection(payment, projection, projectionIndex),
-        )
-        .reduce((sum, payment) => sum + clampMoney(payment.amount), 0),
+        .reduce(
+          (sum, payment) =>
+            sum +
+            paymentContributionToProjection(payment, projection, projectionIndex),
+          0,
+        ),
     );
     const remainingAmount = clampMoney(
       Math.max(clampMoney(projection.amount) - paidAmount, 0),
@@ -928,12 +988,80 @@ async function normalizeInvoicePaymentInput(req, invoice, options = {}) {
   if (amount <= 0) {
     throw new ApiError(400, "Nominal pembayaran tidak valid");
   }
-  const projectionMarker = resolveInvoiceProjectionForPayment(
-    invoice,
-    body,
-    amount,
-    excludePaymentId,
-  );
+
+  const existingCoveredIds = parseFlexibleArray(
+    existingPayment?.coveredProjectionIds,
+  )
+    .map((id) => normalizeObjectId(id))
+    .filter(Boolean);
+  const existingBreakdown = Array.isArray(
+    existingPayment?.coveredProjectionBreakdown,
+  )
+    ? existingPayment.coveredProjectionBreakdown
+    : [];
+  const isMultiCoverEdit =
+    existingCoveredIds.length > 1 || existingBreakdown.length > 1;
+
+  let projectionMarker = null;
+  if (isMultiCoverEdit) {
+    // Multi-cover: amount is total across covered cicilan, not one projection remaining.
+    const idSource =
+      existingCoveredIds.length > 0
+        ? existingCoveredIds
+        : existingBreakdown
+            .map((row) => normalizeObjectId(row?.projectionId))
+            .filter(Boolean);
+    let multiRemaining = 0;
+    for (const projId of idSource) {
+      const match = (invoice.projections || [])
+        .map((projection, index) => ({ projection, projectionIndex: index + 1 }))
+        .find(({ projection }) => sameObjectId(projection._id, projId));
+      if (!match) continue;
+      const { projection, projectionIndex } = match;
+      const paidElsewhere = clampMoney(
+        (invoice.payments || [])
+          .filter(
+            (payment) =>
+              !excludePaymentId ||
+              String(payment._id) !== String(excludePaymentId),
+          )
+          .reduce(
+            (sum, payment) =>
+              sum +
+              paymentContributionToProjection(
+                payment,
+                projection,
+                projectionIndex,
+              ),
+            0,
+          ),
+      );
+      multiRemaining += clampMoney(
+        Math.max(clampMoney(projection.amount) - paidElsewhere, 0),
+      );
+    }
+    multiRemaining = clampMoney(multiRemaining);
+    if (amount > multiRemaining + 0.01) {
+      throw new ApiError(
+        400,
+        `Nominal melebihi sisa total cicilan tercakup. Sisa: ${multiRemaining}`,
+      );
+    }
+    projectionMarker = {
+      projectionId: existingPayment?.projectionId || idSource[0] || null,
+      projectionIndex: existingPayment?.projectionIndex || null,
+      projectionDescription: existingPayment?.projectionDescription || "",
+      projectionDueDate: existingPayment?.projectionDueDate || null,
+      remainingAmount: multiRemaining,
+    };
+  } else {
+    projectionMarker = resolveInvoiceProjectionForPayment(
+      invoice,
+      body,
+      amount,
+      excludePaymentId,
+    );
+  }
   if (!accountId) {
     throw new ApiError(400, "Record Account wajib dipilih");
   }
@@ -982,6 +1110,27 @@ async function normalizeInvoicePaymentInput(req, invoice, options = {}) {
         uploadedAttachment?.originalname ||
         existingPayment?.attachmentOriginalName ||
         "",
+      coveredProjectionIds: parseFlexibleArray(
+        existingPayment?.coveredProjectionIds,
+      )
+        .map((id) => normalizeObjectId(id))
+        .filter(Boolean),
+      coveredProjectionBreakdown: Array.isArray(
+        existingPayment?.coveredProjectionBreakdown,
+      )
+        ? existingPayment.coveredProjectionBreakdown
+            .map((row) => ({
+              projectionId: normalizeObjectId(row?.projectionId),
+              projectionIndex:
+                Number.isFinite(Number(row?.projectionIndex)) &&
+                Number(row?.projectionIndex) > 0
+                  ? Number(row.projectionIndex)
+                  : null,
+              amount: clampMoney(row?.amount),
+              description: normalizeString(row?.description),
+            }))
+            .filter((row) => row.projectionId || row.projectionIndex)
+        : [],
     },
     splitRows,
     preserveExistingSplits,
@@ -1829,7 +1978,6 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
   const isMultiProjection = rawProjectionIds.length > 1;
 
   if (!isMultiProjection) {
-    // Single-projection path (backward compatible)
     let createdTransaction = null;
     let payment = null;
     try {
@@ -1878,7 +2026,7 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
     return;
   }
 
-  // Multi-projection path: one payment + one transaction per selected cicilan
+  // Multi: one payment + one journal covering all selected cicilan (match bank mutation)
   const resolvedProjections = resolveMultipleProjectionsForPayment(
     invoice,
     rawProjectionIds,
@@ -1916,7 +2064,17 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
   if (!account) {
     throw new ApiError(404, "Record Account tidak ditemukan");
   }
-  // Parse optional split rows for multi-projection
+
+  const totalAmount = clampMoney(
+    resolvedProjections.reduce(
+      (sum, p) => sum + clampMoney(p.remainingAmount),
+      0,
+    ),
+  );
+  if (totalAmount <= 0) {
+    throw new ApiError(400, "Total cicilan tidak valid");
+  }
+
   const rawSplitRows = getPaymentBodyValue(body, ["splits", "split_data"]);
   const multiSplitRows = normalizeSplitRows(rawSplitRows);
   const isMultiSplit = multiSplitRows.length > 0;
@@ -1925,81 +2083,65 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
     if (multiSplitRows.length < 2) {
       throw new ApiError(400, "Split transaction minimal 2 baris");
     }
-    const totalMulti = resolvedProjections.reduce(
-      (sum, p) => sum + clampMoney(p.remainingAmount),
-      0,
-    );
     const totalSplit = clampMoney(
       multiSplitRows.reduce((sum, s) => sum + s.amount, 0),
     );
-    if (Math.abs(totalSplit - totalMulti) > 0.01) {
+    if (Math.abs(totalSplit - totalAmount) > 0.01) {
       throw new ApiError(
         400,
-        `Total split (${totalSplit}) tidak sama dengan total cicilan (${totalMulti})`,
+        `Total split (${totalSplit}) tidak sama dengan total cicilan (${totalAmount})`,
       );
     }
   } else if (!categoryId || !categoryType) {
     throw new ApiError(400, "Category wajib dipilih");
   }
 
-  const createdTransactions = [];
-  const createdPayments = [];
+  const primary = resolvedProjections[0];
+  const coveredProjectionIds = resolvedProjections.map((p) => p.projectionId);
+  const coveredProjectionBreakdown = resolvedProjections.map((p) => ({
+    projectionId: p.projectionId,
+    projectionIndex: p.projectionIndex,
+    amount: clampMoney(p.remainingAmount),
+    description: p.projectionDescription,
+  }));
+  const cicilanLabels = resolvedProjections
+    .map((p) => `Cicilan ${p.projectionIndex}`)
+    .join(", ");
+  const multiNotes = [notes, `Cover: ${cicilanLabels}`]
+    .filter(Boolean)
+    .join(" | ");
+
+  let createdTransaction = null;
+  let payment = null;
   try {
-    const totalMulti = resolvedProjections.reduce(
-      (sum, p) => sum + clampMoney(p.remainingAmount),
-      0,
+    payment = {
+      _id: new mongoose.Types.ObjectId(),
+      paymentDate,
+      amount: totalAmount,
+      method,
+      notes: multiNotes,
+      accountId,
+      categoryId: isMultiSplit ? null : categoryId,
+      categoryType: isMultiSplit ? null : categoryType,
+      projectionId: primary.projectionId,
+      projectionIndex: primary.projectionIndex,
+      projectionDescription: primary.projectionDescription,
+      projectionDueDate: primary.projectionDueDate,
+      isSplit: isMultiSplit,
+      senderName,
+      attachment: uploadedAttachment?.filename || "",
+      attachmentOriginalName: uploadedAttachment?.originalname || "",
+      coveredProjectionIds,
+      coveredProjectionBreakdown,
+    };
+
+    createdTransaction = await createAccountingTransactionFromPayment(
+      invoice,
+      payment,
+      isMultiSplit ? multiSplitRows : [],
     );
-
-    for (const proj of resolvedProjections) {
-      const projAmount = clampMoney(proj.remainingAmount);
-
-      // Scale split rows proportionally for this cicilan (round all but last)
-      let projSplitRows = [];
-      if (isMultiSplit) {
-        const ratio = totalMulti > 0 ? projAmount / totalMulti : 0;
-        let scaledSum = 0;
-        projSplitRows = multiSplitRows.map((split, idx) => {
-          if (idx === multiSplitRows.length - 1) {
-            // Last row gets remainder to avoid rounding drift
-            const lastAmount = clampMoney(projAmount - scaledSum);
-            return { ...split, amount: lastAmount };
-          }
-          const scaled = clampMoney(split.amount * ratio);
-          scaledSum += scaled;
-          return { ...split, amount: scaled };
-        });
-      }
-
-      const payment = {
-        _id: new mongoose.Types.ObjectId(),
-        paymentDate,
-        amount: projAmount,
-        method,
-        notes,
-        accountId,
-        categoryId: isMultiSplit ? null : categoryId,
-        categoryType: isMultiSplit ? null : categoryType,
-        projectionId: proj.projectionId,
-        projectionIndex: proj.projectionIndex,
-        projectionDescription: proj.projectionDescription,
-        projectionDueDate: proj.projectionDueDate,
-        isSplit: isMultiSplit,
-        senderName,
-        attachment: uploadedAttachment?.filename || "",
-        attachmentOriginalName: uploadedAttachment?.originalname || "",
-        coveredProjectionIds: [proj.projectionId],
-      };
-
-      const transaction = await createAccountingTransactionFromPayment(
-        invoice,
-        payment,
-        projSplitRows,
-      );
-      payment.transactionId = transaction._id;
-      createdTransactions.push(transaction);
-      createdPayments.push(payment);
-      invoice.payments.push(payment);
-    }
+    payment.transactionId = createdTransaction._id;
+    invoice.payments.push(payment);
 
     const rebuilt = await buildInvoicePayload(invoice.toObject(), {
       currentInvoice: invoice,
@@ -2011,11 +2153,9 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
     });
     await invoice.save();
   } catch (error) {
-    // Rollback all created transactions on failure
-    for (const txn of createdTransactions) {
-      await deleteLinkedAccountingTransaction(txn._id, null);
-    }
-    if (!createdTransactions.length && uploadedAttachment?.filename) {
+    if (createdTransaction?._id) {
+      await deleteLinkedAccountingTransaction(createdTransaction._id, payment);
+    } else if (uploadedAttachment?.filename) {
       removeTransactionReceiptFile(uploadedAttachment.filename);
     }
     throw error;
@@ -2027,7 +2167,7 @@ export const addInvoicePayment = asyncHandler(async (req, res) => {
       new ApiResponse(
         200,
         await serializeInvoiceWithSplits(invoice),
-        `${createdPayments.length} cicilan berhasil dibayar`,
+        `${resolvedProjections.length} cicilan dibayar (1 payment)`,
       ),
     );
 });

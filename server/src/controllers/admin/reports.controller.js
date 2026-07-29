@@ -140,6 +140,14 @@ function isSameObjectId(left, right) {
 
 function paymentMatchesProjection(payment, projection, projectionIndex) {
   if (!payment || !projection) return false;
+
+  const coveredIds = Array.isArray(payment.coveredProjectionIds)
+    ? payment.coveredProjectionIds
+    : [];
+  if (coveredIds.length > 0) {
+    return coveredIds.some((id) => isSameObjectId(id, projection._id));
+  }
+
   if (payment.projectionId && isSameObjectId(payment.projectionId, projection._id)) {
     return true;
   }
@@ -147,6 +155,31 @@ function paymentMatchesProjection(payment, projection, projectionIndex) {
     Number(payment.projectionIndex || 0) > 0 &&
     Number(payment.projectionIndex) === Number(projectionIndex)
   );
+}
+
+/** Amount of a payment attributed to one cicilan (multi-cover uses breakdown). */
+function paymentContributionToProjection(payment, projection, projectionIndex) {
+  if (!paymentMatchesProjection(payment, projection, projectionIndex)) return 0;
+
+  const breakdown = Array.isArray(payment.coveredProjectionBreakdown)
+    ? payment.coveredProjectionBreakdown
+    : [];
+  if (breakdown.length > 0) {
+    const row = breakdown.find(
+      (item) =>
+        isSameObjectId(item?.projectionId, projection._id) ||
+        (Number(item?.projectionIndex || 0) > 0 &&
+          Number(item.projectionIndex) === Number(projectionIndex)),
+    );
+    return roundMoney(row?.amount || 0);
+  }
+
+  const coveredIds = Array.isArray(payment.coveredProjectionIds)
+    ? payment.coveredProjectionIds
+    : [];
+  if (coveredIds.length > 1) return 0;
+
+  return roundMoney(payment.amount || 0);
 }
 
 function getAgedReceivableBucket(daysOverdue) {
@@ -249,7 +282,14 @@ function buildProjectionReceivableDetails(invoice, asOfDate) {
               ? !payment.projectionId && !payment.projectionIndex
               : paymentMatchesProjection(payment, projection, projectionIndex),
           )
-          .reduce((sum, payment) => sum + roundMoney(payment.amount), 0),
+          .reduce(
+            (sum, payment) =>
+              sum +
+              (projection.synthetic
+                ? roundMoney(payment.amount || 0)
+                : paymentContributionToProjection(payment, projection, projectionIndex)),
+            0,
+          ),
       );
       const remainingAmount = roundMoney(Math.max(projectionAmount - paidAmount, 0));
       if (remainingAmount <= 0.009) return null;
@@ -306,18 +346,29 @@ function computePaymentReputation(invoice) {
     const dueDate = new Date(projection.estimateDate);
     if (Number.isNaN(dueDate.getTime())) continue;
 
-    const matchingPayments = payments.filter((payment) =>
-      payment.projectionId
+    const matchingPayments = payments.filter((payment) => {
+      const coveredIds = Array.isArray(payment.coveredProjectionIds)
+        ? payment.coveredProjectionIds
+        : [];
+      if (coveredIds.length > 0) {
+        return coveredIds.some((id) => isSameObjectId(id, projection._id));
+      }
+      return payment.projectionId
         ? isSameObjectId(payment.projectionId, projection._id)
         : Number(payment.projectionIndex || 0) > 0 &&
           Number(payment.projectionIndex) ===
-            (projections.indexOf(projection) + 1),
-    );
+            (projections.indexOf(projection) + 1);
+    });
 
     for (const payment of matchingPayments) {
       const payDate = new Date(payment.paymentDate);
       if (Number.isNaN(payDate.getTime())) continue;
-      totalPaid += roundMoney(payment.amount);
+      const contribution = paymentContributionToProjection(
+        payment,
+        projection,
+        projections.indexOf(projection) + 1,
+      );
+      totalPaid += contribution;
 
       const diffDays = dateDiffDays(payDate, dueDate);
       if (diffDays < 0) earlyCount += 1;

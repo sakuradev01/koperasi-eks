@@ -962,6 +962,33 @@ export default function InvoiceDetail({
     [paymentRecords],
   );
   const getPaymentProjectionLabel = (payment) => {
+    const breakdown = Array.isArray(payment?.coveredProjectionBreakdown)
+      ? payment.coveredProjectionBreakdown
+      : [];
+    if (breakdown.length > 1) {
+      return breakdown
+        .map((row) =>
+          row.projectionIndex
+            ? `Cicilan ${row.projectionIndex}`
+            : row.description || "",
+        )
+        .filter(Boolean)
+        .join(", ");
+    }
+    const coveredIds = Array.isArray(payment?.coveredProjectionIds)
+      ? payment.coveredProjectionIds
+      : [];
+    if (coveredIds.length > 1 && invoice?.projections?.length) {
+      const labels = coveredIds
+        .map((id) => {
+          const idx = invoice.projections.findIndex(
+            (p) => String(p._id) === String(id),
+          );
+          return idx >= 0 ? `Cicilan ${idx + 1}` : null;
+        })
+        .filter(Boolean);
+      if (labels.length) return labels.join(", ");
+    }
     if (!payment?.projectionIndex) return "Unassigned / Legacy";
     return [
       `Cicilan ${payment.projectionIndex}`,
@@ -1585,7 +1612,10 @@ export default function InvoiceDetail({
         editingPaymentId
           ? "Payment updated"
           : isMultiProjection
-            ? `${selectedProjectionIds.length} cicilan berhasil dibayar`
+            ? `${selectedProjectionIds.length} cicilan dibayar — 1 payment ${formatMoney(
+                multiProjectionTotal,
+                invoice.currency,
+              )}`
             : "Payment added",
       );
       setInvoice(res.data);
@@ -2025,12 +2055,11 @@ export default function InvoiceDetail({
                 <div>
                   <span>Payment received</span>
                   <strong>{formatDate(payment.paymentDate)}</strong>
-                  {payment.projectionIndex ? (
+                  {payment.projectionIndex ||
+                  (Array.isArray(payment.coveredProjectionIds) &&
+                    payment.coveredProjectionIds.length > 1) ? (
                     <em className="inv-payment-record-marker">
-                      Cicilan {payment.projectionIndex}
-                      {payment.projectionDescription
-                        ? ` - ${payment.projectionDescription}`
-                        : ""}
+                      {getPaymentProjectionLabel(payment)}
                     </em>
                   ) : (
                     <em className="inv-payment-record-marker legacy">
@@ -2880,7 +2909,7 @@ export default function InvoiceDetail({
                                     <span>
                                       Total {formatMoney(multiProjectionTotal, invoice.currency)}
                                     </span>
-                                    <span>Amount akan dihitung otomatis per cicilan</span>
+                                    <span>1 receipt = total mutasi bank (bukan per cicilan)</span>
                                   </div>
                                 ) : null}
                                 {!outstandingProjections.length ? (
@@ -2921,7 +2950,7 @@ export default function InvoiceDetail({
                               Amount ({invoice.currency || "IDR"})
                             </label>
                             <div className="inv-input" style={{ background: "#f0f0f0", color: "#666" }}>
-                              {formatMoney(multiProjectionTotal, invoice.currency)} (otomatis per cicilan)
+                              {formatMoney(multiProjectionTotal, invoice.currency)} (1 payment total)
                             </div>
                           </div>
                         ) : (
