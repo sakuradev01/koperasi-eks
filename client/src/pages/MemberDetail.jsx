@@ -9,6 +9,7 @@ import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { toast } from "react-toastify";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { renderMutasiAccountHeader } from "../utils/mutasiPdfLayout.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -608,118 +609,16 @@ const MemberDetail = () => {
       doc.text("REKENING SIMPANAN", 20, yPos);
       yPos += 8;
 
-      // Two-column member/account header (fixed widths so text never collides)
-      const marginX = 20;
-      const gap = 4;
-      const leftBoxW = 95;
-      const rightBoxW = pageWidth - marginX * 2 - leftBoxW - gap; // ~71 on A4
-      const leftBoxX = marginX;
-      const rightBoxX = leftBoxX + leftBoxW + gap;
-      const leftPad = 2;
-      const rightPad = 2;
-      const leftTextW = leftBoxW - leftPad * 2;
-      const rightTextW = rightBoxW - rightPad * 2;
-      const headerTop = yPos - 2;
-      const lineH = 4.5;
-
-      const sanitizePdfText = (value, fallback = "-") => {
-        const raw = value == null ? "" : String(value);
-        // Drop control chars that garble Helvetica; keep printable + common punctuation
-        const cleaned = raw
-          .replace(/[\u0000-\u001F\u007F]/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (!cleaned || cleaned === "-") return fallback;
-        return cleaned;
-      };
-
-      // --- Left column: name, address (wrapped), phone, country ---
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-      const nameLines = doc.splitTextToSize(
-        sanitizePdfText(member.name?.toUpperCase(), "NAMA TIDAK TERSEDIA"),
-        leftTextW
-      );
-
-      doc.setFont("helvetica", "normal");
-      const addressRaw =
-        member.completeAddress && String(member.completeAddress).trim() !== "-"
-          ? member.completeAddress
-          : member.address || "";
-      const addressLines = doc.splitTextToSize(
-        sanitizePdfText(addressRaw, "ALAMAT TIDAK TERSEDIA"),
-        leftTextW
-      );
-      const phoneLine = sanitizePdfText(member.phone, "TELEPON TIDAK TERSEDIA");
-      const countryLine = "INDONESIA";
-
-      let leftY = headerTop + 5;
-      doc.setFont("helvetica", "bold");
-      nameLines.forEach((line) => {
-        doc.text(line, leftBoxX + leftPad, leftY);
-        leftY += lineH;
+      const accountHeaderBottom = renderMutasiAccountHeader({
+        doc,
+        member,
+        pageNum,
+        totalPages,
+        currentMonth,
+        currentYear,
+        startY: yPos - 2,
       });
-      doc.setFont("helvetica", "normal");
-      addressLines.forEach((line) => {
-        doc.text(line, leftBoxX + leftPad, leftY);
-        leftY += lineH;
-      });
-      doc.text(phoneLine, leftBoxX + leftPad, leftY);
-      leftY += lineH;
-      doc.text(countryLine, leftBoxX + leftPad, leftY);
-      leftY += 3;
-
-      // --- Right column: rekening / halaman / periode / mata uang ---
-      doc.setFontSize(8);
-      const accNum = sanitizePdfText(
-        member.accountNumber && String(member.accountNumber).trim() !== "-"
-          ? member.accountNumber
-          : null,
-        "TIDAK TERSEDIA"
-      );
-      const rightRows = [
-        { label: "NO. REKENING", value: accNum },
-        { label: "HALAMAN", value: `${pageNum} / ${totalPages}` },
-        { label: "PERIODE", value: `${currentMonth} ${currentYear}` },
-        { label: "MATA UANG", value: "IDR" },
-      ];
-
-      // Optional class/product if present (prod sometimes shows KELAS)
-      const kelasVal =
-        member.className ||
-        member.kelas ||
-        member.product?.name ||
-        member.productName ||
-        null;
-      if (kelasVal) {
-        rightRows.splice(1, 0, {
-          label: "KELAS",
-          value: sanitizePdfText(kelasVal, "-"),
-        });
-      }
-
-      let rightY = headerTop + 5;
-      const labelW = 28;
-      rightRows.forEach((row) => {
-        doc.setFont("helvetica", "bold");
-        doc.text(`${row.label} :`, rightBoxX + rightPad, rightY);
-        doc.setFont("helvetica", "normal");
-        const valueLines = doc.splitTextToSize(String(row.value), rightTextW - labelW);
-        valueLines.forEach((vLine, idx) => {
-          doc.text(vLine, rightBoxX + rightPad + labelW, rightY + idx * lineH);
-        });
-        rightY += Math.max(lineH, valueLines.length * lineH);
-      });
-
-      const boxBottom = Math.max(leftY, rightY) + 2;
-      const boxH = Math.max(22, boxBottom - headerTop);
-
-      doc.setLineWidth(0.8);
-      doc.setDrawColor(0, 0, 0);
-      doc.rect(leftBoxX, headerTop - 3, leftBoxW, boxH, "S");
-      doc.rect(rightBoxX, headerTop - 3, rightBoxW, boxH, "S");
-
-      yPos = headerTop - 3 + boxH + 5;
+      yPos = accountHeaderBottom + 5;
 
       
       // Notes with 2 column layout and border
