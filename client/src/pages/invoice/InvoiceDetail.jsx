@@ -2364,7 +2364,7 @@ export default function InvoiceDetail({
                 </div>
 
                 <div className="inv-table-wrap inv-print-items-wrap">
-                  <table className="inv-print-table">
+                  <table className="inv-print-table inv-print-items-table">
                     <thead>
                       <tr>
                         <th>Item</th>
@@ -2558,7 +2558,7 @@ export default function InvoiceDetail({
                 </div>
 
                 <div className="inv-table-wrap inv-print-items-wrap">
-                  <table className="inv-print-table">
+                  <table className="inv-print-table inv-print-items-table">
                     <thead>
                       <tr>
                         <th>品目</th>
