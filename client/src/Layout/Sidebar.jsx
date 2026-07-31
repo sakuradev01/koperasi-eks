@@ -310,8 +310,8 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
   return (
     <>
       {/* Desktop Sidebar */}
-      <div className="hidden lg:flex w-64 bg-white shadow-lg flex-col h-screen border-r border-pink-200">
-        <div className="p-6">
+      <div className="hidden lg:flex w-64 bg-white shadow-lg flex-col h-screen min-h-0 border-r border-pink-200">
+        <div className="flex flex-1 min-h-0 flex-col p-6">
           <div className="flex items-center mb-8">
             <div className="w-10 h-10 bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg flex items-center justify-center mr-3">
               <span className="text-white text-xl font-bold">🌸</span>
@@ -322,7 +322,9 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
             </div>
           </div>
 
-          <nav className="space-y-1 flex-1">{renderMenuItems(filteredMenuItems)}</nav>
+          <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1">
+            {renderMenuItems(filteredMenuItems)}
+          </nav>
         </div>
 
         <div className="mt-auto p-6 border-t border-pink-200">
@@ -369,8 +371,8 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
             </div>
           </div>
 
-          <div className="flex-1 p-4">
-          <nav className="space-y-1">{renderMenuItems(filteredMenuItems)}</nav>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <nav className="space-y-1">{renderMenuItems(filteredMenuItems)}</nav>
           </div>
 
           <div className="p-4 border-t border-pink-200">
