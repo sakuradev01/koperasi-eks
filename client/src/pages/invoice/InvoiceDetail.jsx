@@ -2118,20 +2118,32 @@ export default function InvoiceDetail({
       }`}
     >
       {publicView ? (
-        <div className="inv-public-toolbar inv-no-print">
-          <div>
-            <span>Public Invoice</span>
-            <strong>{invoiceNumber}</strong>
+        <>
+          <div className="inv-public-toolbar inv-no-print">
+            <div>
+              <span>Public Invoice</span>
+              <strong>{invoiceNumber}</strong>
+            </div>
+            <div className="inv-public-actions">
+              <button type="button" onClick={() => handlePrint("standard")}>
+                Print / Save PDF
+              </button>
+              <button type="button" onClick={() => handlePrint("japan")}>
+                Print Japan
+              </button>
+            </div>
           </div>
-          <div className="inv-public-actions">
-            <button type="button" onClick={() => handlePrint("standard")}>
-              Print / Save PDF
-            </button>
-            <button type="button" onClick={() => handlePrint("japan")}>
-              Print Japan
-            </button>
-          </div>
-        </div>
+          {!loading && invoiceIsDraft ? (
+            <div className="inv-draft-bar inv-no-print">
+              <p>
+                <strong>Draft invoice</strong>
+                <span>
+                  Invoice ini masih draft dan dapat berubah sebelum dipublish.
+                </span>
+              </p>
+            </div>
+          ) : null}
+        </>
       ) : (
         <>
           <div className="inv-samit-hero inv-no-print">

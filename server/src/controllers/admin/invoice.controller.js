@@ -1731,13 +1731,10 @@ export const getPublicInvoiceByNumber = asyncHandler(async (req, res) => {
   const invoiceNumber = String(req.params.invoiceNumber || "")
     .trim()
     .toUpperCase();
-  const invoice = await Invoice.findOne({
-    invoiceNumber,
-    status: { $ne: "draft" },
-  }).lean();
+  const invoice = await Invoice.findOne({ invoiceNumber }).lean();
 
   if (!invoice) {
-    throw new ApiError(404, "Invoice tidak ditemukan atau belum dipublish");
+    throw new ApiError(404, "Invoice tidak ditemukan");
   }
 
   const payload = await serializePublicInvoice(invoice);
