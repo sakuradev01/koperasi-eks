@@ -9,6 +9,7 @@ import { BankReconciliationItem } from "../../models/bankReconciliationItem.mode
 import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { buildTransactionListFilter } from "../../utils/transactionQuery.js";
+import { buildTransactionDrilldown } from "../../utils/transactionDrilldown.js";
 
 function normalizeNullable(value) {
   if (value === undefined || value === null) return null;
@@ -299,6 +300,16 @@ export const getTransactions = async (req, res) => {
       obj.splitCategories = obj.isSplit
         ? splitsByTxn.get(String(obj._id)) || []
         : [];
+      if (categoryFilterActive) {
+        const drilldown = buildTransactionDrilldown({
+          transaction: obj,
+          splits: obj.splitCategories,
+          categoryClauses,
+          categoryFilterActive,
+        });
+        obj.drilldownAmount = drilldown.amount;
+        obj.drilldownSplits = drilldown.splits;
+      }
       obj.isReconciled = reconciledSet.has(String(obj._id));
       return obj;
     });

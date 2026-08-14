@@ -286,6 +286,7 @@ export default function Transactions() {
     });
     return query;
   }, [location.search]);
+  const hasReportCategoryFilter = Boolean(reportQuery.filter_category_id || reportQuery.filter_category);
 
   // ===== Dropdown Visibility =====
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
@@ -1401,6 +1402,16 @@ export default function Transactions() {
                   const invoiceId = detectInvoiceId(txn.description);
                   const isJournalEntry = txn.entryType === "journal_entry";
                   const isReportHighlighted = reportHighlightId && String(txn._id) === String(reportHighlightId);
+                  const visibleSplitCategories = hasReportCategoryFilter
+                    ? (txn.drilldownSplits || [])
+                    : (txn.splitCategories || []);
+                  const displayAmount = hasReportCategoryFilter && Number.isFinite(Number(txn.drilldownAmount))
+                    ? txn.drilldownAmount
+                    : txn.amount;
+                  const displaySplitNames = visibleSplitCategories
+                    .map((split) => split.categoryName)
+                    .filter(Boolean)
+                    .join(", ");
 
                   if (reconMode && activeRecon) {
                     // ===== RECONCILIATION MODE ROW =====
@@ -1483,8 +1494,10 @@ export default function Transactions() {
                       <td className="px-3 py-3.5 text-gray-500 text-xs">
                         {txn.isSplit ? (
                           <span className="text-purple-600 font-semibold cursor-help"
-                            title={txn.splitCategories?.map((s) => s.categoryName).join(", ")}>
-                            Split ({txn.splitCategories?.length || 0} categories)
+                            title={displaySplitNames || "Selected split category"}>
+                            {hasReportCategoryFilter
+                              ? (displaySplitNames || "Selected split category")
+                              : `Split (${visibleSplitCategories.length} categories)`}
                           </span>
                         ) : (txn.categoryName || "-")}
                       </td>
@@ -1492,7 +1505,7 @@ export default function Transactions() {
                         isDeposit ? "text-emerald-600" : "text-gray-900"
                       }`}>
                         {isJournalEntry ? "" : (isDeposit ? "" : "-")}
-                        {(txn.accountId?.currency || "Rp")} {formatNumber(txn.amount)}
+                        {(txn.accountId?.currency || "Rp")} {formatNumber(displayAmount)}
                       </td>
                       <td className="px-3 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-1">
