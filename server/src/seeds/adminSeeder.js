@@ -1,33 +1,34 @@
-import bcrypt from "bcryptjs";
 import { User } from "../models/user.model.js";
 
 export const createAdminUser = async () => {
   try {
-    // Check if admin already exists
-    const existingAdmin = await User.findOne({ username: "admin" });
+    const seedUsername = String(process.env.INITIAL_ADMIN_USERNAME || "").trim();
+    const seedPassword = String(process.env.INITIAL_ADMIN_PASSWORD || "");
+
+    if (!seedUsername || !seedPassword) {
+      console.log("Initial admin seed dilewati: INITIAL_ADMIN_USERNAME/PASSWORD belum dikonfigurasi.");
+      return;
+    }
+
+    // Jangan menambah admin kedua jika database sudah memiliki admin.
+    const existingAdmin = await User.findOne({ role: "admin" });
 
     if (existingAdmin) {
       console.log("Admin user already exists");
       return;
     }
 
-    // Hash the password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash("admin123", salt);
-
     // Create admin user
     const adminUser = new User({
-      username: "admin",
-      password: hashedPassword,
-      name: "Administrator",
+      username: seedUsername,
+      password: seedPassword,
+      name: process.env.INITIAL_ADMIN_NAME || "Administrator",
       role: "admin",
       isActive: true,
     });
 
     await adminUser.save();
-    console.log("Admin user created successfully");
-    console.log("Username: admin");
-    console.log("Password: admin123");
+    console.log("Admin user created from bootstrap configuration");
   } catch (error) {
     console.error("Error creating admin user:", error);
   }

@@ -17,8 +17,18 @@ const connectDB = async () => {
 // Seed admin user
 const seedAdminUser = async () => {
   try {
-    // Cek apakah admin sudah ada
-    const existingAdmin = await User.findOne({ username: "admin" });
+    // Seed hanya jika kredensial bootstrap diberikan secara eksplisit melalui env.
+    // Jangan pernah membuat kembali akun default yang credential-nya tertanam di source.
+    const seedUsername = String(process.env.INITIAL_ADMIN_USERNAME || "").trim();
+    const seedPassword = String(process.env.INITIAL_ADMIN_PASSWORD || "");
+
+    if (!seedUsername || !seedPassword) {
+      console.log("Initial admin seed dilewati: INITIAL_ADMIN_USERNAME/PASSWORD belum dikonfigurasi.");
+      return;
+    }
+
+    // Jangan menambah admin kedua jika database sudah memiliki admin aktif/nonaktif.
+    const existingAdmin = await User.findOne({ role: "admin" });
 
     if (existingAdmin) {
       console.log("Admin user sudah ada");
@@ -32,18 +42,15 @@ const seedAdminUser = async () => {
 
     const adminUser = new User({
       uuid: adminUuid,
-      username: "admin",
-      password: "admin123", // Password akan di-hash otomatis oleh pre-save middleware
-      name: "Administrator",
+      username: seedUsername,
+      password: seedPassword, // Password akan di-hash otomatis oleh pre-save middleware
+      name: process.env.INITIAL_ADMIN_NAME || "Administrator",
       role: "admin",
       isActive: true,
     });
 
     await adminUser.save();
-    console.log("Admin user berhasil dibuat:");
-    console.log("Username: admin");
-    console.log("Password: admin123");
-    console.log("Role: admin");
+    console.log("Admin user berhasil dibuat dari konfigurasi bootstrap.");
   } catch (error) {
     console.error("Error creating admin user:", error);
   }
