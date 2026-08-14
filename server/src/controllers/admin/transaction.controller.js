@@ -1,4 +1,5 @@
 import fs from "fs";
+import mongoose from "mongoose";
 import { AccountingTransaction } from "../../models/accountingTransaction.model.js";
 import { TransactionSplit } from "../../models/transactionSplit.model.js";
 import { CoaAccount } from "../../models/coaAccount.model.js";
@@ -7,6 +8,7 @@ import { CoaSubmenu } from "../../models/coaSubmenu.model.js";
 import { BankReconciliationItem } from "../../models/bankReconciliationItem.model.js";
 import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
+import { buildTransactionListFilter } from "../../utils/transactionQuery.js";
 
 function normalizeNullable(value) {
   if (value === undefined || value === null) return null;
@@ -30,6 +32,69 @@ function normalizeTransactionType(value) {
   if (normalized === "deposit") return "Deposit";
   if (normalized === "withdrawal") return "Withdrawal";
   return String(value || "").trim();
+}
+
+function firstQueryValue(query, keys) {
+  for (const key of keys) {
+    const rawValue = Array.isArray(query?.[key]) ? query[key][0] : query?.[key];
+    const value = normalizeNullable(rawValue);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function categoryClauseKey(clause) {
+  return `${clause.categoryType}:${String(clause.categoryId)}`;
+}
+
+async function resolveCategoryClauses({ categoryId, categoryType, categoryName }) {
+  const clauses = [];
+  const addClause = (id, type) => {
+    if (!id || !type) return;
+    const clause = { categoryId: id, categoryType: type };
+    if (!clauses.some((item) => categoryClauseKey(item) === categoryClauseKey(clause))) {
+      clauses.push(clause);
+    }
+  };
+
+  const allowedTypes = ["master", "submenu", "account"];
+  const requestedType = allowedTypes.includes(categoryType) ? categoryType : null;
+  if (categoryId) {
+    if (requestedType) addClause(categoryId, requestedType);
+    else allowedTypes.forEach((type) => addClause(categoryId, type));
+    return clauses;
+  }
+
+  if (!categoryName) return clauses;
+
+  const nameMatcher = new RegExp(`^${escapeRegExp(categoryName)}$`, "i");
+  const searches = [];
+  if (!requestedType || requestedType === "master") {
+    searches.push(
+      CoaMaster.find({ masterName: nameMatcher }).select("_id").lean()
+        .then((rows) => rows.map((row) => ({ row, type: "master" })))
+    );
+  }
+  if (!requestedType || requestedType === "submenu") {
+    searches.push(
+      CoaSubmenu.find({ submenuName: nameMatcher }).select("_id").lean()
+        .then((rows) => rows.map((row) => ({ row, type: "submenu" })))
+    );
+  }
+  if (!requestedType || requestedType === "account") {
+    searches.push(
+      CoaAccount.find({ accountName: nameMatcher }).select("_id").lean()
+        .then((rows) => rows.map((row) => ({ row, type: "account" })))
+    );
+  }
+
+  const matches = (await Promise.all(searches)).flat();
+  matches.forEach(({ row, type }) => addClause(row._id, type));
+  return clauses;
 }
 
 function normalizeSplits(rawSplits) {
@@ -141,11 +206,31 @@ async function resolveCategoryName(categoryId, categoryType) {
  */
 export const getTransactions = async (req, res) => {
   try {
-    const { account } = req.query;
+    const account = firstQueryValue(req.query, ["account"]);
+    const dateFrom = firstQueryValue(req.query, ["filter_date_from", "date_from", "dateFrom"]);
+    const dateTo = firstQueryValue(req.query, ["filter_date_to", "date_to", "dateTo"]);
+    const requestedCategoryId = firstQueryValue(req.query, ["filter_category_id", "category_id", "categoryId"]);
+    const categoryType = firstQueryValue(req.query, ["filter_category_type", "category_type", "categoryType"]);
+    const categoryName = firstQueryValue(req.query, ["filter_category", "category", "categoryName"]);
+    const categoryId = requestedCategoryId && mongoose.Types.ObjectId.isValid(requestedCategoryId)
+      ? requestedCategoryId
+      : null;
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
-    const filter = {};
-    if (account) filter.accountId = account;
+
+    const categoryFilterActive = !!(requestedCategoryId || categoryName);
+    const categoryClauses = await resolveCategoryClauses({ categoryId, categoryType, categoryName });
+    const splitTransactionIds = categoryClauses.length
+      ? await TransactionSplit.find({ $or: categoryClauses }).distinct("transactionId")
+      : [];
+    const filter = buildTransactionListFilter({
+      account,
+      dateFrom,
+      dateTo,
+      categoryClauses,
+      splitTransactionIds,
+      categoryFilterActive,
+    });
 
     // List read: paginate + batch enrich (no per-row N+1)
     const [totalItems, transactions] = await Promise.all([
