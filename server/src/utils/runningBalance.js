@@ -9,6 +9,11 @@ function toAmount(value) {
   return Number.isFinite(amount) ? Math.abs(amount) : 0;
 }
 
+function toNumber(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 function timestamp(value) {
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
@@ -21,7 +26,41 @@ function compareHistoryRowsDesc(left, right) {
   const createdAtDiff = timestamp(right.createdAt) - timestamp(left.createdAt);
   if (createdAtDiff !== 0) return createdAtDiff;
 
-  return toIdString(right._id ?? right.id).localeCompare(toIdString(left._id ?? left.id));
+  return toIdString(right._id ?? right.id ?? right.transactionId)
+    .localeCompare(toIdString(left._id ?? left.id ?? left.transactionId));
+}
+
+function signedTransactionAmount(row) {
+  const amount = toAmount(row.amount);
+  if (row.transactionType === "Deposit") return amount;
+  if (row.transactionType === "Withdrawal") return -amount;
+  return 0;
+}
+
+function calculateLedgerRunningBalances({ accountBalances = [], ledgerRows = [] } = {}) {
+  const balanceByAccount = new Map();
+  for (const account of accountBalances) {
+    const accountId = toIdString(account?._id ?? account?.id);
+    if (!accountId) continue;
+    balanceByAccount.set(accountId, toNumber(account.balance));
+  }
+
+  const calculatedBalances = new Map();
+  const orderedRows = [...ledgerRows].sort(compareHistoryRowsDesc);
+
+  for (const row of orderedRows) {
+    const accountId = toIdString(row?.accountId);
+    if (!accountId || !balanceByAccount.has(accountId)) continue;
+
+    const transactionId = toIdString(row?.transactionId ?? row?._id ?? row?.id);
+    if (!transactionId) continue;
+
+    const currentBalance = balanceByAccount.get(accountId);
+    calculatedBalances.set(transactionId, currentBalance);
+    balanceByAccount.set(accountId, currentBalance - toNumber(row.signedAmount));
+  }
+
+  return calculatedBalances;
 }
 
 /**
@@ -31,34 +70,48 @@ function compareHistoryRowsDesc(left, right) {
  * contain all transactions for those accounts, not only the visible page.
  */
 export function calculateRunningBalances({ accountBalances = [], historyRows = [] } = {}) {
-  const balanceByAccount = new Map();
-  for (const account of accountBalances) {
-    const accountId = toIdString(account?._id ?? account?.id);
-    if (!accountId) continue;
-    const balance = Number(account.balance);
-    balanceByAccount.set(accountId, Number.isFinite(balance) ? balance : 0);
-  }
+  return calculateLedgerRunningBalances({
+    accountBalances,
+    ledgerRows: historyRows.map((row) => ({
+      ...row,
+      transactionId: row?._id ?? row?.id,
+      signedAmount: signedTransactionAmount(row),
+    })),
+  });
+}
 
-  const calculatedBalances = new Map();
-  const orderedRows = [...historyRows].sort(compareHistoryRowsDesc);
-
-  for (const row of orderedRows) {
-    const accountId = toIdString(row?.accountId);
-    if (!accountId || !balanceByAccount.has(accountId)) continue;
-
-    const transactionId = toIdString(row?._id ?? row?.id);
+/**
+ * Calculate a running balance for a report/category ledger. Unlike the bank
+ * account calculation above, this starts from the complete signed movement
+ * set because category accounts do not maintain the payment account balance.
+ * Multiple split rows belonging to one parent transaction are aggregated so
+ * the returned map still has one balance per displayed transaction.
+ */
+export function calculateRunningBalancesFromMovements({ movementRows = [] } = {}) {
+  const groupedRows = new Map();
+  for (const row of movementRows) {
+    const transactionId = toIdString(row?.transactionId ?? row?._id ?? row?.id);
     if (!transactionId) continue;
 
-    const currentBalance = balanceByAccount.get(accountId);
-    calculatedBalances.set(transactionId, currentBalance);
-
-    const amount = toAmount(row.amount);
-    if (row.transactionType === "Deposit") {
-      balanceByAccount.set(accountId, currentBalance - amount);
-    } else if (row.transactionType === "Withdrawal") {
-      balanceByAccount.set(accountId, currentBalance + amount);
+    const existing = groupedRows.get(transactionId);
+    if (existing) {
+      existing.signedAmount += toNumber(row.signedAmount);
+      continue;
     }
+
+    groupedRows.set(transactionId, {
+      ...row,
+      transactionId,
+      accountId: "__report_category__",
+      signedAmount: toNumber(row.signedAmount),
+    });
   }
 
-  return calculatedBalances;
+  const ledgerRows = [...groupedRows.values()];
+  const currentBalance = ledgerRows.reduce((sum, row) => sum + row.signedAmount, 0);
+
+  return calculateLedgerRunningBalances({
+    accountBalances: [{ _id: "__report_category__", balance: currentBalance }],
+    ledgerRows,
+  });
 }

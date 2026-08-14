@@ -10,7 +10,10 @@ import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { buildTransactionListFilter } from "../../utils/transactionQuery.js";
 import { buildTransactionDrilldown } from "../../utils/transactionDrilldown.js";
-import { calculateRunningBalances } from "../../utils/runningBalance.js";
+import {
+  calculateRunningBalances,
+  calculateRunningBalancesFromMovements,
+} from "../../utils/runningBalance.js";
 
 function normalizeNullable(value) {
   if (value === undefined || value === null) return null;
@@ -49,6 +52,16 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function signedCategoryMovement(masterName, transactionType, amount) {
+  const money = Math.abs(Number(amount) || 0);
+  if (masterName === "Income") return transactionType === "Deposit" ? money : -money;
+  if (masterName === "Expenses") return transactionType === "Withdrawal" ? money : -money;
+  if (["Assets", "Expenses"].includes(masterName)) {
+    return transactionType === "Deposit" ? money : -money;
+  }
+  return transactionType === "Deposit" ? -money : money;
+}
+
 function categoryClauseKey(clause) {
   return `${clause.categoryType}:${String(clause.categoryId)}`;
 }
@@ -68,6 +81,13 @@ async function resolveCategoryClauses({ categoryId, categoryType, categoryName }
   if (categoryId) {
     if (requestedType) addClause(categoryId, requestedType);
     else allowedTypes.forEach((type) => addClause(categoryId, type));
+
+    // Profit & Loss account rows also inherit transactions posted directly to
+    // their parent submenu, matching the report aggregation semantics.
+    if (requestedType === "account") {
+      const account = await CoaAccount.findById(categoryId).select("submenuId").lean();
+      if (account?.submenuId) addClause(account.submenuId, "submenu");
+    }
     return clauses;
   }
 
@@ -225,6 +245,13 @@ export const getTransactions = async (req, res) => {
     const splitTransactionIds = categoryClauses.length
       ? await TransactionSplit.find({ $or: categoryClauses }).distinct("transactionId")
       : [];
+    const categoryAccountIds = [
+      ...new Set(
+        categoryClauses
+          .filter((clause) => clause.categoryType === "account")
+          .map((clause) => String(clause.categoryId)),
+      ),
+    ];
     const filter = buildTransactionListFilter({
       account,
       dateFrom,
@@ -258,7 +285,18 @@ export const getTransactions = async (req, res) => {
       ),
     ];
 
-    const [allSplits, reconItems, masters, submenus, accounts, accountBalances, historyRows] = await Promise.all([
+    const [
+      allSplits,
+      reconItems,
+      masters,
+      submenus,
+      accounts,
+      accountBalances,
+      historyRows,
+      categoryDirectHistory,
+      categorySplitParents,
+      categorySplitRows,
+    ] = await Promise.all([
       splitTxnIds.length
         ? TransactionSplit.find({ transactionId: { $in: splitTxnIds } })
             .sort({ createdAt: 1, _id: 1 })
@@ -273,8 +311,8 @@ export const getTransactions = async (req, res) => {
             .lean()
         : [],
       CoaMaster.find({}).select("_id masterName").lean(),
-      CoaSubmenu.find({}).select("_id submenuName").lean(),
-      CoaAccount.find({}).select("_id accountName").lean(),
+      CoaSubmenu.find({}).select("_id submenuName masterId").lean(),
+      CoaAccount.find({}).select("_id accountName submenuId").lean(),
       displayAccountIds.length
         ? CoaAccount.find({ _id: { $in: displayAccountIds } }).select("_id balance").lean()
         : [],
@@ -284,6 +322,30 @@ export const getTransactions = async (req, res) => {
             .sort({ transactionDate: -1, createdAt: -1, _id: -1 })
             .lean()
         : [],
+      categoryAccountIds.length && categoryClauses.length
+        ? AccountingTransaction.find({
+            $and: [
+              { $or: categoryClauses },
+              { $or: [{ isSplit: false }, { isSplit: null }, { isSplit: { $exists: false } }] },
+            ],
+          })
+            .select("_id categoryId categoryType transactionDate createdAt transactionType amount")
+            .lean()
+        : [],
+      categoryAccountIds.length && splitTransactionIds.length
+        ? AccountingTransaction.find({ _id: { $in: splitTransactionIds } })
+            .select("_id transactionDate createdAt transactionType")
+            .lean()
+        : [],
+      categoryAccountIds.length && splitTransactionIds.length
+        ? TransactionSplit.find({
+            transactionId: { $in: splitTransactionIds },
+            categoryType: "account",
+            categoryId: { $in: categoryAccountIds },
+          })
+            .select("transactionId categoryId amount")
+            .lean()
+        : [],
     ]);
 
     const runningBalances = calculateRunningBalances({ accountBalances, historyRows });
@@ -291,6 +353,53 @@ export const getTransactions = async (req, res) => {
     const masterMap = new Map(masters.map((m) => [String(m._id), m.masterName]));
     const submenuMap = new Map(submenus.map((s) => [String(s._id), s.submenuName]));
     const accountMap = new Map(accounts.map((a) => [String(a._id), a.accountName]));
+    const submenuMasterMap = new Map(
+      submenus.map((submenu) => [String(submenu._id), masterMap.get(String(submenu.masterId)) || null]),
+    );
+    const accountMasterMap = new Map(
+      accounts.map((accountRow) => [
+        String(accountRow._id),
+        submenuMasterMap.get(String(accountRow.submenuId)) || null,
+      ]),
+    );
+
+    const categoryMovements = [];
+    for (const transaction of categoryDirectHistory) {
+      categoryMovements.push({
+        transactionId: transaction._id,
+        transactionDate: transaction.transactionDate,
+        createdAt: transaction.createdAt,
+        signedAmount: signedCategoryMovement(
+          transaction.categoryType === "submenu"
+            ? submenuMasterMap.get(String(transaction.categoryId))
+            : accountMasterMap.get(String(transaction.categoryId)),
+          transaction.transactionType,
+          transaction.amount,
+        ),
+      });
+    }
+
+    const categorySplitParentMap = new Map(
+      categorySplitParents.map((transaction) => [String(transaction._id), transaction]),
+    );
+    for (const split of categorySplitRows) {
+      const parent = categorySplitParentMap.get(String(split.transactionId));
+      if (!parent) continue;
+      categoryMovements.push({
+        transactionId: parent._id,
+        transactionDate: parent.transactionDate,
+        createdAt: parent.createdAt,
+        signedAmount: signedCategoryMovement(
+          accountMasterMap.get(String(split.categoryId)),
+          parent.transactionType,
+          split.amount,
+        ),
+      });
+    }
+
+    const categoryRunningBalances = categoryAccountIds.length
+      ? calculateRunningBalancesFromMovements({ movementRows: categoryMovements })
+      : new Map();
     const nameFor = (categoryId, categoryType) => {
       if (!categoryId) return null;
       const id = String(categoryId);
@@ -330,8 +439,9 @@ export const getTransactions = async (req, res) => {
         obj.drilldownAmount = drilldown.amount;
         obj.drilldownSplits = drilldown.splits;
       }
-      obj.runningBalance = runningBalances.has(String(obj._id))
-        ? runningBalances.get(String(obj._id))
+      const runningBalanceMap = categoryAccountIds.length ? categoryRunningBalances : runningBalances;
+      obj.runningBalance = runningBalanceMap.has(String(obj._id))
+        ? runningBalanceMap.get(String(obj._id))
         : null;
       obj.isReconciled = reconciledSet.has(String(obj._id));
       return obj;
