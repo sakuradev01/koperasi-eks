@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildTransactionListFilter } from "../src/utils/transactionQuery.js";
+import { buildTransactionDrilldown } from "../src/utils/transactionDrilldown.js";
 
 test("builds a category/date query for Profit & Loss drill-downs", () => {
   const filter = buildTransactionListFilter({
@@ -35,4 +36,26 @@ test("keeps an unknown report category from falling back to every transaction", 
   });
 
   assert.deepEqual(filter.$or, [{ _id: { $in: [] } }]);
+});
+
+test("limits a split drill-down to the selected account and amount", () => {
+  const result = buildTransactionDrilldown({
+    transaction: {
+      isSplit: true,
+      amount: 1000,
+    },
+    splits: [
+      { categoryId: "selected-account", categoryType: "account", amount: 300 },
+      { categoryId: "payment-account", categoryType: "account", amount: 700 },
+    ],
+    categoryClauses: [
+      { categoryId: "selected-account", categoryType: "account" },
+    ],
+    categoryFilterActive: true,
+  });
+
+  assert.equal(result.amount, 300);
+  assert.deepEqual(result.splits, [
+    { categoryId: "selected-account", categoryType: "account", amount: 300 },
+  ]);
 });

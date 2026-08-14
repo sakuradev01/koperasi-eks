@@ -9,6 +9,8 @@
     "seed": "node src/db/seeder.js",
     "seed-coa": "node src/seeds/coaSeed.js",
     "test:transaction-query": "node --test test/transaction-query.test.js",
+    "test:running-balance": "node --test test/running-balance.test.js",
+    "test:accounting": "node --test test/transaction-query.test.js test/running-balance.test.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

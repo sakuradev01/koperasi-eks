@@ -9,6 +9,8 @@ import { BankReconciliationItem } from "../../models/bankReconciliationItem.mode
 import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { buildTransactionListFilter } from "../../utils/transactionQuery.js";
+import { buildTransactionDrilldown } from "../../utils/transactionDrilldown.js";
+import { calculateRunningBalances } from "../../utils/runningBalance.js";
 
 function normalizeNullable(value) {
   if (value === undefined || value === null) return null;
@@ -247,8 +249,16 @@ export const getTransactions = async (req, res) => {
 
     const txnIds = transactions.map((t) => t._id);
     const splitTxnIds = transactions.filter((t) => t.isSplit).map((t) => t._id);
+    const displayAccountIds = [
+      ...new Set(
+        transactions
+          .map((txn) => (txn.accountId && typeof txn.accountId === "object" ? txn.accountId._id : txn.accountId))
+          .filter(Boolean)
+          .map((accountId) => String(accountId)),
+      ),
+    ];
 
-    const [allSplits, reconItems, masters, submenus, accounts] = await Promise.all([
+    const [allSplits, reconItems, masters, submenus, accounts, accountBalances, historyRows] = await Promise.all([
       splitTxnIds.length
         ? TransactionSplit.find({ transactionId: { $in: splitTxnIds } })
             .sort({ createdAt: 1, _id: 1 })
@@ -265,7 +275,18 @@ export const getTransactions = async (req, res) => {
       CoaMaster.find({}).select("_id masterName").lean(),
       CoaSubmenu.find({}).select("_id submenuName").lean(),
       CoaAccount.find({}).select("_id accountName").lean(),
+      displayAccountIds.length
+        ? CoaAccount.find({ _id: { $in: displayAccountIds } }).select("_id balance").lean()
+        : [],
+      displayAccountIds.length
+        ? AccountingTransaction.find({ accountId: { $in: displayAccountIds } })
+            .select("_id accountId transactionDate createdAt transactionType amount")
+            .sort({ transactionDate: -1, createdAt: -1, _id: -1 })
+            .lean()
+        : [],
     ]);
+
+    const runningBalances = calculateRunningBalances({ accountBalances, historyRows });
 
     const masterMap = new Map(masters.map((m) => [String(m._id), m.masterName]));
     const submenuMap = new Map(submenus.map((s) => [String(s._id), s.submenuName]));
@@ -299,6 +320,19 @@ export const getTransactions = async (req, res) => {
       obj.splitCategories = obj.isSplit
         ? splitsByTxn.get(String(obj._id)) || []
         : [];
+      if (categoryFilterActive) {
+        const drilldown = buildTransactionDrilldown({
+          transaction: obj,
+          splits: obj.splitCategories,
+          categoryClauses,
+          categoryFilterActive,
+        });
+        obj.drilldownAmount = drilldown.amount;
+        obj.drilldownSplits = drilldown.splits;
+      }
+      obj.runningBalance = runningBalances.has(String(obj._id))
+        ? runningBalances.get(String(obj._id))
+        : null;
       obj.isReconciled = reconciledSet.has(String(obj._id));
       return obj;
     });
