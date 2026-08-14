@@ -1391,6 +1391,7 @@ export default function Transactions() {
                       <th className="text-left px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Account</th>
                       <th className="text-left px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
                       <th className="text-right px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
+                      <th className="text-right px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Running Balance</th>
                       <th className="text-center px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Actions</th>
                     </>
                   )}
@@ -1506,6 +1507,13 @@ export default function Transactions() {
                       }`}>
                         {isJournalEntry ? "" : (isDeposit ? "" : "-")}
                         {(txn.accountId?.currency || "Rp")} {formatNumber(displayAmount)}
+                      </td>
+                      <td className={`px-3 py-3.5 text-right font-mono text-sm font-semibold whitespace-nowrap ${
+                        Number(txn.runningBalance) < 0 ? "text-red-600" : "text-emerald-600"
+                      }`}>
+                        {txn.runningBalance === null || txn.runningBalance === undefined
+                          ? "-"
+                          : `${txn.accountId?.currency || "Rp"} ${formatNumber(txn.runningBalance)}`}
                       </td>
                       <td className="px-3 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-1">
