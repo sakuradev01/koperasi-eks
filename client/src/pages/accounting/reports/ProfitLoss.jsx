@@ -36,6 +36,17 @@ function triggerBlobDownload(response, fallbackName) {
   URL.revokeObjectURL(url);
 }
 
+function buildTransactionDrilldownHref(account, startDate, endDate) {
+  const params = new URLSearchParams({
+    filter_category: account.account_name || "",
+    filter_category_id: account.id || "",
+    filter_category_type: "account",
+    filter_date_from: startDate || "",
+    filter_date_to: endDate || "",
+  });
+  return `/akuntansi/transaksi?${params.toString()}`;
+}
+
 export default function ProfitLoss() {
   const now = new Date();
   const location = useLocation();
@@ -310,7 +321,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={`/akuntansi/transaksi?filter_category=${encodeURIComponent(account.account_name)}&filter_date_from=${payload.startDate}&filter_date_to=${payload.endDate}`}
+                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -341,7 +352,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={`/akuntansi/transaksi?filter_category=${encodeURIComponent(account.account_name)}&filter_date_from=${payload.startDate}&filter_date_to=${payload.endDate}`}
+                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -383,7 +394,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={`/akuntansi/transaksi?filter_category=${encodeURIComponent(account.account_name)}&filter_date_from=${payload.startDate}&filter_date_to=${payload.endDate}`}
+                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >

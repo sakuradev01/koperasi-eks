@@ -55,6 +55,15 @@ function getAmountFloat(displayVal) {
   return parseFloat(intPart + "." + (parts[1] || "0")) || 0;
 }
 
+function parseDateFilter(value, endOfDay = false) {
+  if (!value) return null;
+  const text = String(value).trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? new Date(`${text}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`)
+    : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function formatCurrency(amount, currency = "Rp") {
   const num = parseFloat(amount) || 0;
   return `${currency} ${formatNumber(num)}`;
@@ -246,6 +255,13 @@ export default function Transactions() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionPagination, setTransactionPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    itemsPerPage: 100,
+  });
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
   const isLegacyTransactionsPath = location.pathname === "/transactions" || location.pathname === "/transactions/upload";
@@ -254,6 +270,22 @@ export default function Transactions() {
   const [salesTaxes, setSalesTaxes] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [customVendors, setCustomVendors] = useState([]);
+
+  const reportQuery = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const query = {};
+    [
+      "filter_category",
+      "filter_category_id",
+      "filter_category_type",
+      "filter_date_from",
+      "filter_date_to",
+    ].forEach((key) => {
+      const value = params.get(key);
+      if (value) query[key] = value;
+    });
+    return query;
+  }, [location.search]);
 
   // ===== Dropdown Visibility =====
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
@@ -370,12 +402,20 @@ export default function Transactions() {
     }));
   }, [location.search]);
 
+  useEffect(() => {
+    setTransactionPage(1);
+  }, [location.search, selectedAccountId]);
+
   // ==================== DATA FETCHING ====================
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const promises = [
-        getTransactions(selectedAccountId || null),
+        getTransactions(selectedAccountId || null, {
+          ...reportQuery,
+          page: transactionPage,
+          limit: 100,
+        }),
         getAssetsAccounts(),
         getAllCategories(),
         getSalesTaxes("active"),
@@ -386,7 +426,15 @@ export default function Transactions() {
       }
       const results = await Promise.all(promises);
       const [txnRes, assetsRes, catRes, taxRes, membersRes, reconRes] = results;
-      if (txnRes.success) setTransactions(txnRes.data || []);
+      if (txnRes.success) {
+        setTransactions(txnRes.data || []);
+        setTransactionPagination(txnRes.pagination || {
+          currentPage: transactionPage,
+          totalPages: 1,
+          totalItems: (txnRes.data || []).length,
+          itemsPerPage: 100,
+        });
+      }
       if (assetsRes.success) setAssetsAccounts(assetsRes.data || {});
       if (catRes.success) setCategories(catRes.data || []);
       if (taxRes.success) setSalesTaxes(taxRes.data || []);
@@ -428,7 +476,7 @@ export default function Transactions() {
     } finally {
       setLoading(false);
     }
-  }, [selectedAccountId]);
+  }, [reportQuery, selectedAccountId, transactionPage]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -555,12 +603,12 @@ export default function Transactions() {
     if (f.reviewed === "1") result = result.filter((t) => t.reviewed);
     else if (f.reviewed === "0") result = result.filter((t) => !t.reviewed);
     if (f.dateFrom) {
-      const from = new Date(f.dateFrom);
-      result = result.filter((t) => new Date(t.transactionDate) >= from);
+      const from = parseDateFilter(f.dateFrom);
+      if (from) result = result.filter((t) => new Date(t.transactionDate) >= from);
     }
     if (f.dateTo) {
-      const to = new Date(f.dateTo); to.setHours(23, 59, 59, 999);
-      result = result.filter((t) => new Date(t.transactionDate) <= to);
+      const to = parseDateFilter(f.dateTo, true);
+      if (to) result = result.filter((t) => new Date(t.transactionDate) <= to);
     }
     if (f.amountMin) {
       const min = parseFloat(f.amountMin);
@@ -621,6 +669,17 @@ export default function Transactions() {
     const empty = { type: "", description: "", account: "", category: "", reviewed: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "" };
     setFilters(empty);
     setAppliedFilters(empty);
+
+    const params = new URLSearchParams(location.search);
+    [
+      "filter_account",
+      "filter_category",
+      "filter_category_id",
+      "filter_category_type",
+      "filter_date_from",
+      "filter_date_to",
+    ].forEach((key) => params.delete(key));
+    setSearchParams(params, { replace: true });
   };
 
   // ==================== SORT OPTIONS ====================
@@ -1511,6 +1570,39 @@ export default function Transactions() {
           </div>
         </div>
       )}
+
+      {!loading && transactionPagination.totalPages > 1 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
+          <span>
+            Showing {((transactionPagination.currentPage - 1) * transactionPagination.itemsPerPage) + 1}
+            -{Math.min(
+              transactionPagination.currentPage * transactionPagination.itemsPerPage,
+              transactionPagination.totalItems
+            )} of {transactionPagination.totalItems} transactions
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={transactionPagination.currentPage <= 1}
+              onClick={() => setTransactionPage((page) => Math.max(page - 1, 1))}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <span className="min-w-20 text-center">
+              Page {transactionPagination.currentPage} of {transactionPagination.totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={transactionPagination.currentPage >= transactionPagination.totalPages}
+              onClick={() => setTransactionPage((page) => Math.min(page + 1, transactionPagination.totalPages))}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* ==================== TRANSACTION MODAL ==================== */}
       {showModal && (

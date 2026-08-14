@@ -69,9 +69,10 @@ export const getMembers = async (verified = "") => {
 // Transactions
 // ========================
 
-export const getTransactions = async (accountId = null) => {
-  const params = accountId ? `?account=${accountId}` : "";
-  const res = await api.get(`/transactions${params}`);
+export const getTransactions = async (accountId = null, query = {}) => {
+  const params = { ...query };
+  if (accountId) params.account = accountId;
+  const res = await api.get("/transactions", { params });
   return res.data;
 };
 
