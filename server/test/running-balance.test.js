@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateRunningBalances } from "../src/utils/runningBalance.js";
+import {
+  calculateRunningBalances,
+  calculateRunningBalancesFromMovements,
+} from "../src/utils/runningBalance.js";
 
 test("calculates the balance after each transaction from complete account history", () => {
   const balances = calculateRunningBalances({
@@ -68,4 +71,26 @@ test("keeps running balances isolated per account and stable for same-date rows"
   assert.equal(balances.get("cash-later"), 900);
   assert.equal(balances.get("cash-earlier"), 800);
   assert.equal(balances.get("bank-only"), 400);
+});
+
+test("calculates a report-account balance from selected category movements", () => {
+  const balances = calculateRunningBalancesFromMovements({
+    movementRows: [
+      {
+        transactionId: "older-category-credit",
+        transactionDate: "2026-08-05",
+        createdAt: "2026-08-05T10:00:00.000Z",
+        signedAmount: 600000,
+      },
+      {
+        transactionId: "latest-category-credit",
+        transactionDate: "2026-08-12",
+        createdAt: "2026-08-12T10:00:00.000Z",
+        signedAmount: 734400,
+      },
+    ],
+  });
+
+  assert.equal(balances.get("latest-category-credit"), 1334400);
+  assert.equal(balances.get("older-category-credit"), 600000);
 });
