@@ -1239,6 +1239,28 @@
   color: #c2410c;
 }
 
+.inv-expand-payment-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 7px;
+  border: 1px solid #f9a8d4;
+  border-radius: 999px;
+  background: #fdf2f8;
+  color: #be185d;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 5px 9px;
+}
+
+.inv-expand-payment-btn:hover,
+.inv-expand-payment-btn:focus-visible {
+  border-color: #ec4899;
+  background: #fce7f3;
+  outline: none;
+}
+
 .inv-projection-mini,
 .inv-payment-method {
   margin-top: 5px;

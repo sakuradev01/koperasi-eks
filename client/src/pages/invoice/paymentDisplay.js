@@ -89,14 +89,35 @@ const hasMultipleProjectionMarkers = (payment) =>
   asArray(payment?.coveredProjectionIds).length > 1 ||
   asArray(payment?.coveredProjectionBreakdown).length > 1;
 
+const getPaymentContributionAmount = (payment, projection, projectionIndex) => {
+  const breakdown = asArray(payment?.coveredProjectionBreakdown);
+  const projectionId = asId(projection?._id);
+  const row = breakdown.find(
+    (item) =>
+      (asId(item?.projectionId) &&
+        asId(item?.projectionId) === projectionId) ||
+      (Number(item?.projectionIndex) || 0) === Number(projectionIndex),
+  );
+
+  if (row && Number.isFinite(Number(row.amount))) {
+    return Number(row.amount);
+  }
+
+  return Number(payment?.amount || 0);
+};
+
 /**
  * Flatten the linked payment table while preserving projection row metadata.
  * A multi-cicilan payment is emitted once as an anchor row. If its occurrences
  * are contiguous and each covered projection has one realization, the anchor
  * may use a row span; otherwise later occurrences become a placeholder cell.
  */
-export const buildLinkedPaymentDisplayRows = (projections = []) => {
+export const buildLinkedPaymentDisplayRows = (projections = [], options = {}) => {
   const safeProjections = asArray(projections);
+  const expandedPaymentKeys =
+    options?.expandedPaymentKeys instanceof Set
+      ? options.expandedPaymentKeys
+      : new Set(asArray(options?.expandedPaymentKeys).map(asId));
   const rows = [];
 
   safeProjections.forEach((projection, projectionOffset) => {
@@ -170,6 +191,26 @@ export const buildLinkedPaymentDisplayRows = (projections = []) => {
     const canRowSpan = contiguous && startsEachProjection;
     const label = formatProjectionNumberList(coverageIndexes);
 
+    if (expandedPaymentKeys.has(paymentKey)) {
+      occurrenceRows.forEach((rowIndex, occurrenceOffset) => {
+        const row = rows[rowIndex];
+        displayByRowIndex.set(rowIndex, {
+          kind: "expanded",
+          amount: getPaymentContributionAmount(
+            row.payment,
+            row.projection,
+            row.projectionIndex,
+          ),
+          label,
+          toggleAnchor: occurrenceOffset === 0,
+          actionRowSpan:
+            row.projectionRowIndex === 0 ? row.projectionRowCount : 0,
+          paymentKey,
+        });
+      });
+      return;
+    }
+
     occurrenceRows.forEach((rowIndex, occurrenceOffset) => {
       const row = rows[rowIndex];
       if (occurrenceOffset === 0) {
@@ -183,6 +224,7 @@ export const buildLinkedPaymentDisplayRows = (projections = []) => {
                 : row.projectionRowCount
               : 0,
           label,
+          toggleAnchor: true,
           paymentKey,
         });
         return;

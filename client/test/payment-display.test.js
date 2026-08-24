@@ -74,3 +74,29 @@ test("keeps a single-projection payment as a regular realization", () => {
   assert.equal(paymentRow.paymentDisplay.kind, "regular");
   assert.equal(paymentRow.paymentDisplay.rowSpan, 1);
 });
+
+test("expands a merged payment into per-cicilan details", () => {
+  const rows = buildLinkedPaymentDisplayRows(
+    [
+      projection("p1"),
+      projection("p2", multiPayment),
+      projection("p3", multiPayment),
+      projection("p4", multiPayment),
+      projection("p5", multiPayment),
+    ],
+    { expandedPaymentKeys: new Set(["id:payment-1"]) },
+  );
+
+  const paymentRows = rows.filter((row) => row.payment);
+
+  assert.deepEqual(
+    paymentRows.map((row) => row.paymentDisplay.kind),
+    ["expanded", "expanded", "expanded", "expanded"],
+  );
+  assert.deepEqual(
+    paymentRows.map((row) => row.paymentDisplay.amount),
+    [2852000, 2852000, 2852000, 2852000],
+  );
+  assert.equal(paymentRows[0].paymentDisplay.toggleAnchor, true);
+  assert.equal(paymentRows[1].paymentDisplay.toggleAnchor, false);
+});
