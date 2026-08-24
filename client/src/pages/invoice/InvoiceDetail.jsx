@@ -17,6 +17,10 @@ import {
   getAssetsAccounts,
 } from "../../api/accountingApi.jsx";
 import { API_URL } from "../../api/config.js";
+import {
+  buildLinkedPaymentDisplayRows,
+  formatProjectionNumberList,
+} from "./paymentDisplay.js";
 import "./invoice.css";
 
 const companyProfile = {
@@ -961,33 +965,35 @@ export default function InvoiceDetail({
       ),
     [paymentRecords],
   );
+  const linkedPaymentDisplayRows = useMemo(
+    () => buildLinkedPaymentDisplayRows(invoice?.projections || []),
+    [invoice?.projections],
+  );
   const getPaymentProjectionLabel = (payment) => {
     const breakdown = Array.isArray(payment?.coveredProjectionBreakdown)
       ? payment.coveredProjectionBreakdown
       : [];
     if (breakdown.length > 1) {
-      return breakdown
-        .map((row) =>
-          row.projectionIndex
-            ? `Cicilan ${row.projectionIndex}`
-            : row.description || "",
-        )
-        .filter(Boolean)
-        .join(", ");
+      const indexes = breakdown
+        .map((row) => Number(row.projectionIndex || 0))
+        .filter(Boolean);
+      return indexes.length
+        ? formatProjectionNumberList(indexes)
+        : "Pembayaran gabungan";
     }
     const coveredIds = Array.isArray(payment?.coveredProjectionIds)
       ? payment.coveredProjectionIds
       : [];
     if (coveredIds.length > 1 && invoice?.projections?.length) {
-      const labels = coveredIds
+      const indexes = coveredIds
         .map((id) => {
           const idx = invoice.projections.findIndex(
             (p) => String(p._id) === String(id),
           );
-          return idx >= 0 ? `Cicilan ${idx + 1}` : null;
+          return idx >= 0 ? idx + 1 : null;
         })
         .filter(Boolean);
-      if (labels.length) return labels.join(", ");
+      if (indexes.length) return formatProjectionNumberList(indexes);
     }
     if (!payment?.projectionIndex) return "Unassigned / Legacy";
     return [
@@ -1751,28 +1757,47 @@ export default function InvoiceDetail({
               </tr>
             </thead>
             <tbody>
-              {(invoice.projections || []).length ? (
-                (invoice.projections || []).map((projection, index) => {
-                  const projectionIndex = projection.projectionIndex || index + 1;
-                  const realizations = (projection.realizations || []).length
-                    ? projection.realizations
-                    : [null];
+              {linkedPaymentDisplayRows.length ? (
+                linkedPaymentDisplayRows.map((row) => {
+                  const {
+                    projection,
+                    projectionIndex,
+                    projectionRowIndex,
+                    projectionRowCount,
+                    payment,
+                    paymentDisplay,
+                  } = row;
+                  const isProjectionStart = projectionRowIndex === 0;
+                  const isMergedAnchor =
+                    paymentDisplay.kind === "merged-anchor";
+                  const isMergedRowSpan =
+                    paymentDisplay.kind === "merged-rowspan";
+                  const isMergedPlaceholder =
+                    paymentDisplay.kind === "merged-placeholder";
+                  const paymentCellRowSpan = isMergedAnchor
+                    ? paymentDisplay.rowSpan
+                    : 1;
+                  const actionRowSpan =
+                    paymentDisplay.actionRowSpan ||
+                    (paymentDisplay.kind === "empty" && isProjectionStart
+                      ? projectionRowCount
+                      : 0);
                   const projectionStatus = String(
                     projection.status || "Unpaid",
                   ).toLowerCase();
                   const projectionReceiptPayment =
                     getProjectionReceiptPayment(projection);
 
-                  return realizations.map((payment, paymentIndex) => (
+                  return (
                     <tr
-                      key={`${projection._id}-${payment?._id || "empty"}`}
+                      key={row.key}
                       className={
-                        paymentIndex === 0 ? "inv-projection-row-start" : ""
+                        isProjectionStart ? "inv-projection-row-start" : ""
                       }
                     >
-                      {paymentIndex === 0 ? (
+                      {isProjectionStart ? (
                         <>
-                          <td rowSpan={realizations.length}>
+                          <td rowSpan={projectionRowCount}>
                             <span
                               className={`inv-aging-pill ${
                                 Number(projection.agingDays || 0) > 0
@@ -1783,7 +1808,7 @@ export default function InvoiceDetail({
                               {getProjectionAgingLabel(projection)}
                             </span>
                           </td>
-                          <td rowSpan={realizations.length}>
+                          <td rowSpan={projectionRowCount}>
                             <span className="inv-row-badge blue">
                               {projectionIndex}
                             </span>
@@ -1801,10 +1826,10 @@ export default function InvoiceDetail({
                               )}
                             </div>
                           </td>
-                          <td rowSpan={realizations.length}>
+                          <td rowSpan={projectionRowCount}>
                             {formatDate(projection.estimateDate)}
                           </td>
-                          <td rowSpan={realizations.length} className="right">
+                          <td rowSpan={projectionRowCount} className="right">
                             {formatMoney(projection.amount, invoice.currency)}
                             <div>
                               <span
@@ -1818,94 +1843,111 @@ export default function InvoiceDetail({
                           </td>
                         </>
                       ) : null}
-                      <td>
-                        {payment ? (
-                          <>
-                            <span className="inv-row-badge pink">
-                              {projectionIndex}.{paymentIndex + 1}
-                            </span>
-                            <strong>{formatDate(payment.paymentDate)}</strong>
-                            <div className="inv-payment-method">
-                              {payment.method || "Bank"}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="inv-muted">No realization</span>
-                        )}
-                      </td>
-                      <td className="right">
-                        {payment ? (
-                          <strong>
-                            {formatMoney(payment.amount, invoice.currency)}
-                          </strong>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <td>
-                        {payment?.notes ? (
-                          <button
-                            type="button"
-                            className="inv-note-preview-btn"
-                            onClick={() =>
-                              setNotePreview({
-                                title: `Cicilan ${projectionIndex}`,
-                                body: payment.notes,
-                              })
-                            }
-                          >
-                            {truncateText(payment.notes)}
-                          </button>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <td className="center">
-                        {payment?.attachment ? (
-                          <a
-                            className="inv-file-link"
-                            href={`${API_URL}/uploads/transactions/${encodeURIComponent(
-                              payment.attachment,
-                            )}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            View
-                          </a>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      {paymentIndex === 0 ? (
-                        <td rowSpan={realizations.length} className="center">
-                          {invoiceIsDraft ? (
-                            <span className="inv-muted-dash">-</span>
-                          ) : projectionStatus === "paid" &&
-                            projectionReceiptPayment ? (
-                            <button
-                              type="button"
-                              className="inv-view-receipt-btn"
-                              onClick={() =>
-                                handlePaymentReceiptPrint(
-                                  projectionReceiptPayment,
-                                )
-                              }
-                            >
-                              View Payment Receipt
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="inv-pay-projection-btn"
-                              onClick={() => startPayment(projection)}
-                            >
-                              Pay
-                            </button>
-                          )}
+
+                      {isMergedRowSpan ? null : isMergedPlaceholder ? (
+                        <td
+                          colSpan={paymentDisplay.placeholderColSpan}
+                          className="inv-merged-payment-cell"
+                        >
+                          Termasuk dalam pembayaran gabungan —{" "}
+                          <strong>{paymentDisplay.label}</strong>
                         </td>
-                      ) : null}
+                      ) : (
+                        <>
+                          <td rowSpan={paymentCellRowSpan}>
+                            {payment ? (
+                              <>
+                                <span className="inv-row-badge pink">
+                                  {isMergedAnchor
+                                    ? paymentDisplay.label
+                                    : `${projectionIndex}.${projectionRowIndex + 1}`}
+                                </span>
+                                <strong>{formatDate(payment.paymentDate)}</strong>
+                                <div className="inv-payment-method">
+                                  {payment.method || "Bank"}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="inv-muted">No realization</span>
+                            )}
+                          </td>
+                          <td rowSpan={paymentCellRowSpan} className="right">
+                            {payment ? (
+                              <strong>
+                                {formatMoney(payment.amount, invoice.currency)}
+                              </strong>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          <td rowSpan={paymentCellRowSpan}>
+                            {payment?.notes ? (
+                              <button
+                                type="button"
+                                className="inv-note-preview-btn"
+                                onClick={() =>
+                                  setNotePreview({
+                                    title: isMergedAnchor
+                                      ? paymentDisplay.label
+                                      : `Cicilan ${projectionIndex}`,
+                                    body: payment.notes,
+                                  })
+                                }
+                              >
+                                {truncateText(payment.notes)}
+                              </button>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          <td rowSpan={paymentCellRowSpan} className="center">
+                            {payment?.attachment ? (
+                              <a
+                                className="inv-file-link"
+                                href={`${API_URL}/uploads/transactions/${encodeURIComponent(
+                                  payment.attachment,
+                                )}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                View
+                              </a>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          {actionRowSpan > 0 ? (
+                            <td rowSpan={actionRowSpan} className="center">
+                              {invoiceIsDraft ? (
+                                <span className="inv-muted-dash">-</span>
+                              ) : projectionStatus === "paid" &&
+                                projectionReceiptPayment ? (
+                                <button
+                                  type="button"
+                                  className="inv-view-receipt-btn"
+                                  onClick={() =>
+                                    handlePaymentReceiptPrint(
+                                      projectionReceiptPayment,
+                                    )
+                                  }
+                                >
+                                  View Payment Receipt
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="inv-pay-projection-btn"
+                                  onClick={() => startPayment(projection)}
+                                >
+                                  Pay
+                                </button>
+                              )}
+                            </td>
+                          ) : null}
+                        </>
+                      )}
                     </tr>
-                  ));
+                  );
                 })
               ) : (
                 <tr>
