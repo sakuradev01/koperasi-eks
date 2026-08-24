@@ -478,6 +478,9 @@ export default function InvoiceDetail({
   const [paymentSplitMode, setPaymentSplitMode] = useState(false);
   const [paymentReceiptTarget, setPaymentReceiptTarget] = useState(null);
   const [paymentReceiptPreview, setPaymentReceiptPreview] = useState(null);
+  const [expandedPaymentKeys, setExpandedPaymentKeys] = useState(
+    () => new Set(),
+  );
   const [notePreview, setNotePreview] = useState(null);
   const [paymentForm, setPaymentForm] = useState({
     paymentDate: new Date().toISOString().slice(0, 10),
@@ -535,6 +538,10 @@ export default function InvoiceDetail({
   useEffect(() => {
     loadInvoice();
   }, [invoiceNumber, publicView]);
+
+  useEffect(() => {
+    setExpandedPaymentKeys(new Set());
+  }, [invoiceNumber]);
 
   useEffect(() => {
     if (!printOnly) setActiveDetailTab(initialDetailTab);
@@ -966,9 +973,24 @@ export default function InvoiceDetail({
     [paymentRecords],
   );
   const linkedPaymentDisplayRows = useMemo(
-    () => buildLinkedPaymentDisplayRows(invoice?.projections || []),
-    [invoice?.projections],
+    () =>
+      buildLinkedPaymentDisplayRows(invoice?.projections || [], {
+        expandedPaymentKeys,
+      }),
+    [expandedPaymentKeys, invoice?.projections],
   );
+  const toggleExpandedPayment = (paymentKey) => {
+    if (!paymentKey) return;
+    setExpandedPaymentKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      if (nextKeys.has(paymentKey)) {
+        nextKeys.delete(paymentKey);
+      } else {
+        nextKeys.add(paymentKey);
+      }
+      return nextKeys;
+    });
+  };
   const getPaymentProjectionLabel = (payment) => {
     const breakdown = Array.isArray(payment?.coveredProjectionBreakdown)
       ? payment.coveredProjectionBreakdown
@@ -1770,6 +1792,8 @@ export default function InvoiceDetail({
                   const isProjectionStart = projectionRowIndex === 0;
                   const isMergedAnchor =
                     paymentDisplay.kind === "merged-anchor";
+                  const isExpandedPayment =
+                    paymentDisplay.kind === "expanded";
                   const isMergedRowSpan =
                     paymentDisplay.kind === "merged-rowspan";
                   const isMergedPlaceholder =
@@ -1782,6 +1806,11 @@ export default function InvoiceDetail({
                     (paymentDisplay.kind === "empty" && isProjectionStart
                       ? projectionRowCount
                       : 0);
+                  const displayPaymentAmount =
+                    paymentDisplay.amount ?? payment?.amount;
+                  const showExpandToggle =
+                    (isMergedAnchor || isExpandedPayment) &&
+                    paymentDisplay.toggleAnchor;
                   const projectionStatus = String(
                     projection.status || "Unpaid",
                   ).toLowerCase();
@@ -1866,6 +1895,22 @@ export default function InvoiceDetail({
                                 <div className="inv-payment-method">
                                   {payment.method || "Bank"}
                                 </div>
+                                {showExpandToggle ? (
+                                  <button
+                                    type="button"
+                                    className="inv-expand-payment-btn"
+                                    aria-expanded={isExpandedPayment}
+                                    onClick={() =>
+                                      toggleExpandedPayment(
+                                        paymentDisplay.paymentKey,
+                                      )
+                                    }
+                                  >
+                                    {isExpandedPayment
+                                      ? "Tutup detail"
+                                      : "Expand detail"}
+                                  </button>
+                                ) : null}
                               </>
                             ) : (
                               <span className="inv-muted">No realization</span>
@@ -1874,7 +1919,10 @@ export default function InvoiceDetail({
                           <td rowSpan={paymentCellRowSpan} className="right">
                             {payment ? (
                               <strong>
-                                {formatMoney(payment.amount, invoice.currency)}
+                                {formatMoney(
+                                  displayPaymentAmount,
+                                  invoice.currency,
+                                )}
                               </strong>
                             ) : (
                               "-"
