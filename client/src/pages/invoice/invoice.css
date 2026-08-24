@@ -1226,6 +1226,19 @@
   border-top: 2px solid #dbeafe;
 }
 
+.inv-merged-payment-cell {
+  vertical-align: middle !important;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.78rem !important;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.inv-merged-payment-cell strong {
+  color: #c2410c;
+}
+
 .inv-projection-mini,
 .inv-payment-method {
   margin-top: 5px;
