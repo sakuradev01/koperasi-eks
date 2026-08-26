@@ -6,7 +6,10 @@ import conf from "./conf/conf.js";
 import { ensureUploadsSubdirs, getUploadsDir } from "./utils/uploadsDir.js";
 
 const app = express();
-const BODY_LIMIT = "150mb";
+// Identity verification forwards original iPhone evidence as base64 JSON.
+// Keep this configurable and above the CI4 multipart envelope so the API does
+// not reject a valid, unmodified set of four photos plus a signature.
+const BODY_LIMIT = process.env.KOPERASI_BODY_LIMIT || "256mb";
 
 app.use(bodyParser.json({ limit: BODY_LIMIT }));
 app.use(express.json({ limit: BODY_LIMIT }));
