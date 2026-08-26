@@ -42,8 +42,45 @@ function getExtFromMime(mime) {
     "image/png": "png",
     "image/webp": "webp",
     "image/gif": "gif",
+    "image/heic": "heic",
+    "image/heif": "heif",
   };
   return map[mime.toLowerCase()] || "jpg";
+}
+
+function detectImageMimeFromBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return "";
+
+  if (buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
+    return "image/jpeg";
+  }
+  if (buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
+    return "image/png";
+  }
+  const gifHeader = buffer.subarray(0, 6).toString("ascii");
+  if (gifHeader === "GIF87a" || gifHeader === "GIF89a") {
+    return "image/gif";
+  }
+  if (
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+
+  if (buffer.subarray(4, 8).toString("ascii") === "ftyp") {
+    const brand = buffer.subarray(8, 12).toString("ascii").toLowerCase();
+    if (["heic", "heix", "hevc", "hevx"].includes(brand)) return "image/heic";
+    if (["mif1", "msf1"].includes(brand)) return "image/heif";
+  }
+
+  return "";
+}
+
+function normalizeImageMime(mime, buffer) {
+  const normalized = String(mime || "").trim().toLowerCase();
+  if (normalized.startsWith("image/")) return normalized;
+  return detectImageMimeFromBuffer(buffer);
 }
 
 /**
@@ -63,11 +100,19 @@ export function saveBase64ImageToFile(base64Data, subdirName, fileNamePrefix) {
     // If it's already http(s) URL, keep for backward compat (don't save)
     return trimmed;
   }
-  const match = trimmed.match(/^data:(image\/[\w+]+);base64,(.+)$/);
+  const match = trimmed.match(/^data:([^;,]+);base64,(.+)$/s);
   if (!match) return trimmed; // unknown format, keep
 
-  const mime = match[1];
+  const suppliedMime = match[1];
   const b64 = match[2];
+  let buffer;
+  try {
+    buffer = Buffer.from(b64, "base64");
+  } catch {
+    return trimmed;
+  }
+  const mime = normalizeImageMime(suppliedMime, buffer);
+  if (!mime) return trimmed;
   const ext = getExtFromMime(mime);
   const base = getUploadsDir();
   const dir = path.join(base, subdirName);
@@ -81,8 +126,7 @@ export function saveBase64ImageToFile(base64Data, subdirName, fileNamePrefix) {
   const filename = `${safePrefix}-${Date.now()}-${rand}.${ext}`;
   const fullPath = path.join(dir, filename);
   try {
-    const buf = Buffer.from(b64, "base64");
-    fs.writeFileSync(fullPath, buf);
+    fs.writeFileSync(fullPath, buffer);
     return `/uploads/${subdirName}/${filename}`;
   } catch (e) {
     console.error("saveBase64ImageToFile failed", e.message);
