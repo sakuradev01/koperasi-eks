@@ -45,6 +45,22 @@ export const formatProjectionNumberList = (projectionIndexes) => {
   return `Cicilan ${parts.join(", ")}`;
 };
 
+/**
+ * Keep the payment badge content in one place so merged and per-installment
+ * realizations use the same readable label in the table.
+ */
+export const formatPaymentBadgeLabel = ({
+  paymentDisplay,
+  projectionIndex,
+  projectionRowIndex,
+} = {}) => {
+  if (paymentDisplay?.kind === "merged-anchor" && paymentDisplay.label) {
+    return String(paymentDisplay.label);
+  }
+
+  return `${projectionIndex}.${Number(projectionRowIndex || 0) + 1}`;
+};
+
 const getPaymentKey = (payment) => {
   const explicitId = asId(payment?._id);
   if (explicitId) return `id:${explicitId}`;
