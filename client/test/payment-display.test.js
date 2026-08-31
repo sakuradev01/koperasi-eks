@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLinkedPaymentDisplayRows } from "../src/pages/invoice/paymentDisplay.js";
+import { readFileSync } from "node:fs";
+import postcss from "postcss";
+import {
+  buildLinkedPaymentDisplayRows,
+  formatPaymentBadgeLabel,
+} from "../src/pages/invoice/paymentDisplay.js";
 
 const multiPayment = {
   _id: "payment-1",
@@ -99,4 +104,36 @@ test("expands a merged payment into per-cicilan details", () => {
   );
   assert.equal(paymentRows[0].paymentDisplay.toggleAnchor, true);
   assert.equal(paymentRows[1].paymentDisplay.toggleAnchor, false);
+});
+
+test("keeps a merged payment badge as one complete readable label", () => {
+  const label = formatPaymentBadgeLabel({
+    paymentDisplay: {
+      kind: "merged-anchor",
+      label: "Cicilan 5–6",
+    },
+    projectionIndex: 5,
+    projectionRowIndex: 0,
+  });
+
+  assert.equal(label, "Cicilan 5–6");
+  assert.equal(label.includes("\n"), false);
+});
+
+test("uses a non-clipping single-line layout for merged payment badges", () => {
+  const css = readFileSync(
+    new URL("../src/pages/invoice/invoice.css", import.meta.url),
+    "utf8",
+  );
+  const paymentBadgeRule = postcss
+    .parse(css)
+    .nodes.find((node) => node.selector === ".inv-payment-badge");
+  const declarations = Object.fromEntries(
+    (paymentBadgeRule?.nodes || [])
+      .filter((node) => node.type === "decl")
+      .map((node) => [node.prop, node.value]),
+  );
+
+  assert.equal(declarations.height, "auto");
+  assert.equal(declarations["white-space"], "nowrap");
 });

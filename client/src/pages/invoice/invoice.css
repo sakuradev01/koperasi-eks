@@ -1242,7 +1242,7 @@
 .inv-expand-payment-btn {
   display: inline-flex;
   align-items: center;
-  margin-top: 7px;
+  margin-top: 2px;
   border: 1px solid #f9a8d4;
   border-radius: 999px;
   background: #fdf2f8;
@@ -1252,6 +1252,7 @@
   font-weight: 800;
   line-height: 1.2;
   padding: 5px 9px;
+  white-space: nowrap;
 }
 
 .inv-expand-payment-btn:hover,
@@ -1267,6 +1268,35 @@
   color: #64748b;
   font-size: 0.74rem;
   line-height: 1.35;
+}
+
+.inv-payment-cell {
+  display: flex;
+  min-width: 110px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.inv-payment-cell .inv-row-badge {
+  margin-right: 0;
+}
+
+.inv-payment-badge {
+  height: auto;
+  min-height: 22px;
+  padding: 3px 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.inv-payment-date {
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.inv-payment-cell .inv-payment-method {
+  margin-top: 0;
 }
 
 .inv-aging-pill {

@@ -19,6 +19,7 @@ import {
 import { API_URL } from "../../api/config.js";
 import {
   buildLinkedPaymentDisplayRows,
+  formatPaymentBadgeLabel,
   formatProjectionNumberList,
 } from "./paymentDisplay.js";
 import "./invoice.css";
@@ -1885,13 +1886,17 @@ export default function InvoiceDetail({
                         <>
                           <td rowSpan={paymentCellRowSpan}>
                             {payment ? (
-                              <>
-                                <span className="inv-row-badge pink">
-                                  {isMergedAnchor
-                                    ? paymentDisplay.label
-                                    : `${projectionIndex}.${projectionRowIndex + 1}`}
+                              <div className="inv-payment-cell">
+                                <span className="inv-row-badge pink inv-payment-badge">
+                                  {formatPaymentBadgeLabel({
+                                    paymentDisplay,
+                                    projectionIndex,
+                                    projectionRowIndex,
+                                  })}
                                 </span>
-                                <strong>{formatDate(payment.paymentDate)}</strong>
+                                <strong className="inv-payment-date">
+                                  {formatDate(payment.paymentDate)}
+                                </strong>
                                 <div className="inv-payment-method">
                                   {payment.method || "Bank"}
                                 </div>
@@ -1911,7 +1916,7 @@ export default function InvoiceDetail({
                                       : "Expand detail"}
                                   </button>
                                 ) : null}
-                              </>
+                              </div>
                             ) : (
                               <span className="inv-muted">No realization</span>
                             )}
