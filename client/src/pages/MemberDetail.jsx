@@ -44,6 +44,12 @@ const formatDateSafe = (d, fmt = "dd/MM/yyyy") => {
   return format(dt, fmt, { locale: id });
 };
 
+const getRegistrationStatus = (member) => {
+  const explicit = String(member?.registrationStatus || "").toLowerCase();
+  if (["pending", "approved", "rejected"].includes(explicit)) return explicit;
+  return member?.isVerified ? "approved" : "pending";
+};
+
 const MemberDetail = () => {
   const { uuid } = useParams();
   const navigate = useNavigate();
@@ -104,7 +110,7 @@ const MemberDetail = () => {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
-  const [rejectKind, setRejectKind] = useState("address"); // address | identity
+  const [rejectKind, setRejectKind] = useState("address"); // address | identity | registration
 
   useEffect(() => {
     if (uuid) {
@@ -219,25 +225,36 @@ const MemberDetail = () => {
     setRejectReason("");
   };
 
+  const handleRejectRegistration = () => {
+    if (!member || member.registrationSource !== "student_dashboard" || getRegistrationStatus(member) !== "pending") return;
+    setRejectKind("registration");
+    setShowRejectDialog(true);
+    setRejectReason("");
+  };
+
   const handleConfirmReject = async () => {
-    if (!rejectReason.trim()) {
-      toast.error("Alasan penolakan wajib diisi");
+    if (rejectReason.trim().length < 5 || rejectReason.trim().length > 1000) {
+      toast.error("Alasan penolakan wajib 5–1000 karakter");
       return;
     }
     setConfirmLoading(true);
     try {
       const path =
-        rejectKind === "identity"
-          ? `/api/admin/members/${member.uuid}/identity/reject`
-          : `/api/admin/members/${member.uuid}/address/reject`;
+        rejectKind === "registration"
+          ? `/api/admin/members/${member.uuid}/reject`
+          : rejectKind === "identity"
+            ? `/api/admin/members/${member.uuid}/identity/reject`
+            : `/api/admin/members/${member.uuid}/address/reject`;
       const res = await api.patch(path, {
         rejectionReason: rejectReason.trim(),
       });
       if (res.data.success) {
         toast.success(
-          rejectKind === "identity"
-            ? "Verifikasi wajah berhasil ditolak"
-            : "Perubahan alamat berhasil ditolak"
+          rejectKind === "registration"
+            ? "Pengajuan anggota berhasil ditolak"
+            : rejectKind === "identity"
+              ? "Verifikasi wajah berhasil ditolak"
+              : "Perubahan alamat berhasil ditolak"
         );
         setShowRejectDialog(false);
         fetchMemberDetail();
@@ -245,9 +262,11 @@ const MemberDetail = () => {
     } catch (err) {
       toast.error(
         err.response?.data?.message ||
-          (rejectKind === "identity"
-            ? "Gagal menolak verifikasi wajah"
-            : "Gagal menolak alamat")
+          (rejectKind === "registration"
+            ? "Gagal menolak pengajuan anggota"
+            : rejectKind === "identity"
+              ? "Gagal menolak verifikasi wajah"
+              : "Gagal menolak alamat")
       );
     } finally {
       setConfirmLoading(false);
@@ -1600,6 +1619,9 @@ const MemberDetail = () => {
     );
   }
 
+  const registrationStatus = getRegistrationStatus(member);
+  const isStudentRegistration = member.registrationSource === "student_dashboard";
+
   return (
     <div className="p-4 sm:p-6">
       {/* Header */}
@@ -1695,6 +1717,44 @@ const MemberDetail = () => {
         </div>
       </div>
 
+      {isStudentRegistration && registrationStatus === "pending" && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-blue-900 mb-1">🕐 Pendaftaran anggota menunggu verifikasi</h3>
+              <p className="text-sm text-blue-800">Periksa seluruh data dan empat dokumen identitas sebelum menyetujui pendaftaran ini.</p>
+              {member.registrationAttempt > 1 && <p className="text-xs text-blue-700 mt-2">Pengajuan ke-{member.registrationAttempt}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={handleRejectRegistration}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold text-sm whitespace-nowrap"
+            >
+              ✕ Tolak Pengajuan
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isStudentRegistration && registrationStatus === "rejected" && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-red-900 mb-1">❌ Pendaftaran ditolak</h3>
+              <p className="text-sm text-red-800 whitespace-pre-wrap">{member.registrationRejectionReason || "Alasan penolakan tidak tersedia."}</p>
+              {member.registrationRejectedAt && <p className="text-xs text-red-700 mt-2">Ditolak: {formatMemberDate(member.registrationRejectedAt)}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/master/anggota/riwayat-penolakan")}
+              className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded-lg hover:bg-red-100 font-semibold text-sm whitespace-nowrap"
+            >
+              🗂️ Lihat Riwayat
+            </button>
+          </div>
+        </div>
+      )}
+
       {member.addressUpdateStatus === "pending" && (
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -1777,17 +1837,27 @@ const MemberDetail = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">
             <h3 className="text-lg font-bold text-gray-900 mb-4">
-              {rejectKind === "identity" ? "Tolak Verifikasi Wajah" : "Tolak Perubahan Alamat"}
+              {rejectKind === "registration"
+                ? "Tolak Pengajuan Anggota"
+                : rejectKind === "identity"
+                  ? "Tolak Verifikasi Wajah"
+                  : "Tolak Perubahan Alamat"}
             </h3>
             <p className="text-sm text-gray-600 mb-4">
-              {rejectKind === "identity"
-                ? "Berikan alasan penolakan agar student bisa mengirim ulang dokumen wajah."
-                : "Berikan alasan penolakan agar student bisa memperbaiki alamatnya."}
+              {rejectKind === "registration"
+                ? "Berikan alasan penolakan agar student bisa memperbaiki data dan mengirim ulang pengajuan."
+                : rejectKind === "identity"
+                  ? "Berikan alasan penolakan agar student bisa mengirim ulang dokumen wajah."
+                  : "Berikan alasan penolakan agar student bisa memperbaiki alamatnya."}
             </p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Contoh: Alamat tidak lengkap, RT/RW kurang..."
+              placeholder={
+                rejectKind === "registration"
+                  ? "Contoh: Selfie dengan KTP belum terlihat jelas..."
+                  : "Contoh: Alamat tidak lengkap, RT/RW kurang..."
+              }
               className="w-full border border-gray-300 rounded-lg p-3 text-sm min-h-[100px] resize-y"
             />
             <div className="flex justify-end gap-3 mt-4">
@@ -1799,7 +1869,7 @@ const MemberDetail = () => {
               </button>
               <button
                 onClick={handleConfirmReject}
-                disabled={confirmLoading}
+                disabled={confirmLoading || rejectReason.trim().length < 5}
                 className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm disabled:opacity-50"
               >
                 {confirmLoading ? "Memproses..." : "Ya, Tolak"}

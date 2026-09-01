@@ -21,6 +21,12 @@ const getMemberImageUrl = (val) => {
   return raw;
 };
 
+const getRegistrationStatus = (member) => {
+  const explicit = String(member?.registrationStatus || "").toLowerCase();
+  if (["pending", "approved", "rejected"].includes(explicit)) return explicit;
+  return member?.isVerified ? "approved" : "pending";
+};
+
 
 const normalizeDateInputValue = (value) => {
   if (!value) return "";
@@ -66,13 +72,16 @@ const Members = () => {
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
-  const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, address-pending, identity-pending
+  const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, rejected, address-pending, identity-pending
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [exporting, setExporting] = useState(false);
   const [verifyMember, setVerifyMember] = useState(null);
   const [verifyConfirmed, setVerifyConfirmed] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyLoadingDetail, setVerifyLoadingDetail] = useState(false);
+  const [registrationRejectTarget, setRegistrationRejectTarget] = useState(null);
+  const [registrationRejectReason, setRegistrationRejectReason] = useState("");
+  const [registrationRejectLoading, setRegistrationRejectLoading] = useState(false);
   const [formData, setFormData] = useState({
     uuid: "",
     name: "",
@@ -110,6 +119,8 @@ const Members = () => {
       setFilterVerification("address-pending");
     } else if (filterParam === "identity-pending") {
       setFilterVerification("identity-pending");
+    } else if (filterParam === "rejected") {
+      setFilterVerification("rejected");
     }
     fetchMembers();
     fetchProducts();
@@ -412,6 +423,45 @@ const Members = () => {
     }
   };
 
+  const openRegistrationReject = (member) => {
+    if (!member || member.registrationSource !== "student_dashboard" || getRegistrationStatus(member) !== "pending") {
+      return;
+    }
+    setRegistrationRejectTarget(member);
+    setRegistrationRejectReason("");
+  };
+
+  const closeRegistrationReject = () => {
+    setRegistrationRejectTarget(null);
+    setRegistrationRejectReason("");
+  };
+
+  const handleRegistrationReject = async () => {
+    const reason = registrationRejectReason.trim();
+    if (!registrationRejectTarget) return;
+    if (reason.length < 5 || reason.length > 1000) {
+      toast.error("Alasan penolakan wajib 5–1000 karakter");
+      return;
+    }
+
+    setRegistrationRejectLoading(true);
+    try {
+      const response = await api.patch(`/api/admin/members/${registrationRejectTarget.uuid}/reject`, {
+        rejectionReason: reason,
+      });
+      if (response.data?.success) {
+        toast.success("Pengajuan ditolak dan masuk Riwayat Penolakan");
+        closeRegistrationReject();
+        closeVerifyPreview();
+        fetchMembers();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Gagal menolak pengajuan");
+    } finally {
+      setRegistrationRejectLoading(false);
+    }
+  };
+
   const handleVerify = (uuid, memberName) => {
     const m = members.find((x) => x.uuid === uuid);
     if (m) {
@@ -558,7 +608,9 @@ const Members = () => {
     if (filterVerification === "verified") {
       result = result.filter(member => member.isVerified === true);
     } else if (filterVerification === "unverified") {
-      result = result.filter(member => !member.isVerified);
+      result = result.filter(member => getRegistrationStatus(member) === "pending");
+    } else if (filterVerification === "rejected") {
+      result = result.filter(member => getRegistrationStatus(member) === "rejected");
     } else if (filterVerification === "address-pending") {
       result = result.filter(member => member.addressUpdateStatus === "pending");
     } else if (filterVerification === "identity-pending") {
@@ -669,6 +721,13 @@ const Members = () => {
         </h1>
         <div className="flex gap-2">
           <button
+            type="button"
+            onClick={() => navigate("/master/anggota/riwayat-penolakan")}
+            className="bg-white border border-red-200 text-red-600 px-4 py-2 sm:px-5 sm:py-3 rounded-lg hover:bg-red-50 transition-all duration-200 font-medium text-sm sm:text-base shadow-sm"
+          >
+            🗂️ Riwayat Penolakan
+          </button>
+          <button
             onClick={handleExportExcel}
             disabled={exporting}
             className="bg-white border border-pink-200 text-pink-600 px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:bg-pink-50 transition-all duration-200 font-medium text-sm sm:text-base shadow-sm disabled:opacity-60"
@@ -745,6 +804,7 @@ const Members = () => {
               <option value="all">📋 Semua</option>
               <option value="verified">✅ Terverifikasi</option>
               <option value="unverified">🕐 Belum Verifikasi</option>
+              <option value="rejected">❌ Ditolak</option>
               <option value="address-pending">📍 Alamat Pending</option>
               <option value="identity-pending">🤳 Wajah Pending</option>
             </select>
@@ -787,9 +847,11 @@ const Members = () => {
                   </span>
                 )}
                 {filterVerification !== "all" && (
-                  <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : filterVerification === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
+                  <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : filterVerification === "rejected" ? "bg-red-100 text-red-800" : filterVerification === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
                     {filterVerification === "verified"
                       ? "✅ Terverifikasi"
+                      : filterVerification === "rejected"
+                        ? "❌ Ditolak"
                       : filterVerification === "address-pending"
                         ? "📍 Alamat Pending"
                         : filterVerification === "identity-pending"
@@ -941,9 +1003,13 @@ const Members = () => {
                 </td>
                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
                   <div className="flex flex-col items-start gap-1">
-                    {member.isVerified ? (
+                    {getRegistrationStatus(member) === "approved" ? (
                       <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-semibold">
                         ✅ Terverifikasi
+                      </span>
+                    ) : getRegistrationStatus(member) === "rejected" ? (
+                      <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-semibold">
+                        ❌ Ditolak
                       </span>
                     ) : (
                       <button
@@ -952,6 +1018,11 @@ const Members = () => {
                       >
                         🔍 Preview & Verifikasi
                       </button>
+                    )}
+                    {getRegistrationStatus(member) === "rejected" && member.registrationRejectionReason && (
+                      <span className="max-w-[220px] truncate text-[10px] text-red-600" title={member.registrationRejectionReason}>
+                        Alasan: {member.registrationRejectionReason}
+                      </span>
                     )}
                     {member.registrationSource === "student_dashboard" && (
                       <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[10px]">
@@ -1600,6 +1671,16 @@ const Members = () => {
                 </span>
               </label>
               <div className="flex justify-end gap-3">
+                {verifyMember.registrationSource === "student_dashboard" && getRegistrationStatus(verifyMember) === "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => openRegistrationReject(verifyMember)}
+                    disabled={verifyLoading || verifyLoadingDetail || registrationRejectLoading}
+                    className="mr-auto px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold shadow"
+                  >
+                    ❌ Tolak Pengajuan
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={closeVerifyPreview}
@@ -1616,6 +1697,44 @@ const Members = () => {
                   {verifyLoadingDetail ? "⏳ Memuat dokumen..." : verifyLoading ? "⏳ Memverifikasi..." : "✅ Verifikasi Anggota Ini"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {registrationRejectTarget && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-red-100 bg-red-50 px-6 py-4">
+              <h3 className="text-lg font-bold text-red-900">Tolak Pengajuan Anggota</h3>
+              <p className="mt-1 text-sm text-red-700">
+                {registrationRejectTarget.name} · <span className="font-mono">{registrationRejectTarget.uuid}</span>
+              </p>
+            </div>
+            <div className="px-6 py-5">
+              <label htmlFor="registration-rejection-reason" className="block text-sm font-semibold text-gray-800 mb-2">
+                Alasan penolakan <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                id="registration-rejection-reason"
+                value={registrationRejectReason}
+                onChange={(event) => setRegistrationRejectReason(event.target.value)}
+                placeholder="Contoh: Selfie dengan KTP belum terlihat jelas. Silakan unggah ulang seluruh dokumen."
+                maxLength={1000}
+                className="w-full min-h-[130px] resize-y rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              />
+              <div className="mt-1 flex justify-between text-xs text-gray-500">
+                <span>Minimal 5 karakter. Alasan akan terlihat oleh siswa.</span>
+                <span>{registrationRejectReason.length}/1000</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-100 bg-gray-50 px-6 py-4">
+              <button type="button" onClick={closeRegistrationReject} disabled={registrationRejectLoading} className="px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50">
+                Batal
+              </button>
+              <button type="button" onClick={handleRegistrationReject} disabled={registrationRejectLoading || registrationRejectReason.trim().length < 5} className="px-5 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                {registrationRejectLoading ? "Memproses..." : "Ya, Tolak Pengajuan"}
+              </button>
             </div>
           </div>
         </div>
