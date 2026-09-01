@@ -17,6 +17,8 @@ import {
   reverseSavingsAccountingTransaction,
   normalizeObjectId,
 } from "../../services/savingsAccounting.service.js";
+import { isSavingsCoaOnlyEditor } from "../../utils/permissions.js";
+import { validateSavingsCoaOnlyPayload } from "../../utils/savingsPermissions.js";
 
 // Get all savings
 const getAllSavings = asyncHandler(async (req, res) => {
@@ -217,7 +219,40 @@ const updateSavings = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Data simpanan tidak ditemukan");
   }
 
-  const bodyData = { ...req.body };
+  let bodyData = { ...req.body };
+
+  if (isSavingsCoaOnlyEditor(req.user)) {
+    if (req.file) {
+      try {
+        const fs = await import("node:fs");
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch {
+        // The authorization failure must still be returned even if cleanup
+        // cannot remove a maliciously uploaded file.
+      }
+      throw new ApiError(
+        403,
+        "Akses Simpanan ini hanya boleh mengubah Record Account dan Category",
+      );
+    }
+
+    const restrictedPayload = validateSavingsCoaOnlyPayload(bodyData, {
+      isSplit: Boolean(existingSaving.isSplit),
+    });
+    if (!restrictedPayload.valid) {
+      const statusCode = restrictedPayload.disallowedFields?.length ? 403 : 400;
+      throw new ApiError(
+        statusCode,
+        restrictedPayload.errors[0] ||
+          "Akses Simpanan ini hanya boleh mengubah Record Account dan Category",
+        restrictedPayload.disallowedFields || restrictedPayload.errors,
+      );
+    }
+    bodyData = restrictedPayload.payload;
+  }
+
   ["amount", "installmentPeriod"].forEach((key) => {
     if (bodyData[key] !== undefined && bodyData[key] !== "") {
       const parsed = Number(bodyData[key]);

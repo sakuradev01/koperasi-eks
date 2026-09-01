@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useSelector } from "react-redux";
 import axios from "axios";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
@@ -8,7 +9,6 @@ import jsPDF from "jspdf";
 import "jspdf-autotable";
 import { API_URL } from "../api/config";
 import { getAssetsAccounts, getAllCategories } from "../api/accountingApi";
-import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import SearchableDropdown from "../components/SearchableDropdown.jsx";
 
@@ -56,6 +56,22 @@ const buildProofUrl = (proofFile) => {
 };
 
 const Savings = () => {
+  const { userData: user } = useSelector((state) => state.auth);
+  const isAdmin = user?.role === "admin";
+  const savingsPermission = user?.permissions?.simpanan || {};
+  const isSavingsCoaOnlyEditor =
+    !isAdmin && savingsPermission.editCoaOnly === true;
+  const canViewSavings =
+    isAdmin || isSavingsCoaOnlyEditor || savingsPermission.view === true;
+  const canEditSavings =
+    isAdmin || isSavingsCoaOnlyEditor || savingsPermission.edit === true;
+  const canCreateSavings =
+    isAdmin || (!isSavingsCoaOnlyEditor && savingsPermission.create === true);
+  const canDeleteSavings =
+    isAdmin || (!isSavingsCoaOnlyEditor && savingsPermission.delete === true);
+  const canReviewSavings =
+    isAdmin || (!isSavingsCoaOnlyEditor && savingsPermission.edit === true);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [savings, setSavings] = useState([]);
   const [members, setMembers] = useState([]);
@@ -95,11 +111,6 @@ const Savings = () => {
     hasUpgrade: false,
     upgradeInfo: null
   });
-  const [originalSelection, setOriginalSelection] = useState({
-    memberId: "",
-    productId: "",
-  });
-
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState({
     isOpen: false,
@@ -150,6 +161,7 @@ const Savings = () => {
   const [filterStatus, setFilterStatus] = useState("all"); // all, Pending, Approved, Rejected
   const [filterProduct, setFilterProduct] = useState("all");
   const [filterMember, setFilterMember] = useState("all");
+  const [filterAccounting, setFilterAccounting] = useState("all"); // all, incomplete, complete
   const [sortOrder, setSortOrder] = useState("newest"); // newest, oldest
 
   // Handle URL params from notification
@@ -274,17 +286,24 @@ const Savings = () => {
 
   useEffect(() => {
     const loadData = async () => {
+      if (!canViewSavings) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
-      await Promise.all([
-        fetchSavings(),
-        fetchMembers(),
-        fetchProducts(),
-        fetchAccountingOptions(),
-      ]);
+      const requests = [fetchSavings(), fetchAccountingOptions()];
+      // COA-only editors only need the populated savings list and COA
+      // selectors; avoid loading unrelated member/product endpoints.
+      if (!isSavingsCoaOnlyEditor) {
+        requests.push(fetchMembers(), fetchProducts());
+      }
+      await Promise.all(requests);
       setLoading(false);
     };
     loadData();
-  }, []);
+    // Fetch permission changes after auth state is restored from localStorage.
+  }, [canViewSavings, isSavingsCoaOnlyEditor]);
 
   // Auto-fill product when member is selected
   useEffect(() => {
@@ -321,11 +340,6 @@ const Savings = () => {
       minimumFractionDigits: 0,
     }).format(amount);
   };
-
-  const flatAssetAccounts = useMemo(
-    () => Object.values(assetsAccounts || {}).flatMap((items) => items || []),
-    [assetsAccounts]
-  );
 
   // Master / submenu as non-selectable separators; accounts selectable + searchable
   const categoryDropdownOptions = useMemo(() => {
@@ -530,20 +544,35 @@ const Savings = () => {
     
     // Prevent double submit
     if (submitLoading) return;
+    if (isSavingsCoaOnlyEditor && !editingId) {
+      toast.error("Akses ini hanya dapat mengedit mapping COA simpanan");
+      return;
+    }
     setSubmitLoading(true);
 
     // Get token first
     const token = localStorage.getItem("token");
     
-    // Check if we have a file to upload
-    const hasFile = formData.proofFile && formData.proofFile instanceof File;
+    // COA-only editor selalu mengirim whitelist JSON, tanpa field simpanan lain
+    // dan tanpa file bukti pembayaran.
+    const hasFile =
+      !isSavingsCoaOnlyEditor &&
+      formData.proofFile &&
+      formData.proofFile instanceof File;
     
     let formDataToSend;
     let headers = {
       Authorization: `Bearer ${token}`,
     };
 
-    if (hasFile) {
+    if (isSavingsCoaOnlyEditor) {
+      formDataToSend = {
+        accountId: formData.accountId || null,
+        categoryId: formData.categoryId || null,
+        categoryType: formData.categoryType || null,
+      };
+      headers["Content-Type"] = "application/json";
+    } else if (hasFile) {
       // Use FormData for file upload
       formDataToSend = new FormData();
       Object.keys(formData).forEach((key) => {
@@ -648,7 +677,6 @@ const Savings = () => {
       categoryType: "",
     });
     setLastPeriod(0);
-    setOriginalSelection({ memberId: "", productId: "" });
     setExistingProofFile(null);
     setEditingId(null);
     // Reset member search
@@ -668,6 +696,11 @@ const Savings = () => {
 
   // Handle delete
   const handleDelete = (id) => {
+    if (!canDeleteSavings) {
+      toast.error("Kamu tidak memiliki akses untuk menghapus simpanan");
+      return;
+    }
+
     setConfirmDialog({
       isOpen: true,
       title: "Hapus Simpanan",
@@ -693,6 +726,11 @@ const Savings = () => {
   };
 
   const handleApprove = async (savingOrId) => {
+    if (!canReviewSavings) {
+      toast.error("Akses ini hanya untuk mengubah Record Account dan Category");
+      return;
+    }
+
     const saving =
       savingOrId && typeof savingOrId === "object"
         ? savingOrId
@@ -782,6 +820,11 @@ const Savings = () => {
   };
 
   const handleReject = (id) => {
+    if (!canReviewSavings) {
+      toast.error("Akses ini hanya untuk mengubah Record Account dan Category");
+      return;
+    }
+
     setRejectSavingsId(id);
     setRejectionReason("");
     setShowRejectModal(true);
@@ -816,6 +859,11 @@ const Savings = () => {
 
   // Handle edit
   const handleEdit = async (saving) => {
+    if (!canEditSavings) {
+      toast.error("Kamu tidak memiliki akses untuk mengedit simpanan");
+      return;
+    }
+
     setEditingId(saving._id);
     const accountId = saving.accountId?._id || saving.accountId || "";
     const categoryId = saving.categoryId?._id || saving.categoryId || "";
@@ -836,10 +884,6 @@ const Savings = () => {
     });
     // Store existing proof file for preview
     setExistingProofFile(saving.proofFile || null);
-    setOriginalSelection({
-      memberId: saving.memberId?._id || saving.memberId || "",
-      productId: saving.productId?._id || saving.productId || "",
-    });
     setLastPeriod(0);
     setShowModal(true);
 
@@ -924,8 +968,28 @@ const Savings = () => {
     // Member filter
     const memberId = saving.memberId?._id || saving.memberId;
     const matchesMember = filterMember === "all" || memberId === filterMember;
+
+    // Split transactions keep category rows in their split details; their
+    // top-level category is intentionally empty and should not be treated as
+    // an incomplete COA mapping.
+    const hasRecordAccount = Boolean(saving.accountId?._id || saving.accountId);
+    const hasCategory = Boolean(
+      saving.isSplit ||
+        (saving.categoryId && (saving.categoryType || saving.category_type)),
+    );
+    const isAccountingComplete = hasRecordAccount && hasCategory;
+    const matchesAccounting =
+      filterAccounting === "all" ||
+      (filterAccounting === "incomplete" && !isAccountingComplete) ||
+      (filterAccounting === "complete" && isAccountingComplete);
     
-    return matchesSearch && matchesStatus && matchesProduct && matchesMember;
+    return (
+      matchesSearch &&
+      matchesStatus &&
+      matchesProduct &&
+      matchesMember &&
+      matchesAccounting
+    );
   });
 
   // Sort logic
@@ -1112,7 +1176,7 @@ const Savings = () => {
   // Reset page when filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterProduct, filterMember, sortOrder]);
+  }, [searchTerm, filterStatus, filterProduct, filterMember, filterAccounting, sortOrder]);
 
   // Close member dropdown when clicking outside
   useEffect(() => {
@@ -1154,6 +1218,7 @@ const Savings = () => {
     setFilterStatus("all");
     setFilterProduct("all");
     setFilterMember("all");
+    setFilterAccounting("all");
     setSortOrder("newest");
   };
 
@@ -1165,6 +1230,21 @@ const Savings = () => {
     );
   }
 
+  if (!canViewSavings) {
+    return (
+      <div className="p-6">
+        <div className="max-w-xl mx-auto mt-12 rounded-lg border border-yellow-200 bg-yellow-50 p-6 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <h1 className="text-xl font-semibold text-yellow-900">Akses Simpanan belum diberikan</h1>
+          <p className="mt-2 text-sm text-yellow-800">
+            Hubungi admin untuk mendapatkan akses yang sesuai. Untuk pembukuan lama,
+            admin dapat mengaktifkan mode <strong>Edit COA saja</strong>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 space-y-4 sm:space-y-0">
@@ -1172,38 +1252,44 @@ const Savings = () => {
           🌸 Data Simpanan
         </h1>
         <div className="flex flex-wrap gap-2 sm:justify-end">
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            disabled={!sortedSavings.length}
-            className="px-4 py-2 sm:px-5 sm:py-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors font-medium text-sm sm:text-base"
-          >
-            Export Excel
-          </button>
-          <button
-            type="button"
-            onClick={handleExportPdf}
-            disabled={!sortedSavings.length}
-            className="px-4 py-2 sm:px-5 sm:py-3 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors font-medium text-sm sm:text-base"
-          >
-            Export PDF
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setShowModal(true);
-              const hasAccounts = Object.values(assetsAccounts || {}).some(
-                (items) => Array.isArray(items) && items.length > 0
-              );
-              const hasCategories = Array.isArray(categories) && categories.length > 0;
-              if (!hasAccounts || !hasCategories) {
-                await fetchAccountingOptions({ silent: false });
-              }
-            }}
-            className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
-          >
-            ➕ Tambah Simpanan
-          </button>
+          {!isSavingsCoaOnlyEditor && (
+            <>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={!sortedSavings.length}
+                className="px-4 py-2 sm:px-5 sm:py-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors font-medium text-sm sm:text-base"
+              >
+                Export Excel
+              </button>
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                disabled={!sortedSavings.length}
+                className="px-4 py-2 sm:px-5 sm:py-3 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors font-medium text-sm sm:text-base"
+              >
+                Export PDF
+              </button>
+            </>
+          )}
+          {canCreateSavings && (
+            <button
+              type="button"
+              onClick={async () => {
+                setShowModal(true);
+                const hasAccounts = Object.values(assetsAccounts || {}).some(
+                  (items) => Array.isArray(items) && items.length > 0
+                );
+                const hasCategories = Array.isArray(categories) && categories.length > 0;
+                if (!hasAccounts || !hasCategories) {
+                  await fetchAccountingOptions({ silent: false });
+                }
+              }}
+              className="bg-gradient-to-r from-pink-500 to-rose-500 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
+            >
+              ➕ Tambah Simpanan
+            </button>
+          )}
         </div>
       </div>
 
@@ -1231,7 +1317,7 @@ const Savings = () => {
 
       {/* Filter & Search Section */}
       <div className="bg-white rounded-lg shadow p-4 mb-6 border border-pink-100">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4">
           {/* Search */}
           <div className="lg:col-span-2">
             <label className="block text-xs font-medium text-gray-600 mb-1">🔍 Cari</label>
@@ -1277,6 +1363,20 @@ const Savings = () => {
             </select>
           </div>
 
+          {/* Accounting mapping filter */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">🧾 Pembukuan</label>
+            <select
+              value={filterAccounting}
+              onChange={(e) => setFilterAccounting(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-pink-500"
+            >
+              <option value="all">Semua COA</option>
+              <option value="incomplete">Belum lengkap</option>
+              <option value="complete">Sudah lengkap</option>
+            </select>
+          </div>
+
           {/* Sort Order */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">📅 Urutan</label>
@@ -1306,7 +1406,10 @@ const Savings = () => {
           <span className="text-gray-600">
             Menampilkan <strong>{sortedSavings.length}</strong> dari <strong>{savings.length}</strong> data
           </span>
-          {(searchTerm || filterStatus !== "all" || filterProduct !== "all") && (
+          {(searchTerm ||
+            filterStatus !== "all" ||
+            filterProduct !== "all" ||
+            filterAccounting !== "all") && (
             <span className="text-pink-600">• Filter aktif</span>
           )}
         </div>
@@ -1431,7 +1534,7 @@ const Savings = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex items-center space-x-1">
-                      {saving.status === "Pending" && (
+                      {canReviewSavings && saving.status === "Pending" && (
                         saving.proofFile ? (
                           <button
                             onClick={() => openProofModal(saving)}
@@ -1446,20 +1549,24 @@ const Savings = () => {
                           </span>
                         )
                       )}
-                      <button
-                        onClick={() => handleEdit(saving)}
-                        className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
-                        title="Edit"
-                      >
-                        ✎
-                      </button>
-                      <button
-                        onClick={() => handleDelete(saving._id)}
-                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200"
-                        title="Hapus"
-                      >
-                        🗑
-                      </button>
+                      {canEditSavings && (
+                        <button
+                          onClick={() => handleEdit(saving)}
+                          className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+                          title={isSavingsCoaOnlyEditor ? "Edit Record Account & Category" : "Edit"}
+                        >
+                          ✎
+                        </button>
+                      )}
+                      {canDeleteSavings && (
+                        <button
+                          onClick={() => handleDelete(saving._id)}
+                          className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200"
+                          title="Hapus"
+                        >
+                          🗑
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1654,10 +1761,66 @@ const Savings = () => {
           <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
             <div className="mt-3">
               <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">
-                {editingId ? "Edit Data Simpanan" : "Tambah Data Simpanan"}
+                {isSavingsCoaOnlyEditor && editingId
+                  ? "Edit Mapping COA Simpanan"
+                  : editingId
+                    ? "Edit Data Simpanan"
+                    : "Tambah Data Simpanan"}
               </h3>
 
               <form onSubmit={handleSubmit} className="space-y-4">
+                {isSavingsCoaOnlyEditor && editingId ? (
+                  <>
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                      <p className="font-semibold">Mode Edit COA saja</p>
+                      <p className="mt-1">
+                        Hanya Record Account dan Category yang dapat diubah. Nominal, tanggal,
+                        anggota, status, keterangan, dan bukti pembayaran dikunci.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">
+                          Record Account <span className="text-red-500">*</span>
+                        </label>
+                        <div className="mt-1">
+                          <SearchableDropdown
+                            value={formData.accountId ? String(formData.accountId) : ""}
+                            onChange={(value) =>
+                              setFormData((prev) => ({ ...prev, accountId: value || "" }))
+                            }
+                            options={accountDropdownOptions}
+                            grouped
+                            placeholder="Pilih akun pencatatan"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">
+                          Category <span className="text-red-500">*</span>
+                        </label>
+                        <div className="mt-1">
+                          <SearchableDropdown
+                            value={
+                              formData.categoryId
+                                ? `${formData.categoryType || "account"}|${formData.categoryId}`
+                                : ""
+                            }
+                            onChange={selectFormCategory}
+                            options={categoryDropdownOptions}
+                            placeholder="Pilih kategori (cari master/submenu/akun)"
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Pilih category akun yang sesuai dengan pembukuan lama.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Anggota
@@ -1986,7 +2149,7 @@ const Savings = () => {
                                                 </span>
                                                 {tx.status === 'Rejected' && tx.rejectionReason && (
                                                   <div className="text-red-600 text-xs italic ml-4 mt-1">
-                                                    💬 "{tx.rejectionReason}"
+                                                    💬 &quot;{tx.rejectionReason}&quot;
                                                   </div>
                                                 )}
                                               </div>
@@ -2322,6 +2485,9 @@ const Savings = () => {
                   </p>
                 </div>
 
+                  </>
+                )}
+
                 <div className="flex justify-end space-x-3">
                   <button
                     type="button"
@@ -2348,7 +2514,11 @@ const Savings = () => {
                         {editingId ? 'Menyimpan...' : 'Menambahkan...'}
                       </>
                     ) : (
-                      editingId ? '💾 Update' : '➕ Simpan'
+                      isSavingsCoaOnlyEditor && editingId
+                        ? '💾 Update Mapping COA'
+                        : editingId
+                          ? '💾 Update'
+                          : '➕ Simpan'
                     )}
                   </button>
                 </div>
@@ -2651,7 +2821,7 @@ const Savings = () => {
             </div>
 
             {/* Modal Footer - Action Buttons */}
-            {selectedSaving.status === 'Pending' && (
+            {selectedSaving.status === 'Pending' && !isSavingsCoaOnlyEditor && (
               <div className="border-t border-gray-200 px-6 py-4 bg-gray-50">
                 <p className="text-sm text-gray-600 mb-3 text-center">
                   ⚠️ Pastikan bukti pembayaran sudah benar sebelum mengambil aksi
@@ -2694,6 +2864,26 @@ const Savings = () => {
                     🗑 Hapus
                   </button>
                 </div>
+              </div>
+            )}
+
+            {selectedSaving.status === 'Pending' && isSavingsCoaOnlyEditor && (
+              <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex justify-center gap-3">
+                <button
+                  onClick={() => {
+                    closeProofModal();
+                    handleEdit(selectedSaving);
+                  }}
+                  className="px-6 py-2.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-md"
+                >
+                  ✎ Edit Record Account &amp; Category
+                </button>
+                <button
+                  onClick={closeProofModal}
+                  className="px-6 py-2.5 bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-colors"
+                >
+                  Tutup
+                </button>
               </div>
             )}
 

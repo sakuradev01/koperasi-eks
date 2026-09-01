@@ -47,6 +47,10 @@ export const verifyToken = async (req, res, next) => {
       username: user.username,
       name: user.name,
       role: user.role,
+      // Keep the latest permission document available to route-level
+      // authorization middleware.  The user is loaded from Mongo on every
+      // request, so permission changes take effect on the next request.
+      permissions: user.permissions || {},
     };
 
     next();
