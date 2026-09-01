@@ -7,7 +7,7 @@ import { Savings } from "../models/savings.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import multer from "multer";
 import path from "path";
-import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";
+import { ensureUploadsSubdirs, saveBase64ImageToFile } from "../utils/uploadsDir.js";
 import {
   getDonationOverview,
   createDonation,
@@ -17,6 +17,12 @@ import {
   getPublicInvoiceByNumber,
   getPublicMemberInvoicesByUuid,
 } from "../controllers/admin/invoice.controller.js";
+import {
+  getEffectiveRegistrationStatus,
+  isStudentRegistration,
+  summarizeRegistrationDocuments,
+  validateRegistrationPayload,
+} from "../utils/memberRegistration.js";
 
 const { donasi: donasiDir } = ensureUploadsSubdirs();
 
@@ -50,6 +56,74 @@ const getPublicAddressState = (member) => ({
     (isBlankAddress(member.completeAddress) ||
       (member.addressUpdateStatus || "none") === "pending"),
 });
+
+const registrationPayloadFields = [
+  "uuid",
+  "name",
+  "gender",
+  "email",
+  "phone",
+  "birthPlace",
+  "birthDate",
+  "nik",
+  "completeAddress",
+  "accountNumber",
+  "bankName",
+  "accountHolderName",
+  "productId",
+  "signatureImage",
+  "ktpImage",
+  "selfieImage",
+  "livenessLeftImage",
+  "livenessRightImage",
+  "faceMatchScore",
+  "riplText",
+  "riplVersion",
+  "riplAgreedAt",
+];
+
+const pickRegistrationPayload = (body = {}) =>
+  Object.fromEntries(registrationPayloadFields.map((field) => [field, body[field]]));
+
+const hasCompleteIdentityDocuments = (payload) => {
+  const summary = summarizeRegistrationDocuments(payload);
+  return summary.ktp && summary.selfie && summary.livenessLeft && summary.livenessRight;
+};
+
+const registrationValidationError = (validation) => ({
+  success: false,
+  code: "REGISTRATION_DOCS_REQUIRED",
+  fields: validation.errors,
+  message: "Lengkapi seluruh data, rekening, tanda tangan, dan dokumen KTP/selfie/liveness sebelum mengirim pendaftaran.",
+});
+
+const registrationDocumentFileNames = {
+  ktpImage: "ktp",
+  selfieImage: "selfie",
+  livenessLeftImage: "liveness-left",
+  livenessRightImage: "liveness-right",
+  signatureImage: "signature",
+};
+
+/**
+ * Keep original evidence bytes intact, but store them on disk instead of in a
+ * MongoDB document. A phone can produce several megabytes per photo; storing
+ * all five data URLs in one document can exceed MongoDB's 16 MB document limit.
+ */
+const persistRegistrationDocuments = (payload, uuid) => {
+  const persisted = { ...payload };
+  for (const [field, suffix] of Object.entries(registrationDocumentFileNames)) {
+    const original = String(payload[field] || "").trim();
+    const stored = saveBase64ImageToFile(payload[field], "members", `${uuid}-${suffix}`);
+    if (/^data:/i.test(original) && /^data:/i.test(String(stored || "").trim())) {
+      const error = new Error(`Dokumen ${field} gagal disimpan tanpa mengubah file asli.`);
+      error.code = "REGISTRATION_DOCUMENT_STORAGE_FAILED";
+      throw error;
+    }
+    persisted[field] = stored;
+  }
+  return persisted;
+};
 
 // Public API untuk integrasi eksternal (tanpa auth)
 // GET /api/public/savings - Ambil semua data savings dengan detail lengkap
@@ -423,6 +497,7 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
 // POST /api/public/register-koperasi - Student dashboard registration
 const registerKoperasi = asyncHandler(async (req, res) => {
   try {
+    const payload = pickRegistrationPayload(req.body);
     const {
       uuid,
       name,
@@ -437,23 +512,15 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       bankName,
       accountHolderName,
       productId,
-      signatureImage,
-      ktpImage,
-      selfieImage,
-      livenessLeftImage,
-      livenessRightImage,
       faceMatchScore,
       riplText,
       riplVersion,
       riplAgreedAt,
-    } = req.body;
+    } = payload;
 
-    // Validate required fields
-    if (!uuid || !name || !gender) {
-      return res.status(400).json({
-        success: false,
-        message: "UUID, nama, dan jenis kelamin wajib diisi",
-      });
+    const validation = validateRegistrationPayload(payload);
+    if (!validation.valid) {
+      return res.status(422).json(registrationValidationError(validation));
     }
 
     // Check if UUID already registered
@@ -477,6 +544,8 @@ const registerKoperasi = asyncHandler(async (req, res) => {
         });
       }
     }
+
+    const persistedDocuments = persistRegistrationDocuments(payload, uuid);
 
     // Generate UUID for user account
     const generateUserUUID = () => {
@@ -517,11 +586,11 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       accountNumber: accountNumber || "",
       bankName: bankName || "",
       accountHolderName: accountHolderName || "",
-      signatureImage: signatureImage || "",
-      ktpImage: ktpImage || "",
-      selfieImage: selfieImage || "",
-      livenessLeftImage: livenessLeftImage || "",
-      livenessRightImage: livenessRightImage || "",
+      signatureImage: persistedDocuments.signatureImage || "",
+      ktpImage: persistedDocuments.ktpImage || "",
+      selfieImage: persistedDocuments.selfieImage || "",
+      livenessLeftImage: persistedDocuments.livenessLeftImage || "",
+      livenessRightImage: persistedDocuments.livenessRightImage || "",
       faceMatchScore: faceMatchScore || null,
       riplText: riplText || "",
       riplVersion: riplVersion || "",
@@ -529,24 +598,14 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       productId: productId || null,
       user: user._id,
       isVerified: false,
+      registrationStatus: "pending",
+      registrationAttempt: 1,
       registrationSource: "student_dashboard",
       // New registrations with full face docs skip legacy identity gate after admin verifies membership
-      identityVerifyStatus: [
-        ktpImage,
-        selfieImage,
-        livenessLeftImage,
-        livenessRightImage,
-      ].every((v) => String(v || "").trim().length > 10)
+      identityVerifyStatus: hasCompleteIdentityDocuments(payload)
         ? "approved"
         : "none",
-      identityVerifyVerifiedAt: [
-        ktpImage,
-        selfieImage,
-        livenessLeftImage,
-        livenessRightImage,
-      ].every((v) => String(v || "").trim().length > 10)
-        ? new Date()
-        : null,
+      identityVerifyVerifiedAt: hasCompleteIdentityDocuments(payload) ? new Date() : null,
     });
     await member.save();
 
@@ -562,9 +621,119 @@ const registerKoperasi = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error("Register koperasi error:", error);
+    if (error.code === "REGISTRATION_DOCUMENT_STORAGE_FAILED") {
+      return res.status(507).json({
+        success: false,
+        code: error.code,
+        message: "Bukti pendaftaran belum dapat disimpan. Coba lagi beberapa saat kemudian.",
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Gagal mendaftar koperasi",
+      error: error.message,
+    });
+  }
+});
+
+// PUT /api/public/register-koperasi/:uuid - resubmit a rejected registration
+const resubmitKoperasi = asyncHandler(async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const payload = { ...pickRegistrationPayload(req.body), uuid };
+    const member = await Member.findOne({ uuid });
+
+    if (!member) {
+      return res.status(404).json({ success: false, message: "Member tidak ditemukan" });
+    }
+    if (!isStudentRegistration(member)) {
+      return res.status(400).json({
+        success: false,
+        code: "REGISTRATION_SOURCE_UNSUPPORTED",
+        message: "Hanya pendaftaran dari Student Dashboard yang dapat dikirim ulang.",
+      });
+    }
+    if (getEffectiveRegistrationStatus(member) !== "rejected") {
+      return res.status(409).json({
+        success: false,
+        code: "REGISTRATION_NOT_REJECTED",
+        message: "Pengajuan hanya dapat dikirim ulang setelah ditolak admin.",
+      });
+    }
+
+    const validation = validateRegistrationPayload(payload);
+    if (!validation.valid) {
+      return res.status(422).json(registrationValidationError(validation));
+    }
+
+    const product = await Product.findById(payload.productId);
+    if (!product || !product.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "Produk simpanan tidak valid atau tidak aktif",
+      });
+    }
+
+    const persistedDocuments = persistRegistrationDocuments(payload, uuid);
+
+    Object.assign(member, {
+      name: payload.name,
+      gender: String(payload.gender).toUpperCase(),
+      email: payload.email || "",
+      phone: payload.phone || "",
+      birthPlace: payload.birthPlace || "",
+      birthDate: payload.birthDate ? new Date(payload.birthDate) : null,
+      nik: payload.nik,
+      completeAddress: payload.completeAddress || "",
+      accountNumber: payload.accountNumber,
+      bankName: payload.bankName,
+      accountHolderName: payload.accountHolderName,
+      productId: payload.productId,
+      signatureImage: persistedDocuments.signatureImage,
+      ktpImage: persistedDocuments.ktpImage,
+      selfieImage: persistedDocuments.selfieImage,
+      livenessLeftImage: persistedDocuments.livenessLeftImage,
+      livenessRightImage: persistedDocuments.livenessRightImage,
+      faceMatchScore: payload.faceMatchScore || null,
+      riplText: payload.riplText,
+      riplVersion: payload.riplVersion,
+      riplAgreedAt: new Date(payload.riplAgreedAt),
+      registrationStatus: "pending",
+      registrationAttempt: Math.max(1, Number(member.registrationAttempt) || 1) + 1,
+      registrationRejectionReason: null,
+      registrationRejectedAt: null,
+      registrationRejectedBy: null,
+      isVerified: false,
+      identityVerifyStatus: hasCompleteIdentityDocuments(payload) ? "approved" : "none",
+      identityVerifyVerifiedAt: hasCompleteIdentityDocuments(payload) ? new Date() : null,
+      identityVerifyRejectionReason: null,
+    });
+    await member.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Pendaftaran berhasil dikirim ulang dan menunggu verifikasi admin.",
+      data: {
+        uuid: member.uuid,
+        name: member.name,
+        isVerified: member.isVerified,
+        registrationStatus: "pending",
+        registrationAttempt: member.registrationAttempt,
+        ...getPublicAddressState(member),
+      },
+    });
+  } catch (error) {
+    console.error("Resubmit koperasi error:", error);
+    if (error.code === "REGISTRATION_DOCUMENT_STORAGE_FAILED") {
+      return res.status(507).json({
+        success: false,
+        code: error.code,
+        message: "Bukti pendaftaran belum dapat disimpan. Coba lagi beberapa saat kemudian.",
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengirim ulang pendaftaran koperasi",
       error: error.message,
     });
   }
@@ -593,7 +762,31 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
       });
     }
 
-    if (!member.isVerified) {
+    const registrationStatus = getEffectiveRegistrationStatus(member);
+
+    if (registrationStatus === "rejected") {
+      return res.status(200).json({
+        success: true,
+        status: "rejected",
+        message: "Pendaftaran ditolak admin. Perbaiki data lalu kirim ulang.",
+        data: {
+          uuid: member.uuid,
+          name: member.name,
+          registeredAt: member.createdAt,
+          registrationStatus,
+          registrationAttempt: member.registrationAttempt || 1,
+          registrationRejectionReason: member.registrationRejectionReason || "",
+          registrationRejectedAt: member.registrationRejectedAt || null,
+          ...getPublicAddressState(member),
+          product: member.productId ? {
+            title: member.productId.title,
+            depositAmount: member.productId.depositAmount,
+          } : null,
+        },
+      });
+    }
+
+    if (registrationStatus === "pending") {
       return res.status(200).json({
         success: true,
         status: "pending_verification",
@@ -602,6 +795,8 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
           uuid: member.uuid,
           name: member.name,
           registeredAt: member.createdAt,
+          registrationStatus,
+          registrationAttempt: member.registrationAttempt || 1,
           ...getPublicAddressState(member),
           product: member.productId ? {
             title: member.productId.title,
@@ -619,6 +814,7 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
         uuid: member.uuid,
         name: member.name,
         isVerified: member.isVerified,
+        registrationStatus,
       },
     });
   } catch (error) {
@@ -638,6 +834,7 @@ router.get("/summary", getPublicSummary);
 router.get("/member/:uuid", getMemberByUuid);
 router.get("/student-dashboard/:uuid", getStudentDashboardSavings);
 router.post("/register-koperasi", registerKoperasi);
+router.put("/register-koperasi/:uuid", resubmitKoperasi);
 router.get("/check-member/:uuid", checkMemberStatus);
 router.get("/donations/overview/:studentUuid", getDonationOverview);
 router.post("/donations", donationUpload.single("proofFile"), createDonation);
