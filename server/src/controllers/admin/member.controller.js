@@ -4,18 +4,40 @@ import { Savings } from "../../models/savings.model.js";
 import { Loan } from "../../models/loan.model.js";
 import { LoanPayment } from "../../models/loanPayment.model.js";
 import { ProductUpgrade } from "../../models/productUpgrade.model.js";
+import { MemberRegistrationRejection } from "../../models/memberRegistrationRejection.model.js";
 import mongoose from "mongoose";
 import fs from "fs/promises";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import {
+  getEffectiveRegistrationStatus,
+  isStudentRegistration,
+  summarizeRegistrationDocuments,
+  validateRegistrationPayload,
+} from "../../utils/memberRegistration.js";
 
 // Get all members — optimized: exclude heavy base64 images from list, single aggregate for savings
 const getAllMembers = asyncHandler(async (req, res) => {
   // Filter by verification status
-  const { verified, addressUpdateStatus, identityVerifyStatus, isCompleted, productId } = req.query;
+  const {
+    verified,
+    registrationStatus,
+    addressUpdateStatus,
+    identityVerifyStatus,
+    isCompleted,
+    productId,
+  } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
   else if (verified === "false") filter.isVerified = false;
+  if (registrationStatus === "pending") {
+    filter.$or = [
+      { registrationStatus: "pending" },
+      { registrationStatus: { $exists: false }, isVerified: false },
+    ];
+  } else if (["approved", "rejected"].includes(registrationStatus)) {
+    filter.registrationStatus = registrationStatus;
+  }
   if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
   if (identityVerifyStatus) filter.identityVerifyStatus = identityVerifyStatus;
   if (isCompleted === "true") filter.isCompleted = true;
@@ -48,6 +70,7 @@ const getAllMembers = asyncHandler(async (req, res) => {
 
   const membersWithSavings = members.map((m) => ({
     ...m,
+    registrationStatus: getEffectiveRegistrationStatus(m),
     totalSavings: savingsMap.get(String(m._id)) || 0,
   }));
 
@@ -203,6 +226,7 @@ const createMember = asyncHandler(async (req, res) => {
     riplVersion: riplVersion || "",
     riplAgreedAt: riplAgreedAt ? new Date(riplAgreedAt) : null,
     isVerified: true,
+    registrationStatus: "approved",
     registrationSource: "admin",
   });
 
@@ -514,9 +538,35 @@ const verifyMember = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: "Member sudah diverifikasi" });
   }
 
+  const registrationStatus = getEffectiveRegistrationStatus(member);
+  if (registrationStatus === "rejected") {
+    return res.status(409).json({
+      success: false,
+      code: "REGISTRATION_REJECTED",
+      message: "Pengajuan ini sudah ditolak. Siswa harus mengirim ulang data terlebih dahulu.",
+    });
+  }
+
+  if (isStudentRegistration(member)) {
+    const validation = validateRegistrationPayload(member);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        code: "REGISTRATION_DOCS_REQUIRED",
+        fields: validation.errors,
+        message: "Dokumen dan data pendaftaran belum lengkap.",
+      });
+    }
+  }
+
+  const actorId = req.user?.userId || req.user?._id;
   member.isVerified = true;
-  member.verifiedBy = req.user._id;
+  if (isStudentRegistration(member)) member.registrationStatus = "approved";
+  member.verifiedBy = actorId;
   member.verifiedAt = new Date();
+  member.registrationRejectionReason = null;
+  member.registrationRejectedAt = null;
+  member.registrationRejectedBy = null;
   if (member.completeAddress && member.completeAddress.trim()) {
     member.addressUpdateStatus = "approved";
     member.addressUpdateVerifiedBy = req.user._id;
@@ -547,6 +597,7 @@ const unverifyMember = asyncHandler(async (req, res) => {
   member.isVerified = false;
   member.verifiedBy = null;
   member.verifiedAt = null;
+  if (isStudentRegistration(member)) member.registrationStatus = "pending";
   await member.save();
 
   res.status(200).json({
@@ -715,9 +766,154 @@ const rejectMemberIdentity = asyncHandler(async (req, res) => {
   });
 });
 
+const normalizeRejectionReason = (value) => String(value || "").trim();
+
+const getActorId = (req) => req.user?.userId || req.user?._id || null;
+
+const getActorName = (req) =>
+  String(req.user?.name || req.user?.username || "Admin").trim();
+
+const isValidRejectionReason = (reason) => reason.length >= 5 && reason.length <= 1000;
+
+const saveRegistrationRejection = async ({ member, reason, req }) => {
+  const history = await MemberRegistrationRejection.create({
+    memberId: member._id,
+    memberUuid: member.uuid,
+    memberName: member.name,
+    reason,
+    rejectedBy: getActorId(req),
+    rejectedByName: getActorName(req),
+    rejectedAt: new Date(),
+    attempt: Math.max(1, Number(member.registrationAttempt) || 1),
+    documentSummary: summarizeRegistrationDocuments(member),
+  });
+
+  try {
+    member.registrationStatus = "rejected";
+    member.registrationRejectionReason = reason;
+    member.registrationRejectedAt = history.rejectedAt;
+    member.registrationRejectedBy = getActorId(req);
+    member.isVerified = false;
+    await member.save();
+  } catch (error) {
+    await MemberRegistrationRejection.deleteOne({ _id: history._id });
+    throw error;
+  }
+
+  return history;
+};
+
+// Reject a new Student Dashboard registration without deleting its audit trail.
+const rejectMemberRegistration = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+  const reason = normalizeRejectionReason(req.body?.rejectionReason);
+  const member = await Member.findOne({ uuid });
+
+  if (!member) {
+    return res.status(404).json({ success: false, message: "Member tidak ditemukan" });
+  }
+
+  if (!isStudentRegistration(member)) {
+    return res.status(400).json({
+      success: false,
+      code: "REGISTRATION_SOURCE_UNSUPPORTED",
+      message: "Hanya pendaftaran dari Student Dashboard yang dapat ditolak melalui alur ini.",
+    });
+  }
+
+  const status = getEffectiveRegistrationStatus(member);
+  if (status !== "pending") {
+    return res.status(409).json({
+      success: false,
+      code: "REGISTRATION_NOT_PENDING",
+      registrationStatus: status,
+      message: `Pengajuan saat ini berstatus ${status} dan tidak dapat ditolak lagi.`,
+    });
+  }
+
+  if (!isValidRejectionReason(reason)) {
+    return res.status(422).json({
+      success: false,
+      code: "REJECTION_REASON_REQUIRED",
+      message: "Alasan penolakan wajib diisi (5–1000 karakter).",
+    });
+  }
+
+  const history = await saveRegistrationRejection({ member, reason, req });
+  return res.status(200).json({
+    success: true,
+    message: "Pengajuan anggota berhasil ditolak dan dicatat dalam riwayat.",
+    data: {
+      uuid: member.uuid,
+      registrationStatus: "rejected",
+      registrationRejectionReason: reason,
+      registrationRejectedAt: history.rejectedAt,
+      registrationAttempt: member.registrationAttempt || 1,
+    },
+  });
+});
+
+const parseHistoryPagination = (query = {}) => {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 20));
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const historyProjection = "memberId memberUuid memberName reason rejectedBy rejectedByName rejectedAt attempt documentSummary createdAt";
+
+const getRegistrationRejectionHistory = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = parseHistoryPagination(req.query);
+  const search = String(req.query.search || "").trim();
+  const filter = search
+    ? {
+        $or: [
+          { memberUuid: { $regex: escapeRegExp(search), $options: "i" } },
+          { memberName: { $regex: escapeRegExp(search), $options: "i" } },
+        ],
+      }
+    : {};
+  const [rows, total] = await Promise.all([
+    MemberRegistrationRejection.find(filter)
+      .select(historyProjection)
+      .sort({ rejectedAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    MemberRegistrationRejection.countDocuments(filter),
+  ]);
+
+  return res.status(200).json({
+    success: true,
+    data: rows,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  });
+});
+
+const getMemberRegistrationRejectionHistory = asyncHandler(async (req, res) => {
+  const { uuid } = req.params;
+  const rows = await MemberRegistrationRejection.find({ memberUuid: uuid })
+    .select(historyProjection)
+    .sort({ rejectedAt: -1, _id: -1 })
+    .limit(100)
+    .lean();
+
+  return res.status(200).json({
+    success: true,
+    data: rows,
+    pagination: { page: 1, limit: 100, total: rows.length, totalPages: rows.length ? 1 : 0 },
+  });
+});
+
 // Get pending verification count
 const getPendingCount = asyncHandler(async (req, res) => {
-  const registrationPending = await Member.countDocuments({ isVerified: false });
+  const registrationPending = await Member.countDocuments({
+    $or: [
+      { registrationStatus: "pending" },
+      { registrationStatus: { $exists: false }, isVerified: false },
+    ],
+  });
   const addressPending = await Member.countDocuments({ addressUpdateStatus: "pending" });
   const identityPending = await Member.countDocuments({ identityVerifyStatus: "pending" });
   res.status(200).json({
@@ -929,6 +1125,9 @@ export {
   rejectMemberAddress,
   approveMemberIdentity,
   rejectMemberIdentity,
+  rejectMemberRegistration,
+  getRegistrationRejectionHistory,
+  getMemberRegistrationRejectionHistory,
   getPendingCount,
   exportMembersExcel,
   migrateExistingMembers,

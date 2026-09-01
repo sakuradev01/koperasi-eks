@@ -108,6 +108,32 @@ const memberSchema = new Schema(
       type: Boolean,
       default: false,
     },
+    // Registration workflow for Student Dashboard submissions. Legacy rows
+    // without this field are mapped from isVerified by the status helper.
+    registrationStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: undefined,
+      index: true,
+    },
+    registrationRejectionReason: {
+      type: String,
+      default: null,
+    },
+    registrationRejectedAt: {
+      type: Date,
+      default: null,
+    },
+    registrationRejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    registrationAttempt: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
     verifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -241,6 +267,7 @@ memberSchema.index({ isVerified: 1 });
 memberSchema.index({ isCompleted: 1 });
 memberSchema.index({ productId: 1 });
 memberSchema.index({ createdAt: -1 });
+memberSchema.index({ registrationStatus: 1, createdAt: -1 });
 // hasUpgraded & addressUpdateStatus already indexed above
 
 // Generate UUID sebelum disimpan

@@ -29,6 +29,9 @@ import {
   rejectMemberAddress,
   approveMemberIdentity,
   rejectMemberIdentity,
+  rejectMemberRegistration,
+  getRegistrationRejectionHistory,
+  getMemberRegistrationRejectionHistory,
   getPendingCount,
   exportMembersExcel,
   migrateExistingMembers
@@ -125,6 +128,7 @@ router.delete("/products/:id", verifyToken, deleteProduct);
 router.patch("/products/:id/toggle-status", verifyToken, toggleProductStatus);
 // Member management routes
 router.get("/members/export", verifyToken, exportMembersExcel);
+router.get("/member-registration-rejections", verifyToken, getRegistrationRejectionHistory);
 router.get("/members", verifyToken, getAllMembers);
 router.get("/members/pending-count", verifyToken, getPendingCount);
 router.post("/members/migrate-verified", verifyToken, migrateExistingMembers);
@@ -136,6 +140,8 @@ router.patch("/members/:uuid/complete", verifyToken, markAsCompleted);
 router.patch("/members/:uuid/uncomplete", verifyToken, unmarkAsCompleted);
 router.patch("/members/:uuid/verify", verifyToken, verifyMember);
 router.patch("/members/:uuid/unverify", verifyToken, unverifyMember);
+router.patch("/members/:uuid/reject", verifyToken, rejectMemberRegistration);
+router.get("/members/:uuid/registration-rejections", verifyToken, getMemberRegistrationRejectionHistory);
 router.patch("/members/:uuid/address/approve", verifyToken, approveMemberAddress);
 router.patch("/members/:uuid/address/reject", verifyToken, rejectMemberAddress);
 router.patch("/members/:uuid/identity/approve", verifyToken, approveMemberIdentity);
