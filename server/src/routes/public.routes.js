@@ -7,7 +7,7 @@ import { Savings } from "../models/savings.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import multer from "multer";
 import path from "path";
-import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";
+import { ensureUploadsSubdirs, saveBase64ImageToFile } from "../utils/uploadsDir.js";
 import {
   getDonationOverview,
   createDonation,
@@ -96,6 +96,34 @@ const registrationValidationError = (validation) => ({
   fields: validation.errors,
   message: "Lengkapi seluruh data, rekening, tanda tangan, dan dokumen KTP/selfie/liveness sebelum mengirim pendaftaran.",
 });
+
+const registrationDocumentFileNames = {
+  ktpImage: "ktp",
+  selfieImage: "selfie",
+  livenessLeftImage: "liveness-left",
+  livenessRightImage: "liveness-right",
+  signatureImage: "signature",
+};
+
+/**
+ * Keep original evidence bytes intact, but store them on disk instead of in a
+ * MongoDB document. A phone can produce several megabytes per photo; storing
+ * all five data URLs in one document can exceed MongoDB's 16 MB document limit.
+ */
+const persistRegistrationDocuments = (payload, uuid) => {
+  const persisted = { ...payload };
+  for (const [field, suffix] of Object.entries(registrationDocumentFileNames)) {
+    const original = String(payload[field] || "").trim();
+    const stored = saveBase64ImageToFile(payload[field], "members", `${uuid}-${suffix}`);
+    if (/^data:/i.test(original) && /^data:/i.test(String(stored || "").trim())) {
+      const error = new Error(`Dokumen ${field} gagal disimpan tanpa mengubah file asli.`);
+      error.code = "REGISTRATION_DOCUMENT_STORAGE_FAILED";
+      throw error;
+    }
+    persisted[field] = stored;
+  }
+  return persisted;
+};
 
 // Public API untuk integrasi eksternal (tanpa auth)
 // GET /api/public/savings - Ambil semua data savings dengan detail lengkap
@@ -484,11 +512,6 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       bankName,
       accountHolderName,
       productId,
-      signatureImage,
-      ktpImage,
-      selfieImage,
-      livenessLeftImage,
-      livenessRightImage,
       faceMatchScore,
       riplText,
       riplVersion,
@@ -521,6 +544,8 @@ const registerKoperasi = asyncHandler(async (req, res) => {
         });
       }
     }
+
+    const persistedDocuments = persistRegistrationDocuments(payload, uuid);
 
     // Generate UUID for user account
     const generateUserUUID = () => {
@@ -561,11 +586,11 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       accountNumber: accountNumber || "",
       bankName: bankName || "",
       accountHolderName: accountHolderName || "",
-      signatureImage: signatureImage || "",
-      ktpImage: ktpImage || "",
-      selfieImage: selfieImage || "",
-      livenessLeftImage: livenessLeftImage || "",
-      livenessRightImage: livenessRightImage || "",
+      signatureImage: persistedDocuments.signatureImage || "",
+      ktpImage: persistedDocuments.ktpImage || "",
+      selfieImage: persistedDocuments.selfieImage || "",
+      livenessLeftImage: persistedDocuments.livenessLeftImage || "",
+      livenessRightImage: persistedDocuments.livenessRightImage || "",
       faceMatchScore: faceMatchScore || null,
       riplText: riplText || "",
       riplVersion: riplVersion || "",
@@ -596,6 +621,13 @@ const registerKoperasi = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error("Register koperasi error:", error);
+    if (error.code === "REGISTRATION_DOCUMENT_STORAGE_FAILED") {
+      return res.status(507).json({
+        success: false,
+        code: error.code,
+        message: "Bukti pendaftaran belum dapat disimpan. Coba lagi beberapa saat kemudian.",
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Gagal mendaftar koperasi",
@@ -642,6 +674,8 @@ const resubmitKoperasi = asyncHandler(async (req, res) => {
       });
     }
 
+    const persistedDocuments = persistRegistrationDocuments(payload, uuid);
+
     Object.assign(member, {
       name: payload.name,
       gender: String(payload.gender).toUpperCase(),
@@ -655,11 +689,11 @@ const resubmitKoperasi = asyncHandler(async (req, res) => {
       bankName: payload.bankName,
       accountHolderName: payload.accountHolderName,
       productId: payload.productId,
-      signatureImage: payload.signatureImage,
-      ktpImage: payload.ktpImage,
-      selfieImage: payload.selfieImage,
-      livenessLeftImage: payload.livenessLeftImage,
-      livenessRightImage: payload.livenessRightImage,
+      signatureImage: persistedDocuments.signatureImage,
+      ktpImage: persistedDocuments.ktpImage,
+      selfieImage: persistedDocuments.selfieImage,
+      livenessLeftImage: persistedDocuments.livenessLeftImage,
+      livenessRightImage: persistedDocuments.livenessRightImage,
       faceMatchScore: payload.faceMatchScore || null,
       riplText: payload.riplText,
       riplVersion: payload.riplVersion,
@@ -690,6 +724,13 @@ const resubmitKoperasi = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error("Resubmit koperasi error:", error);
+    if (error.code === "REGISTRATION_DOCUMENT_STORAGE_FAILED") {
+      return res.status(507).json({
+        success: false,
+        code: error.code,
+        message: "Bukti pendaftaran belum dapat disimpan. Coba lagi beberapa saat kemudian.",
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Gagal mengirim ulang pendaftaran koperasi",

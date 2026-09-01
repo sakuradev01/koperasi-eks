@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getEffectiveRegistrationStatus,
+  hasUsableDocument,
   summarizeRegistrationDocuments,
   validateRegistrationPayload,
 } from "../src/utils/memberRegistration.js";
@@ -63,4 +64,28 @@ test("summary contains booleans only, never image data", () => {
 
   assert.equal(summary.ktp, true);
   assert.equal(Object.values(summary).includes(image), false);
+});
+
+test("accepts original evidence after it is persisted as upload paths", () => {
+  const persisted = {
+    ...complete,
+    signatureImage: "/uploads/members/JPSB-test-signature.png",
+    ktpImage: "/uploads/members/JPSB-test-ktp.jpg",
+    selfieImage: "/uploads/members/JPSB-test-selfie.jpg",
+    livenessLeftImage: "/uploads/members/JPSB-test-liveness-left.jpg",
+    livenessRightImage: "/uploads/members/JPSB-test-liveness-right.jpg",
+  };
+
+  const result = validateRegistrationPayload(persisted);
+
+  assert.equal(result.valid, true);
+  assert.equal(result.summary.selfie, true);
+});
+
+test("accepts an iPhone JPEG whose picker reports application/octet-stream", () => {
+  const jpegBytes = Buffer.from("ffd8ffe000104a46494600010100", "hex");
+  const dataUrl = `data:application/octet-stream;base64,${jpegBytes.toString("base64")}`;
+
+  assert.equal(hasUsableDocument(dataUrl), true);
+  assert.equal(hasUsableDocument("data:application/octet-stream;base64,not-an-image"), false);
 });

@@ -555,7 +555,8 @@ const Members = () => {
       if (filterStatus === "completed") params.set("isCompleted", "true");
       else if (filterStatus === "not_completed") params.set("isCompleted", "false");
       if (filterVerification === "verified") params.set("verified", "true");
-      else if (filterVerification === "unverified") params.set("verified", "false");
+      else if (filterVerification === "unverified") params.set("registrationStatus", "pending");
+      else if (filterVerification === "rejected") params.set("registrationStatus", "rejected");
       else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
       else if (filterVerification === "identity-pending") params.set("identityVerifyStatus", "pending");
       if (filterProduct) params.set("productId", filterProduct);

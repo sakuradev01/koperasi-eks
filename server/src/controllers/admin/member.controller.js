@@ -569,7 +569,7 @@ const verifyMember = asyncHandler(async (req, res) => {
   member.registrationRejectedBy = null;
   if (member.completeAddress && member.completeAddress.trim()) {
     member.addressUpdateStatus = "approved";
-    member.addressUpdateVerifiedBy = req.user._id;
+    member.addressUpdateVerifiedBy = actorId;
     member.addressUpdateVerifiedAt = new Date();
   }
   await member.save();
@@ -929,21 +929,44 @@ const getPendingCount = asyncHandler(async (req, res) => {
 
 // Export members to Excel (TSV-as-XLS, batched savings aggregation)
 const exportMembersExcel = asyncHandler(async (req, res) => {
-  const { verified, addressUpdateStatus, isCompleted, productId, search } = req.query;
+  const {
+    verified,
+    registrationStatus,
+    addressUpdateStatus,
+    isCompleted,
+    productId,
+    search,
+  } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
   else if (verified === "false") filter.isVerified = false;
+  if (registrationStatus === "pending") {
+    filter.$and = [
+      {
+        $or: [
+          { registrationStatus: "pending" },
+          { registrationStatus: { $exists: false }, isVerified: false },
+        ],
+      },
+    ];
+  } else if (["approved", "rejected"].includes(registrationStatus)) {
+    filter.registrationStatus = registrationStatus;
+  }
   if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
   if (isCompleted === "true") filter.isCompleted = true;
   else if (isCompleted === "false") filter.isCompleted = false;
   if (productId) filter.productId = productId;
   if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: "i" } },
-      { uuid: { $regex: search, $options: "i" } },
-      { phone: { $regex: search, $options: "i" } },
-      { nik: { $regex: search, $options: "i" } },
-    ];
+    const searchFilter = {
+      $or: [
+        { name: { $regex: search, $options: "i" } },
+        { uuid: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
+        { nik: { $regex: search, $options: "i" } },
+      ],
+    };
+    if (filter.$and) filter.$and.push(searchFilter);
+    else filter.$or = searchFilter.$or;
   }
 
   const members = await Member.find(filter)
