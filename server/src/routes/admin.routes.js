@@ -64,6 +64,7 @@ import {
 } from "../controllers/admin/donation.controller.js";
 import { clearAllData } from "../controllers/admin/system.controller.js";
 import { verifyToken, requireAdmin } from "../middlewares/auth.middleware.js";
+import { requireFeaturePermission } from "../middlewares/permission.middleware.js";
 import multer from "multer";
 import productUpgradeRoutes from "./admin/productUpgrade.routes.js";
 import loanRoutes from "./loan.routes.js";
@@ -148,18 +149,70 @@ router.patch("/members/:uuid/identity/approve", verifyToken, approveMemberIdenti
 router.patch("/members/:uuid/identity/reject", verifyToken, rejectMemberIdentity);
 
 // Savings management routes
-router.get("/savings", verifyToken, getAllSavings);
-router.get("/savings/:id", verifyToken, getSavingsById);
-router.post("/savings", verifyToken, upload.single('proofFile'), createSavings);
-router.put("/savings/:id", verifyToken, upload.single('proofFile'), updateSavings);
-router.delete("/savings/:id", verifyToken, deleteSavings);
-router.get("/savings/check-period/:memberId/:productId", verifyToken, getLastInstallmentPeriod);
+router.get(
+  "/savings",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view"),
+  getAllSavings,
+);
+router.get(
+  "/savings/:id",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view"),
+  getSavingsById,
+);
+router.post(
+  "/savings",
+  verifyToken,
+  requireFeaturePermission("simpanan", "create"),
+  upload.single("proofFile"),
+  createSavings,
+);
+router.put(
+  "/savings/:id",
+  verifyToken,
+  requireFeaturePermission("simpanan", "edit"),
+  upload.single("proofFile"),
+  updateSavings,
+);
+router.delete(
+  "/savings/:id",
+  verifyToken,
+  requireFeaturePermission("simpanan", "delete"),
+  deleteSavings,
+);
+router.get(
+  "/savings/check-period/:memberId/:productId",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view"),
+  getLastInstallmentPeriod,
+);
 
 // Savings approval/rejection routes
-router.patch("/savings/:id/approve", verifyToken, approveSavings);
-router.patch("/savings/:id/reject", verifyToken, rejectSavings);
-router.patch("/savings/:id/partial", verifyToken, markAsPartial);
-router.get("/savings/period-summary/:memberId/:productId/:installmentPeriod", verifyToken, getSavingsPeriodSummary);
+router.patch(
+  "/savings/:id/approve",
+  verifyToken,
+  requireFeaturePermission("simpanan", "edit", { allowSavingsCoaOnly: false }),
+  approveSavings,
+);
+router.patch(
+  "/savings/:id/reject",
+  verifyToken,
+  requireFeaturePermission("simpanan", "edit", { allowSavingsCoaOnly: false }),
+  rejectSavings,
+);
+router.patch(
+  "/savings/:id/partial",
+  verifyToken,
+  requireFeaturePermission("simpanan", "edit", { allowSavingsCoaOnly: false }),
+  markAsPartial,
+);
+router.get(
+  "/savings/period-summary/:memberId/:productId/:installmentPeriod",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view"),
+  getSavingsPeriodSummary,
+);
 
 // Donation routes
 router.get("/donations/overview", verifyToken, getDonationOverview);
@@ -210,6 +263,6 @@ router.post("/chart-of-accounts/getSubmenus", verifyToken, getSubmenusLegacy);
 router.get("/chart-of-accounts/:type", verifyToken, getAccountsByType);
 
 // System routes (danger zone)
-router.post("/system/clear-all", verifyToken, clearAllData);
+router.post("/system/clear-all", verifyToken, requireAdmin, clearAllData);
 
 export default router;

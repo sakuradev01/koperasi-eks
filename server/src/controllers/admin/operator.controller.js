@@ -2,11 +2,12 @@ import { User } from "../../models/user.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
+import { normalizeSavingsPermission } from "../../utils/permissions.js";
 
 // Default permissions untuk operator baru
 const DEFAULT_OPERATOR_PERMISSIONS = {
   dashboard: { view: true, create: false, edit: false, delete: false },
-  simpanan: { view: false, create: false, edit: false, delete: false },
+  simpanan: { view: false, create: false, edit: false, delete: false, editCoaOnly: false },
   donasi: { view: false, create: false, edit: false, delete: false },
   manajemenPinjaman: { view: false, create: false, edit: false, delete: false },
   danaDarurat: { view: false, create: false, edit: false, delete: false },
@@ -19,6 +20,43 @@ const DEFAULT_OPERATOR_PERMISSIONS = {
   akuntansi: { view: false, create: false, edit: false, delete: false },
   reports: { view: false, create: false, edit: false, delete: false },
   pengaturan: { view: false, create: false, edit: false, delete: false },
+};
+
+const cloneDefaultPermissions = () =>
+  Object.fromEntries(
+    Object.entries(DEFAULT_OPERATOR_PERMISSIONS).map(([key, value]) => [
+      key,
+      { ...value },
+    ]),
+  );
+
+const mergeOperatorPermissions = (permissions = {}, existing = null) => {
+  const merged = existing
+    ? Object.fromEntries(
+        Object.entries(existing).map(([key, value]) => [
+          key,
+          value && typeof value === "object" ? { ...value } : value,
+        ]),
+      )
+    : cloneDefaultPermissions();
+
+  for (const [key, value] of Object.entries(permissions || {})) {
+    if (!value || typeof value !== "object") continue;
+    const defaultPermission = DEFAULT_OPERATOR_PERMISSIONS[key];
+    const currentPermission =
+      merged[key] && typeof merged[key] === "object" ? merged[key] : {};
+    merged[key] = {
+      ...(defaultPermission || {}),
+      ...currentPermission,
+      ...value,
+    };
+  }
+
+  if (merged.simpanan && typeof merged.simpanan === "object") {
+    merged.simpanan = normalizeSavingsPermission(merged.simpanan);
+  }
+
+  return merged;
 };
 
 // GET /api/operators — List semua operator
@@ -62,15 +100,9 @@ export const createOperator = async (req, res) => {
       });
     }
 
-    // Merge permissions dengan default
-    const mergedPermissions = { ...DEFAULT_OPERATOR_PERMISSIONS };
-    if (permissions && typeof permissions === "object") {
-      for (const [key, val] of Object.entries(permissions)) {
-        if (mergedPermissions[key]) {
-          mergedPermissions[key] = { ...mergedPermissions[key], ...val };
-        }
-      }
-    }
+    // Merge permissions dengan default.  Mode editCoaOnly selalu dinormalisasi
+    // agar create/delete tidak bisa ikut aktif karena payload lama/stale.
+    const mergedPermissions = mergeOperatorPermissions(permissions);
 
     const operator = await User.create({
       username,
@@ -127,27 +159,13 @@ export const updateOperator = asyncHandler(async (req, res) => {
     operator.password = password;
   }
 
-  // Update permissions
-  // Mixed type needs a NEW object reference + markModified, otherwise
-  // Mongoose treats same-ref assign as "not modified" and skips persist.
+  // Update permissions. Mixed type needs a NEW object reference + markModified,
+  // otherwise Mongoose can skip persisting nested changes.
   if (permissions && typeof permissions === "object") {
-    const source = operator.permissions || {};
-    const currentPerms = {};
-    for (const [key, val] of Object.entries(source)) {
-      currentPerms[key] =
-        val && typeof val === "object" ? { ...val } : val;
-    }
-    for (const [key, val] of Object.entries(permissions)) {
-      if (currentPerms[key] && typeof currentPerms[key] === "object") {
-        currentPerms[key] = { ...currentPerms[key], ...val };
-      } else {
-        const defaultPerm = DEFAULT_OPERATOR_PERMISSIONS[key];
-        currentPerms[key] = defaultPerm
-          ? { ...defaultPerm, ...val }
-          : { view: false, create: false, edit: false, delete: false, ...val };
-      }
-    }
-    operator.permissions = currentPerms;
+    operator.permissions = mergeOperatorPermissions(
+      permissions,
+      operator.permissions || {},
+    );
     operator.markModified("permissions");
   }
 

@@ -17,6 +17,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     if (!permKey) return true; // fallback: show if no permission key
     const perms = user.permissions || {};
     const feature = perms[permKey];
+    if (permKey === "simpanan" && feature?.editCoaOnly === true) return true;
     return feature?.view === true;
   };
 

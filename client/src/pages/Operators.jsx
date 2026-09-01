@@ -20,12 +20,20 @@ const FEATURE_PERMISSIONS = [
   { key: "pengaturan", label: "Pengaturan" },
 ];
 
-const DEFAULT_CRUD = { view: false, create: false, edit: false, delete: false };
+const DEFAULT_CRUD = {
+  view: false,
+  create: false,
+  edit: false,
+  delete: false,
+};
 
 const emptyPermissions = () => {
   const perms = {};
   FEATURE_PERMISSIONS.forEach((f) => {
-    perms[f.key] = { ...DEFAULT_CRUD };
+    perms[f.key] = {
+      ...DEFAULT_CRUD,
+      ...(f.key === "simpanan" ? { editCoaOnly: false } : {}),
+    };
   });
   return perms;
 };
@@ -57,7 +65,7 @@ const Operators = () => {
       setLoading(true);
       const res = await api.get("/api/admin/operators");
       if (res.data.success) setOperators(res.data.data);
-    } catch (err) {
+    } catch {
       toast.error("Gagal mengambil data operator");
     } finally {
       setLoading(false);
@@ -102,22 +110,79 @@ const Operators = () => {
   };
 
   const togglePermission = (featureKey, action) => {
-    setFormData((prev) => ({
-      ...prev,
-      permissions: {
-        ...prev.permissions,
-        [featureKey]: {
-          ...prev.permissions[featureKey],
-          [action]: !prev.permissions[featureKey]?.[action],
+    setFormData((prev) => {
+      const current = {
+        ...DEFAULT_CRUD,
+        ...(prev.permissions[featureKey] || {}),
+      };
+
+      if (featureKey === "simpanan" && action === "editCoaOnly") {
+        const enabled = !current.editCoaOnly;
+        return {
+          ...prev,
+              permissions: {
+                ...prev.permissions,
+                [featureKey]: enabled
+              ? {
+                  ...current,
+                  editCoaOnly: true,
+                  view: true,
+                  edit: true,
+                  create: false,
+                  delete: false,
+                  }
+              : {
+                  ...current,
+                  editCoaOnly: false,
+                  view: false,
+                  edit: false,
+                  create: false,
+                  delete: false,
+                },
+          },
+        };
+      }
+
+      // The restricted mode must remain edit-only even if someone tries to
+      // toggle the disabled controls with browser devtools.
+      if (
+        featureKey === "simpanan" &&
+        current.editCoaOnly &&
+        ["create", "delete"].includes(action)
+      ) {
+        return prev;
+      }
+
+      const next = { ...current, [action]: !current[action] };
+      if (
+        featureKey === "simpanan" &&
+        current.editCoaOnly &&
+        ["view", "edit"].includes(action) &&
+        !next[action]
+      ) {
+        next.editCoaOnly = false;
+      }
+
+      return {
+        ...prev,
+        permissions: {
+          ...prev.permissions,
+          [featureKey]: next,
         },
-      },
-    }));
+      };
+    });
   };
 
   const setAllPermissions = (value) => {
     const perms = {};
     FEATURE_PERMISSIONS.forEach((f) => {
-      perms[f.key] = { view: value, create: value, edit: value, delete: value };
+      perms[f.key] = {
+        view: value,
+        create: value,
+        edit: value,
+        delete: value,
+        ...(f.key === "simpanan" ? { editCoaOnly: false } : {}),
+      };
     });
     setFormData((prev) => ({ ...prev, permissions: perms }));
   };
@@ -196,7 +261,7 @@ const Operators = () => {
             toast.success("Operator berhasil dihapus");
             fetchOperators();
           }
-        } catch (err) {
+        } catch {
           toast.error("Gagal menghapus operator");
         }
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
@@ -211,7 +276,7 @@ const Operators = () => {
         toast.success(res.data.message);
         fetchOperators();
       }
-    } catch (err) {
+    } catch {
       toast.error("Gagal mengubah status operator");
     }
   };
@@ -239,7 +304,7 @@ const Operators = () => {
         </div>
       ) : operators.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
-          Belum ada operator. Klik "Tambah Operator" untuk membuat.
+          Belum ada operator. Klik &quot;Tambah Operator&quot; untuk membuat.
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -278,6 +343,11 @@ const Operators = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
                       {activeFeatures} / {FEATURE_PERMISSIONS.length} fitur
+                      {perms.simpanan?.editCoaOnly && (
+                        <div className="mt-1 text-xs font-medium text-blue-600">
+                          Simpanan: Edit COA saja
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                       <button
@@ -377,22 +447,54 @@ const Operators = () => {
                 <div className="border border-gray-200 rounded-lg divide-y divide-gray-200">
                   {FEATURE_PERMISSIONS.map((feature) => {
                     const perm = formData.permissions[feature.key] || DEFAULT_CRUD;
+                    const isSavings = feature.key === "simpanan";
+                    const isCoaOnly = isSavings && perm.editCoaOnly === true;
                     return (
-                      <div key={feature.key} className="p-3 flex items-center justify-between hover:bg-gray-50">
-                        <span className="text-sm font-medium text-gray-700">{feature.label}</span>
-                        <div className="flex gap-3">
+                      <div key={feature.key} className="p-3 hover:bg-gray-50">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-sm font-medium text-gray-700">{feature.label}</span>
+                          <div className="flex gap-3">
                           {["view", "create", "edit", "delete"].map((action) => (
-                            <label key={action} className="flex items-center gap-1 cursor-pointer">
+                            <label
+                              key={action}
+                              className={`flex items-center gap-1 ${
+                                isCoaOnly && ["create", "delete"].includes(action)
+                                  ? "cursor-not-allowed opacity-40"
+                                  : "cursor-pointer"
+                              }`}
+                            >
                               <input
                                 type="checkbox"
-                                checked={perm[action]}
+                                checked={Boolean(perm[action])}
                                 onChange={() => togglePermission(feature.key, action)}
+                                disabled={isCoaOnly && ["create", "delete"].includes(action)}
                                 className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
                               />
                               <span className="text-xs text-gray-500 capitalize">{action}</span>
                             </label>
                           ))}
+                          </div>
                         </div>
+                        {isSavings && (
+                          <label
+                            className={`mt-2 flex items-center gap-2 text-xs ${
+                              isCoaOnly ? "text-blue-700" : "text-gray-600"
+                            } cursor-pointer`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(perm.editCoaOnly)}
+                              onChange={() => togglePermission(feature.key, "editCoaOnly")}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>
+                              <span className="font-medium">Edit COA saja</span>
+                              <span className="ml-1 text-gray-500">
+                                (hanya Record Account &amp; Category; tanpa tambah/hapus/approve/reject)
+                              </span>
+                            </span>
+                          </label>
+                        )}
                       </div>
                     );
                   })}
