@@ -72,12 +72,25 @@ const Login = () => {
         />
 
         <div className="relative z-10 flex flex-col justify-center w-full max-w-lg mx-auto px-8 lg:px-14 py-12">
-          <div className="w-16 h-16 rounded-2xl bg-white shadow-card flex items-center justify-center mb-8">
-            <img
-              src="/logo-samit.png"
-              alt="Logo LPK SAMIT"
-              className="w-11 h-11 object-contain"
-            />
+          {/* 3D brand badge — layered bevel ring, no glassmorphism */}
+          <div
+            className="mb-10 h-28 w-28 lg:h-32 lg:w-32 rounded-[2rem] p-[3px]"
+            style={{
+              background: "linear-gradient(145deg, rgba(255,255,255,.65) 0%, rgba(255,255,255,.08) 38%, rgba(0,0,0,.28) 100%)",
+              boxShadow:
+                "0 24px 48px -16px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.35)",
+            }}
+          >
+            <div
+              className="h-full w-full rounded-[calc(2rem-3px)] bg-white flex items-center justify-center"
+              style={{ boxShadow: "inset 0 2px 6px rgba(4,33,74,.18)" }}
+            >
+              <img
+                src="/logo-samit-icon.png"
+                alt="Logo LPK SAMIT"
+                className="w-[72%] h-[72%] object-contain drop-shadow-[0_3px_6px_rgba(4,33,74,0.25)]"
+              />
+            </div>
           </div>
 
           <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white">
@@ -96,7 +109,7 @@ const Login = () => {
             </p>
           </div>
 
-          <dl className="mt-12 grid grid-cols-3 gap-6 border-t border-white/10 pt-6">
+          <dl className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 border-t border-white/10 pt-6">
             <div>
               <dt className="text-xs text-primary-300">Aman</dt>
               <dd className="mt-1 text-sm font-medium text-white">
@@ -120,15 +133,24 @@ const Login = () => {
       </div>
 
       {/* Form panel */}
-      <div className="flex-1 flex items-center justify-center bg-white px-5 py-10 sm:px-10 lg:py-8 overflow-y-auto">
+      <div
+        className="flex-1 flex items-center justify-center bg-white px-5 py-10 sm:px-10 lg:py-8 overflow-y-auto"
+        style={{
+          backgroundImage:
+            "radial-gradient(60% 50% at 100% 0%, rgba(4,33,74,.04) 0%, rgba(255,255,255,0) 60%)",
+        }}
+      >
         <div className="w-full max-w-sm">
           {/* Mobile brand row */}
           <div className="md:hidden flex items-center gap-3 mb-8">
-            <div className="w-11 h-11 rounded-xl bg-primary-900 flex items-center justify-center flex-shrink-0">
+            <div
+              className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center flex-shrink-0"
+              style={{ boxShadow: "0 6px 14px -4px rgba(4,33,74,.25), inset 0 1px 0 rgba(255,255,255,.9)" }}
+            >
               <img
-                src="/logo-samit.png"
+                src="/logo-samit-icon.png"
                 alt="Logo LPK SAMIT"
-                className="w-7 h-7 object-contain"
+                className="w-9 h-9 object-contain"
               />
             </div>
             <div className="min-w-0">
@@ -139,7 +161,7 @@ const Login = () => {
             </div>
           </div>
 
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+          <h2 className="text-2xl sm:text-[1.7rem] font-bold text-slate-900 tracking-tight leading-tight">
             Masuk ke Sistem Koperasi
           </h2>
           <p className="mt-1.5 text-sm text-slate-600">
