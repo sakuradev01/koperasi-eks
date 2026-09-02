@@ -1415,6 +1415,12 @@ const MemberDetail = () => {
       console.log('newPaymentWithCompensation:', upgradeInfo.newPaymentWithCompensation);
     }
     
+    // ==== KREDIT KELEBIHAN BAYAR (threshold Rp 30.000) ====
+    // Kelebihan bayar periode sebelumnya (>= Rp 30.000) menjadi kredit yang
+    // mengurangi tagihan periode berikutnya, sehingga siswa cukup membayar
+    // sisa tagihan dan tetap dihitung LUNAS. Di bawah threshold diabaikan.
+    let carriedOverpay = 0;
+
     for (let period = 1; period <= totalPeriods; period++) {
       // Find all transactions for this period
       const periodTransactions = savings.filter(s => s.installmentPeriod === period);
@@ -1460,6 +1466,21 @@ const MemberDetail = () => {
       const periodDate = new Date(startDate.getFullYear(), startDate.getMonth() + (period - 1), 1);
       const monthName = periodDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
       
+      // Terapkan kredit kelebihan bayar periode sebelumnya ke tagihan periode ini
+      const creditApplied = Math.min(carriedOverpay, requiredAmount);
+      requiredAmount -= creditApplied;
+      carriedOverpay -= creditApplied;
+
+      const overpayRaw = Math.max(0, totalPaid - requiredAmount);
+      if (overpayRaw >= 30000) {
+        carriedOverpay += overpayRaw;
+      }
+
+      // Periode yang tertutup penuh kredit kelebihan bayar dianggap lunas
+      if (requiredAmount === 0 && creditApplied > 0 && status === 'belum_bayar') {
+        status = 'paid';
+      }
+
       // SMART STATUS DETECTION for upgraded members
       // If period was completed before upgrade, check against OLD target
       let transactions = [];
@@ -1495,7 +1516,10 @@ const MemberDetail = () => {
         requiredAmount,
         remainingAmount: Math.max(0, requiredAmount - totalPaid),
         transactions,
-        percentage: requiredAmount > 0 ? Math.min((totalPaid / requiredAmount) * 100, 100) : 0
+        percentage: requiredAmount > 0
+          ? (totalPaid / requiredAmount) * 100
+          : (creditApplied > 0 ? 100 : 0),
+        overpaymentAmount: Math.max(0, totalPaid - requiredAmount)
       });
     }
     
@@ -1503,6 +1527,8 @@ const MemberDetail = () => {
   };
 
   const periodStatusData = generatePeriodStatus();
+  // Total target efektif (sudah dikurangi kredit kelebihan bayar antar periode)
+  const totalEffectiveTarget = periodStatusData.reduce((sum, p) => sum + (p.requiredAmount || 0), 0);
 
   // Pagination for period status (moved after periodStatusData is defined)
   const totalPeriodPages = Math.ceil(periodStatusData.length / itemsPerPage);
@@ -2309,8 +2335,8 @@ const MemberDetail = () => {
                       </div>
                     </div>
                     <div className="text-2xl font-bold text-purple-700 mb-2">
-                      {member?.product ? 
-                        `${(((totalSetoran) / ((member.product.depositAmount || 1) * periodStatusData.length)) * 100).toFixed(1)}%`
+                      {totalEffectiveTarget > 0 ? 
+                        `${((totalSetoran / totalEffectiveTarget) * 100).toFixed(1)}%`
                         : '0%'
                       }
                     </div>
@@ -2318,14 +2344,23 @@ const MemberDetail = () => {
                       <div 
                         className="bg-purple-600 h-2 rounded-full transition-all duration-300" 
                         style={{ 
-                          width: member?.product ? 
-                            `${Math.min(((totalSetoran) / ((member.product.depositAmount || 1) * periodStatusData.length)) * 100, 100)}%`
+                          width: totalEffectiveTarget > 0 ? 
+                            `${Math.min((totalSetoran / totalEffectiveTarget) * 100, 100)}%`
                             : '0%'
                         }}
                       ></div>
                     </div>
                     <div className="text-sm text-purple-600">
                       Dari target keseluruhan
+                      {(() => {
+                        const target = totalEffectiveTarget;
+                        const over = Math.max(0, totalSetoran - target);
+                        return over > 0 ? (
+                          <span className="ml-1 font-semibold text-emerald-600">
+                            (Kelebihan bayar {formatCurrency(over)})
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2465,7 +2500,9 @@ const MemberDetail = () => {
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 <span className={period.remainingAmount > 0 ? 'font-semibold text-red-600' : 'text-gray-400'}>
-                                  {formatCurrency(period.remainingAmount)}
+                                  {period.overpaymentAmount > 0
+                                    ? `+ ${formatCurrency(period.overpaymentAmount)}`
+                                    : formatCurrency(period.remainingAmount)}
                                 </span>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
@@ -2480,7 +2517,7 @@ const MemberDetail = () => {
                                     ></div>
                                   </div>
                                   <span className="text-xs text-gray-600 w-12">
-                                    {period.percentage.toFixed(0)}%
+                                    {period.percentage.toFixed(0)}%{period.overpaymentAmount > 0 ? " +" : ""}
                                   </span>
                                 </div>
                               </td>
