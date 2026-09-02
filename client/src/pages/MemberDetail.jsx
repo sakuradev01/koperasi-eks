@@ -1476,6 +1476,11 @@ const MemberDetail = () => {
         carriedOverpay += overpayRaw;
       }
 
+      // Periode yang tertutup penuh kredit kelebihan bayar dianggap lunas
+      if (requiredAmount === 0 && creditApplied > 0 && status === 'belum_bayar') {
+        status = 'paid';
+      }
+
       // SMART STATUS DETECTION for upgraded members
       // If period was completed before upgrade, check against OLD target
       let transactions = [];
@@ -1511,7 +1516,9 @@ const MemberDetail = () => {
         requiredAmount,
         remainingAmount: Math.max(0, requiredAmount - totalPaid),
         transactions,
-        percentage: requiredAmount > 0 ? (totalPaid / requiredAmount) * 100 : 0,
+        percentage: requiredAmount > 0
+          ? (totalPaid / requiredAmount) * 100
+          : (creditApplied > 0 ? 100 : 0),
         overpaymentAmount: Math.max(0, totalPaid - requiredAmount)
       });
     }

@@ -890,8 +890,12 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
   const realizationProofFileMap = {};
 
   depositHistory.forEach((deposit) => {
-    realizationAmountMap[deposit.installmentPeriod] = deposit.amount;
-    realizationProofFileMap[deposit.installmentPeriod] = deposit.proofFile || 0;
+    // Satu periode bisa dibayar bertahap (multiple approved) — jumlahkan, jangan overwrite
+    realizationAmountMap[deposit.installmentPeriod] =
+      (realizationAmountMap[deposit.installmentPeriod] || 0) + deposit.amount;
+    if (deposit.proofFile) {
+      realizationProofFileMap[deposit.installmentPeriod] = deposit.proofFile;
+    }
   });
 
   // Generate projection data for all periods
