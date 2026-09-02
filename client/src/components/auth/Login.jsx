@@ -44,82 +44,126 @@ const Login = () => {
       } else {
         setError(response.message || "Login gagal");
       }
-    } catch (error) {
-      console.error("Login error:", error);
-      setError(error.message || "Username atau password salah");
+    } catch (err) {
+      console.error("Login error:", err);
+      setError(err.message || "Username atau password salah");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-pink-50 via-white to-pink-100 flex flex-col lg:flex-row overflow-hidden">
-      {/* Site Info Section */}
-      <div className="lg:w-1/2 bg-gradient-to-br from-pink-500 via-pink-600 to-rose-600 flex justify-center items-center text-white p-6 sm:p-10 transition-all duration-300 ease-in-out min-h-0">
-        <div className="text-center max-w-md">
-          <div className="mb-6">
-            {/* Sakura Logo */}
-            <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <div className="text-pink-600 text-2xl sm:text-3xl font-bold">
-                🌸
-              </div>
-            </div>
-          </div>
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2">
-            LPK SAMIT
-          </h1>
-          <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold mb-4 text-pink-100">
-            Sakura Mitra
-          </h2>
-          <p className="text-sm sm:text-base lg:text-lg mb-2">
-            Lembaga Pelatihan Kerja
-          </p>
-          <p className="text-xs sm:text-sm opacity-90">
-            Sistem Manajemen Koperasi Digital
-          </p>
-          <div className="mt-6 hidden lg:block">
-            <div className="flex justify-center space-x-2 text-pink-200">
-              <span>🌸</span>
-              <span>🌸</span>
-              <span>🌸</span>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="min-h-dvh flex flex-col lg:flex-row bg-primary-50">
+      {/* Brand panel — navy, hidden on small phones, compact on tablets */}
+      <div className="hidden md:flex lg:w-[55%] xl:w-1/2 relative overflow-hidden bg-primary-900 text-white">
+        {/* Subtle radial depth — single hue, no glassmorphism */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(120% 90% at 20% 10%, rgba(53,97,155,.35) 0%, rgba(4,33,74,0) 55%), radial-gradient(90% 70% at 90% 100%, rgba(2,20,44,.9) 0%, rgba(4,33,74,0) 60%)",
+          }}
+        />
+        {/* Thin gold rule as brand accent */}
+        <div
+          aria-hidden="true"
+          className="absolute left-0 top-0 h-full w-[3px] bg-gold-500/70"
+        />
 
-      {/* Login Form Section */}
-      <div className="lg:w-1/2 flex justify-center items-center bg-white p-6 sm:p-10 transition-all duration-300 ease-in-out min-h-0 overflow-y-auto">
-        <div className="max-w-md w-full">
-          {/* Mobile Logo */}
-          <div className="lg:hidden text-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-rose-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <span className="text-white text-xl font-bold">🌸</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-800">
-              LPK SAMIT Sakura Mitra
-            </h1>
-            <p className="text-sm text-gray-600 mt-1">
+        <div className="relative z-10 flex flex-col justify-center w-full max-w-lg mx-auto px-8 lg:px-14 py-12">
+          <div className="w-16 h-16 rounded-2xl bg-white shadow-card flex items-center justify-center mb-8">
+            <img
+              src="/logo-samit.png"
+              alt="Logo LPK SAMIT"
+              className="w-11 h-11 object-contain"
+            />
+          </div>
+
+          <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white">
+            Koperasi SAMIT
+          </h1>
+          <p className="mt-2 text-lg font-medium text-gold-300">
+            LPK Sakura Mitra
+          </p>
+
+          <div className="mt-8 space-y-1.5">
+            <p className="text-base text-primary-100">
               Lembaga Pelatihan Kerja
+            </p>
+            <p className="text-sm text-primary-300">
+              Sistem Manajemen Koperasi Digital
             </p>
           </div>
 
-          <h2 className="text-xl sm:text-2xl font-bold text-center text-gray-800 mb-6">
+          <dl className="mt-12 grid grid-cols-3 gap-6 border-t border-white/10 pt-6">
+            <div>
+              <dt className="text-xs text-primary-300">Aman</dt>
+              <dd className="mt-1 text-sm font-medium text-white">
+                Data terlindungi
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-primary-300">Terintegrasi</dt>
+              <dd className="mt-1 text-sm font-medium text-white">
+                Simpanan &amp; pinjaman
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-primary-300">Real-time</dt>
+              <dd className="mt-1 text-sm font-medium text-white">
+                Laporan akurat
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      {/* Form panel */}
+      <div className="flex-1 flex items-center justify-center bg-white px-5 py-10 sm:px-10 lg:py-8 overflow-y-auto">
+        <div className="w-full max-w-sm">
+          {/* Mobile brand row */}
+          <div className="md:hidden flex items-center gap-3 mb-8">
+            <div className="w-11 h-11 rounded-xl bg-primary-900 flex items-center justify-center flex-shrink-0">
+              <img
+                src="/logo-samit.png"
+                alt="Logo LPK SAMIT"
+                className="w-7 h-7 object-contain"
+              />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base font-bold text-slate-900 leading-tight">
+                Koperasi SAMIT
+              </h1>
+              <p className="text-xs text-slate-500">LPK Sakura Mitra</p>
+            </div>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
             Masuk ke Sistem Koperasi
           </h2>
+          <p className="mt-1.5 text-sm text-slate-600">
+            Gunakan akun yang diberikan administrator.
+          </p>
 
-          {/* Error Message */}
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 sm:px-4 sm:py-3 rounded-lg mb-4 text-sm">
+            <div
+              role="alert"
+              className="mt-5 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"
+            >
               {error}
             </div>
           )}
 
-          {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+          <form
+            onSubmit={handleSubmit}
+            className="mt-6 space-y-4"
+            noValidate={false}
+          >
             <div>
               <label
                 htmlFor="username"
-                className="block text-sm font-medium text-gray-700 mb-2"
+                className="block text-sm font-medium text-slate-700 mb-1.5"
               >
                 Username
               </label>
@@ -127,18 +171,19 @@ const Login = () => {
                 id="username"
                 name="username"
                 type="text"
+                autoComplete="username"
                 placeholder="Masukkan username"
                 value={formData.username}
                 onChange={handleChange}
                 required
-                className="w-full px-3 py-2 sm:px-4 sm:py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 transition-colors duration-200 text-sm sm:text-base"
+                className=""
               />
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-2"
+                className="block text-sm font-medium text-slate-700 mb-1.5"
               >
                 Password
               </label>
@@ -146,36 +191,31 @@ const Login = () => {
                 id="password"
                 name="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="Masukkan password"
                 value={formData.password}
                 onChange={handleChange}
                 required
-                className="w-full px-3 py-2 sm:px-4 sm:py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 transition-colors duration-200 text-sm sm:text-base"
+                className=""
               />
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white py-2 sm:py-3 px-4 rounded-lg hover:from-pink-600 hover:to-rose-600 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium text-sm sm:text-base shadow-lg hover:shadow-xl"
+              bgColor="bg-primary-900 hover:bg-primary-700"
+              textColor="text-white"
+              className="w-full !py-2.5 !text-sm font-semibold shadow-sm hover:shadow-card-hover !rounded-lg"
             >
-              {loading ? (
-                <div className="flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Memproses...
-                </div>
-              ) : (
-                "🌸 Masuk ke Sistem"
-              )}
+              {loading ? "Memproses…" : "Masuk"}
             </Button>
           </form>
 
-          {/* Footer */}
-          <div className="mt-6 text-center">
-            <p className="text-xs text-gray-500">
-              © 2025 LPK SAMIT Sakura Mitra
+          <div className="mt-10 pt-5 border-t border-slate-100 text-center">
+            <p className="text-xs text-slate-500">
+              © {new Date().getFullYear()} LPK SAMIT Sakura Mitra
             </p>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-slate-400 mt-0.5">
               Lembaga Pelatihan Kerja
             </p>
           </div>

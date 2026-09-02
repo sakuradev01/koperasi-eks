@@ -155,14 +155,14 @@ const Topbar = ({ setSidebarOpen }) => {
   };
 
   return (
-    <header className="bg-white shadow-sm border-b border-pink-200">
+    <header className="bg-white shadow-sm border-b border-slate-200">
       <div className="flex items-center justify-between px-4 sm:px-6 py-4">
         {/* Left Side */}
         <div className="flex items-center">
           {/* Mobile Hamburger Button */}
           <button
             onClick={() => setSidebarOpen && setSidebarOpen(true)}
-            className="lg:hidden p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-pink-50 mr-3"
+            className="lg:hidden p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-primary-50 mr-3"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -171,8 +171,12 @@ const Topbar = ({ setSidebarOpen }) => {
           
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center">
-            <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg flex items-center justify-center mr-2">
-              <span className="text-white text-sm font-bold">🌸</span>
+            <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center mr-2 flex-shrink-0">
+              <img
+                src="/logo-samit.png"
+                alt="Logo SAMIT"
+                className="w-6 h-6 object-contain"
+              />
             </div>
             <div>
               <h1 className="text-sm font-bold text-gray-900">LPK SAMIT</h1>
@@ -182,7 +186,7 @@ const Topbar = ({ setSidebarOpen }) => {
           {/* Desktop Title */}
           <div className="hidden lg:block">
             <h2 className="text-xl font-semibold text-gray-800">
-              🌸 Dashboard Koperasi
+              Dashboard Koperasi
             </h2>
           </div>
         </div>
@@ -193,7 +197,7 @@ const Topbar = ({ setSidebarOpen }) => {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setShowNotifDropdown(!showNotifDropdown)}
-              className="relative p-2 text-gray-500 hover:text-pink-600 hover:bg-pink-50 rounded-lg transition-colors"
+              className="relative p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -208,12 +212,12 @@ const Topbar = ({ setSidebarOpen }) => {
             {/* Notification Dropdown */}
             {showNotifDropdown && (
               <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50 max-h-96 overflow-hidden">
-                <div className="p-3 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-pink-50 to-rose-50">
-                  <h3 className="font-semibold text-gray-800">🔔 Notifikasi</h3>
+                <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-primary-50">
+                  <h3 className="font-semibold text-slate-800">Notifikasi</h3>
                   {unreadCount > 0 && (
                     <button
                       onClick={markAllAsRead}
-                      className="text-xs text-pink-600 hover:text-pink-800"
+                      className="text-xs text-primary-600 hover:text-primary-800"
                     >
                       Tandai semua dibaca
                     </button>
@@ -223,8 +227,24 @@ const Topbar = ({ setSidebarOpen }) => {
                 <div className="overflow-y-auto max-h-72">
                   {allNotifications.length === 0 ? (
                     <div className="p-4 text-center text-gray-500">
-                      <span className="text-2xl">✨</span>
-                      <p className="mt-2 text-sm">Tidak ada notifikasi</p>
+                      <svg
+                        width="28"
+                        height="28"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                        className="mx-auto text-slate-300"
+                      >
+                        <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6.002 6.002 0 0 0-4-5.659V5a2 2 0 1 0-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      </svg>
+                      <p className="mt-2 text-sm text-slate-500">
+                        Tidak ada notifikasi
+                      </p>
                     </div>
                   ) : (
                     allNotifications.map((notif) => {
@@ -236,12 +256,12 @@ const Topbar = ({ setSidebarOpen }) => {
                         <div
                           key={`${notif._notifType}-${notif._id}`}
                           onClick={() => handleNotifClick(notif)}
-                          className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-pink-50 transition-colors ${
-                            !isRead ? "bg-pink-50/50" : ""
+                          className={`p-3 border-b border-slate-100 cursor-pointer hover:bg-primary-50 transition-colors ${
+                            !isRead ? "bg-primary-50/60" : ""
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-blue-500" : isAddress ? "bg-orange-500" : isIdentity ? "bg-violet-500" : "bg-pink-500") : "bg-gray-300"}`} />
+                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-primary-500" : isAddress ? "bg-amber-500" : isIdentity ? "bg-emerald-500" : "bg-primary-500") : "bg-slate-300"}`} />
                             <div className="flex-1 min-w-0">
                               {isMember ? (
                                 <>
@@ -295,12 +315,12 @@ const Topbar = ({ setSidebarOpen }) => {
                             </div>
                             <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${
                               isMember
-                                ? "bg-blue-100 text-blue-800"
+                                ? "bg-primary-100 text-primary-800"
                                 : isAddress
-                                  ? "bg-orange-100 text-orange-800"
+                                  ? "bg-amber-100 text-amber-800"
                                   : isIdentity
-                                    ? "bg-violet-100 text-violet-800"
-                                : "bg-yellow-100 text-yellow-800"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                : "bg-amber-100 text-amber-800"
                             }`}>
                               {isMember ? "Baru" : isAddress ? "Alamat" : isIdentity ? "Wajah" : "Pending"}
                             </span>
@@ -319,7 +339,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           navigate("/master/anggota?filter=unverified");
                           setShowNotifDropdown(false);
                         }}
-                        className="flex-1 text-center text-xs text-blue-600 hover:text-blue-800 py-1"
+                        className="flex-1 text-center text-xs text-primary-600 hover:text-primary-800 py-1"
                       >
                         {pendingMembers.length} pendaftaran baru
                       </button>
@@ -330,7 +350,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           navigate("/master/anggota?filter=address-pending");
                           setShowNotifDropdown(false);
                         }}
-                        className="flex-1 text-center text-xs text-orange-600 hover:text-orange-800 py-1"
+                        className="flex-1 text-center text-xs text-amber-600 hover:text-amber-800 py-1"
                       >
                         {pendingAddressMembers.length} alamat pending
                       </button>
@@ -341,7 +361,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           navigate("/master/anggota?filter=identity-pending");
                           setShowNotifDropdown(false);
                         }}
-                        className="flex-1 text-center text-xs text-violet-600 hover:text-violet-800 py-1"
+                        className="flex-1 text-center text-xs text-emerald-600 hover:text-emerald-800 py-1"
                       >
                         {pendingIdentityMembers.length} wajah pending
                       </button>
@@ -352,7 +372,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           navigate("/simpanan?status=Pending");
                           setShowNotifDropdown(false);
                         }}
-                        className="flex-1 text-center text-xs text-pink-600 hover:text-pink-800 py-1"
+                        className="flex-1 text-center text-xs text-primary-600 hover:text-primary-800 py-1"
                       >
                         {pendingSavings.length} simpanan pending
                       </button>
@@ -364,8 +384,8 @@ const Topbar = ({ setSidebarOpen }) => {
           </div>
 
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-r from-pink-100 to-rose-100 rounded-full flex items-center justify-center">
-              <span className="text-pink-600 text-sm font-bold">
+              <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+              <span className="text-primary-700 text-sm font-semibold">
                 {user?.name?.charAt(0) || 'A'}
               </span>
             </div>
@@ -376,7 +396,7 @@ const Topbar = ({ setSidebarOpen }) => {
 
           <button
             onClick={handleLogout}
-            className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-pink-50 rounded-lg transition-colors"
+            className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-primary-50 rounded-lg transition-colors"
           >
             <svg
               className="w-4 h-4"

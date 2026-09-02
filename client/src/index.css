@@ -7,3 +7,83 @@
   margin: 0;
   box-sizing: border-box;
 }
+
+/* ============================================================
+   Design tokens — see design_product.md (brand anchor #04214A)
+   ============================================================ */
+:root {
+  --brand: #04214a;
+  --brand-600: #234a80;
+  --brand-500: #35619b;
+  --gold: #b8942f;
+  --ink: #0f172a;
+  --ink-muted: #475569;
+  --surface: #f7f9fc;
+  --card-border: #e2e8f0;
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus visibility — keyboard users first */
+*:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Tabular numbers for money & stats — keeps long Rupiah values aligned */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Money/stat values must never overflow their card */
+.num-safe {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Subtle scrollbars (product UI, not decorative) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Long headings wrap instead of overflowing */
+@media (max-width: 480px) {
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+/* Reduced motion — required for every transition in the app */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
