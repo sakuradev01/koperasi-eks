@@ -40,8 +40,8 @@ const Input = React.forwardRef(function Input(
       {/* Input Wrapper */}
       <div
         className={`flex items-center border ${
-          error ? "border-red-500" : "border-gray-300"
-        } rounded-lg bg-white focus-within:ring-2 focus-within:ring-blue-500 transition duration-200`}
+          error ? "border-red-500" : "border-slate-300"
+        } rounded-lg bg-white focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500 transition duration-200`}
       >
         {/* Icon (Left) */}
         {icon && iconPosition === "left" && (
