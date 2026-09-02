@@ -622,37 +622,55 @@ const getLastInstallmentPeriod = asyncHandler(async (req, res) => {
       }
     ]);
     
-    // Filter incomplete periods based on the correct required amount for each period
-    const actualIncompletePeriods = [];
-    
-    console.log("=== Incomplete Periods Debug ===");
-    console.log("Member has upgraded:", member.hasUpgraded);
-    console.log("Periods with payments:", incompletePeriods);
-    
-    for (const period of incompletePeriods) {
-      let requiredForThisPeriod = product.depositAmount;
-      
+    // ==== KREDIT KELEBIHAN BAYAR (threshold Rp 30.000) ====
+    // Walk sekuensial periode 1..max: kelebihan bayar periode sebelumnya
+    // (>= Rp 30.000) menjadi kredit pengurang tagihan periode berikutnya,
+    // sehingga siswa cukup membayar sisa tagihan dan tetap dihitung lunas.
+    const totalsByPeriod = {};
+    incompletePeriods.forEach((p) => { totalsByPeriod[p._id] = p.totalAmount; });
+    const maxPaidPeriod = incompletePeriods.length > 0
+      ? Math.max(...incompletePeriods.map((p) => p._id))
+      : 0;
+
+    const requiredForPeriod = (p) => {
       if (member.hasUpgraded && member.currentUpgradeId) {
-        if (period._id <= member.currentUpgradeId.completedPeriodsAtUpgrade) {
-          requiredForThisPeriod = member.currentUpgradeId.oldMonthlyDeposit;
-          console.log(`Period ${period._id}: Using old amount ${requiredForThisPeriod} (before upgrade)`);
-        } else {
-          requiredForThisPeriod = member.currentUpgradeId.newPaymentWithCompensation;
-          console.log(`Period ${period._id}: Using new amount with compensation ${requiredForThisPeriod} (after upgrade)`);
+        if (p <= member.currentUpgradeId.completedPeriodsAtUpgrade) {
+          return member.currentUpgradeId.oldMonthlyDeposit || product.depositAmount;
         }
-      } else {
-        console.log(`Period ${period._id}: Using standard amount ${requiredForThisPeriod}`);
+        return member.currentUpgradeId.newPaymentWithCompensation || product.depositAmount;
       }
-      
-      console.log(`Period ${period._id}: Total paid = ${period.totalAmount}, Required = ${requiredForThisPeriod}`);
-      
-      if (period.totalAmount < requiredForThisPeriod) {
+      return product.depositAmount;
+    };
+
+    const actualIncompletePeriods = [];
+    const OVERPAY_THRESHOLD = 30000;
+    let carriedOverpay = 0;
+
+    for (let p = 1; p <= maxPaidPeriod; p++) {
+      let requiredForThisPeriod = requiredForPeriod(p);
+
+      const creditApplied = Math.min(carriedOverpay, requiredForThisPeriod);
+      requiredForThisPeriod -= creditApplied;
+      carriedOverpay -= creditApplied;
+
+      const paidForThisPeriod = totalsByPeriod[p] || 0;
+
+      console.log(`Period ${p}: Total paid = ${paidForThisPeriod}, Effective required = ${requiredForThisPeriod}`);
+
+      if (paidForThisPeriod < requiredForThisPeriod) {
         actualIncompletePeriods.push({
-          ...period,
+          _id: p,
+          totalAmount: paidForThisPeriod,
+          count: 0,
           requiredAmount: requiredForThisPeriod,
-          remainingAmount: requiredForThisPeriod - period.totalAmount
+          remainingAmount: requiredForThisPeriod - paidForThisPeriod
         });
-        console.log(`Period ${period._id} is incomplete, remaining: ${requiredForThisPeriod - period.totalAmount}`);
+        console.log(`Period ${p} is incomplete, remaining: ${requiredForThisPeriod - paidForThisPeriod}`);
+      } else {
+        const overpayRaw = paidForThisPeriod - requiredForThisPeriod;
+        if (overpayRaw >= OVERPAY_THRESHOLD) {
+          carriedOverpay += overpayRaw;
+        }
       }
     }
     
