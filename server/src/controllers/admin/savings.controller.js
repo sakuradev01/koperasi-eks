@@ -17,6 +17,11 @@ import {
   reverseSavingsAccountingTransaction,
   normalizeObjectId,
 } from "../../services/savingsAccounting.service.js";
+import {
+  calculateSavingsSchedule,
+  getFirstIncompletePeriod,
+  PAID_SAVINGS_STATUSES,
+} from "../../services/savingsSchedule.service.js";
 import { isSavingsCoaOnlyEditor } from "../../utils/permissions.js";
 import { validateSavingsCoaOnlyPayload } from "../../utils/savingsPermissions.js";
 
@@ -583,140 +588,56 @@ const getLastInstallmentPeriod = asyncHandler(async (req, res) => {
         message: "Product tidak ditemukan"
       });
     }
-
-    // Determine the expected amount first based on upgrade status
-    let baseExpectedAmount = product.depositAmount;
-    
-    // Check if member has upgraded
-    if (member.hasUpgraded && member.currentUpgradeId) {
-      // For upgraded members, we need to check period-specific amounts
-      baseExpectedAmount = product.depositAmount; // Will be adjusted per period
+    if (member.productId && String(member.productId) !== String(productId)) {
+      return res.status(409).json({
+        success: false,
+        code: "PRODUCT_MISMATCH",
+        message: "Produk tidak sesuai dengan produk aktif anggota",
+      });
     }
-    
-    // Check for incomplete periods (only count approved payments)
-    // Don't filter by productId - we want ALL approved payments for this member
-    // This properly handles upgrades and product changes
-    let matchQuery = {
+
+    // Hitung semua pembayaran Approved + Partial dengan kalkulator canonical.
+    // Jangan hanya mengandalkan periode tertinggi karena carry-credit dapat
+    // menutup periode tanpa ada row pembayaran pada periode tersebut.
+    const paidSavings = await Savings.find({
       memberId: new mongoose.Types.ObjectId(memberId),
-      status: "Approved", // Only count approved payments
-      type: "Setoran" // Only count deposits, not withdrawals
-    };
-    
-    // Note: We intentionally don't filter by productId here
-    // This allows us to see ALL periods the member has paid for,
-    // regardless of which product they were using at the time
-    
-    const incompletePeriods = await Savings.aggregate([
-      {
-        $match: matchQuery
-      },
-      {
-        $group: {
-          _id: "$installmentPeriod",
-          totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { _id: 1 }
-      }
-    ]);
-    
-    // ==== KREDIT KELEBIHAN BAYAR (threshold Rp 30.000) ====
-    // Walk sekuensial periode 1..max: kelebihan bayar periode sebelumnya
-    // (>= Rp 30.000) menjadi kredit pengurang tagihan periode berikutnya,
-    // sehingga siswa cukup membayar sisa tagihan dan tetap dihitung lunas.
-    const totalsByPeriod = {};
-    incompletePeriods.forEach((p) => { totalsByPeriod[p._id] = p.totalAmount; });
-    const maxPaidPeriod = incompletePeriods.length > 0
-      ? Math.max(...incompletePeriods.map((p) => p._id))
-      : 0;
-
-    const requiredForPeriod = (p) => {
-      if (member.hasUpgraded && member.currentUpgradeId) {
-        if (p <= member.currentUpgradeId.completedPeriodsAtUpgrade) {
-          return member.currentUpgradeId.oldMonthlyDeposit || product.depositAmount;
-        }
-        return member.currentUpgradeId.newPaymentWithCompensation || product.depositAmount;
-      }
-      return product.depositAmount;
-    };
-
-    const actualIncompletePeriods = [];
-    const OVERPAY_THRESHOLD = 30000;
-    let carriedOverpay = 0;
-
-    for (let p = 1; p <= maxPaidPeriod; p++) {
-      let requiredForThisPeriod = requiredForPeriod(p);
-
-      const creditApplied = Math.min(carriedOverpay, requiredForThisPeriod);
-      requiredForThisPeriod -= creditApplied;
-      carriedOverpay -= creditApplied;
-
-      const paidForThisPeriod = totalsByPeriod[p] || 0;
-
-      console.log(`Period ${p}: Total paid = ${paidForThisPeriod}, Effective required = ${requiredForThisPeriod}`);
-
-      if (paidForThisPeriod < requiredForThisPeriod) {
-        actualIncompletePeriods.push({
-          _id: p,
-          totalAmount: paidForThisPeriod,
-          count: 0,
-          requiredAmount: requiredForThisPeriod,
-          remainingAmount: requiredForThisPeriod - paidForThisPeriod
-        });
-        console.log(`Period ${p} is incomplete, remaining: ${requiredForThisPeriod - paidForThisPeriod}`);
-      } else {
-        const overpayRaw = paidForThisPeriod - requiredForThisPeriod;
-        if (overpayRaw >= OVERPAY_THRESHOLD) {
-          carriedOverpay += overpayRaw;
-        }
-      }
-    }
-    
-    console.log("Actual incomplete periods:", actualIncompletePeriods);
-
-    // FIRST: Get the highest completed period across ALL products
-    // This is the ACTUAL last completed period
-    const highestPeriodResult = await Savings.aggregate([
-      {
-        $match: {
-          memberId: new mongoose.Types.ObjectId(memberId),
-          status: "Approved",
-          type: "Setoran"
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          maxPeriod: { $max: "$installmentPeriod" }
-        }
-      }
-    ]);
-    
-    const actualLastCompletedPeriod = highestPeriodResult.length > 0 
-      ? highestPeriodResult[0].maxPeriod 
-      : 0;
-    
-    console.log("Actual highest approved period:", actualLastCompletedPeriod);
+      type: "Setoran",
+      status: { $in: PAID_SAVINGS_STATUSES },
+    }).lean();
+    const schedule = calculateSavingsSchedule({
+      termDuration: product.termDuration,
+      baseDeposit: product.depositAmount,
+      upgrade: member.currentUpgradeId,
+      savings: paidSavings,
+    });
+    const firstIncomplete = getFirstIncompletePeriod(schedule);
+    const actualLastCompletedPeriod = firstIncomplete
+      ? Math.max(0, firstIncomplete.period - 1)
+      : schedule.termDuration;
+    const actualIncompletePeriods = schedule.periods
+      .filter((period) => !period.isFullyPaid && period.paid > 0)
+      .map((period) => ({
+        _id: period.period,
+        totalAmount: period.paid,
+        count: paidSavings.filter((saving) => Number(saving.installmentPeriod) === period.period).length,
+        requiredAmount: period.effectiveTarget,
+        remainingAmount: period.remaining,
+      }));
 
     let suggestedPeriod;
     let isPartialPayment = false;
     let remainingAmount = 0;
-    let targetAmountForPeriod = 0;
 
-    if (actualIncompletePeriods.length > 0) {
+    if (firstIncomplete && firstIncomplete.paid > 0) {
       // Use the first incomplete period
-      const incompletePeriod = actualIncompletePeriods[0];
-      suggestedPeriod = incompletePeriod._id;
+      suggestedPeriod = firstIncomplete.period;
       isPartialPayment = true;
-      remainingAmount = incompletePeriod.remainingAmount;
-      targetAmountForPeriod = incompletePeriod.requiredAmount;
+      remainingAmount = firstIncomplete.remaining;
       
       console.log(`Suggesting incomplete period ${suggestedPeriod} with remaining ${remainingAmount}`);
     } else {
       // Suggest the next period after the last completed one
-      suggestedPeriod = actualLastCompletedPeriod + 1;
+      suggestedPeriod = firstIncomplete?.period || null;
       
       console.log("=== Period Calculation Debug ===");
       console.log("Member ID:", memberId);
@@ -777,12 +698,14 @@ const getLastInstallmentPeriod = asyncHandler(async (req, res) => {
     });
 
     // Calculate expected amount based on upgrade status
-    let expectedAmount = product.depositAmount;
+    let expectedAmount = firstIncomplete?.effectiveTarget ?? 0;
     let hasUpgrade = false;
     let upgradeInfo = null;
 
     // If there's a partial payment, expected amount is the remaining amount
-    if (isPartialPayment) {
+    if (!firstIncomplete) {
+      expectedAmount = 0;
+    } else if (isPartialPayment) {
       expectedAmount = remainingAmount;
       console.log(`Partial payment detected. Expected amount = remaining amount: ${expectedAmount}`);
     } else {
@@ -833,8 +756,10 @@ const getLastInstallmentPeriod = asyncHandler(async (req, res) => {
         incompletePeriods: actualIncompletePeriods.map(p => ({
           period: p._id,
           paidAmount: p.totalAmount,
-          remainingAmount: p.requiredAmount - p.totalAmount
+          remainingAmount: p.remainingAmount,
         })),
+        periods: schedule.periods,
+        isAllComplete: !firstIncomplete,
         pendingTransactions: pendingTransactions,
         rejectedTransactions: rejectedTransactions,
         transactionsByPeriod: transactionsByPeriod
@@ -860,9 +785,9 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
   }
 
   // Find member by UUID
-  const member = await Member.findOne({ uuid: memberUuid }).populate(
-    "productId"
-  );
+  const member = await Member.findOne({ uuid: memberUuid })
+    .populate("productId")
+    .populate("currentUpgradeId");
 
   if (!member) {
     throw new ApiError(404, "Kamu belum menjadi bagian dari anggota koperasi");
@@ -882,15 +807,22 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
   const depositHistory = await Savings.find({
     memberId: member._id,
     type: "Setoran",
-    status: "Approved",
-  }).select("installmentPeriod amount proofFile");
+    status: { $in: PAID_SAVINGS_STATUSES },
+  }).select("installmentPeriod amount proofFile status productId");
+
+  const schedule = calculateSavingsSchedule({
+    termDuration: product.termDuration,
+    baseDeposit: product.depositAmount,
+    upgrade: member.currentUpgradeId,
+    savings: depositHistory,
+  });
 
   // Map deposit history by installment period
   const realizationAmountMap = {};
   const realizationProofFileMap = {};
 
   depositHistory.forEach((deposit) => {
-    // Satu periode bisa dibayar bertahap (multiple approved) — jumlahkan, jangan overwrite
+    // Satu periode bisa dibayar bertahap (multiple approved/partial) — jumlahkan.
     realizationAmountMap[deposit.installmentPeriod] =
       (realizationAmountMap[deposit.installmentPeriod] || 0) + deposit.amount;
     if (deposit.proofFile) {
@@ -907,6 +839,7 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
     : new Date(member.createdAt);
 
   for (let i = 1; i <= product.termDuration; i++) {
+    const period = schedule.periods[i - 1];
     // Calculate date projection dari startDate + (i-1) bulan
     const projectionDate = new Date(
       startDate.getFullYear(),
@@ -920,12 +853,16 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
 
     delivered.push({
       installment_period: i,
-      projection: product.depositAmount.toString(),
+      projection: String(period?.effectiveTarget ?? product.depositAmount),
       dateProjection: dateProjection,
       realization: realizationAmountMap[i]
         ? realizationAmountMap[i].toString()
         : 0,
       payment_proof: realizationProofFileMap[i] || 0,
+      remaining: period?.remaining ?? 0,
+      creditApplied: period?.creditApplied ?? 0,
+      isFullyPaid: Boolean(period?.isFullyPaid),
+      displayStatus: period?.status || "Belum Bayar",
     });
   }
 

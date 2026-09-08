@@ -3,6 +3,12 @@ import { Member } from "../../models/member.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ApiError } from "../../utils/ApiError.js";
+import { Product } from "../../models/product.model.js";
+import {
+  calculateSavingsSchedule,
+  getFirstIncompletePeriod,
+  PAID_SAVINGS_STATUSES,
+} from "../../services/savingsSchedule.service.js";
 import fs from "fs/promises";
 
 const isBlankAddress = (value) => !String(value || "").trim();
@@ -80,7 +86,7 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
     });
 
     // Validasi input
-    if (!parsedAmount || parsedAmount <= 0 || isNaN(parsedAmount)) {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       console.log('[Member Savings] Amount validation failed:', parsedAmount);
       return res.status(400).json({
         success: false,
@@ -89,7 +95,7 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
     }
 
     // Cari member berdasarkan ID dari token
-    const member = await Member.findById(memberId);
+    const member = await Member.findById(memberId).populate("currentUpgradeId");
     
     if (!member) {
       return res.status(404).json({
@@ -154,17 +160,26 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
       });
     }
 
-    // Jika tidak ada productId, skip untuk sementara karena required di model
-    if (!productId && !member.productId) {
+    if (!member.productId) {
       return res.status(400).json({
         success: false,
         message: "Product ID diperlukan untuk membuat saving. Silakan hubungi admin untuk mengatur produk member.",
       });
     }
 
-    // Get product info for deposit amount comparison
-    const Product = (await import("../../models/product.model.js")).Product;
-    const product = await Product.findById(productId || member.productId);
+    // Product dan schedule harus berasal dari member yang sedang login. Jangan
+    // percaya productId dari browser karena dapat menunjuk ke paket anggota lain.
+    const requestedProductId = String(productId || member.productId);
+    if (requestedProductId !== String(member.productId)) {
+      await discardUploadedProof(req.file);
+      return res.status(409).json({
+        success: false,
+        code: "PRODUCT_MISMATCH",
+        message: "Produk pembayaran tidak sesuai dengan produk simpanan Anda.",
+      });
+    }
+
+    const product = await Product.findById(member.productId);
     
     if (!product) {
       return res.status(404).json({
@@ -173,8 +188,67 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
       });
     }
 
-    // Use installmentPeriod from request or default to 1
-    const finalPeriod = parseInt(installmentPeriod) || 1;
+    const paidSavings = await Savings.find({
+      memberId: member._id,
+      type: "Setoran",
+      status: { $in: PAID_SAVINGS_STATUSES },
+    }).lean();
+    const schedule = calculateSavingsSchedule({
+      termDuration: product.termDuration,
+      baseDeposit: product.depositAmount,
+      upgrade: member.currentUpgradeId,
+      savings: paidSavings,
+    });
+    const firstIncompletePeriod = getFirstIncompletePeriod(schedule);
+
+    if (!firstIncompletePeriod) {
+      await discardUploadedProof(req.file);
+      return res.status(409).json({
+        success: false,
+        code: "SAVINGS_COMPLETE",
+        message: "Seluruh periode simpanan sudah lunas.",
+      });
+    }
+
+    // Use installmentPeriod from request or the first period that is still
+    // incomplete. Periods cannot be skipped through a forged direct request.
+    const parsedPeriod = installmentPeriod === undefined || installmentPeriod === ""
+      ? firstIncompletePeriod.period
+      : Number(installmentPeriod);
+    const finalPeriod = Math.trunc(parsedPeriod);
+    if (!Number.isInteger(finalPeriod) || finalPeriod < 1 || finalPeriod > schedule.termDuration) {
+      await discardUploadedProof(req.file);
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_INSTALLMENT_PERIOD",
+        message: `Periode simpanan harus berada di antara 1 dan ${schedule.termDuration}.`,
+      });
+    }
+    if (finalPeriod !== firstIncompletePeriod.period) {
+      await discardUploadedProof(req.file);
+      return res.status(409).json({
+        success: false,
+        code: "INSTALLMENT_SEQUENCE",
+        message: `Pembayaran berikutnya adalah periode ${firstIncompletePeriod.period}.`,
+        data: { nextPeriod: firstIncompletePeriod.period },
+      });
+    }
+
+    const pendingForPeriod = await Savings.exists({
+      memberId: member._id,
+      installmentPeriod: finalPeriod,
+      type: "Setoran",
+      status: "Pending",
+    });
+    if (pendingForPeriod) {
+      await discardUploadedProof(req.file);
+      return res.status(409).json({
+        success: false,
+        code: "PAYMENT_PENDING",
+        message: "Pembayaran pada periode ini masih menunggu verifikasi admin.",
+      });
+    }
+
     console.log('[Member Savings] Using installmentPeriod:', finalPeriod);
 
     // Calculate partial sequence for this period
@@ -187,7 +261,8 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
     const partialSequence = existingSavingsCount + 1;
 
     // Auto-detect payment type
-    const calculatedPaymentType = parsedAmount < product.depositAmount ? "Partial" : "Full";
+    const calculatedPaymentType =
+      parsedAmount < firstIncompletePeriod.remaining ? "Partial" : "Full";
 
     // Handle file upload if present
     const proofFilePath = req.file ? req.file.filename : null;

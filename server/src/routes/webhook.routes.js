@@ -217,33 +217,96 @@ async function createLegacySaving({ invoiceNumber, amount, channelId }) {
   return { saving, member };
 }
 
+const normalizeWebhookAmount = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const normalized = String(value ?? "").replace(/[^0-9.-]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+async function claimCheckoutIntent(invoiceNumber) {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
+  const claimed = await CheckoutIntent.findOneAndUpdate(
+    {
+      invoiceNumber,
+      $or: [
+        { status: "Pending" },
+        { status: "Processing", processingAt: { $lt: staleBefore } },
+        { status: "Processing", processingAt: null },
+      ],
+    },
+    {
+      $set: {
+        status: "Processing",
+        processingAt: now,
+      },
+    },
+    { new: true },
+  );
+
+  if (claimed) return { intent: claimed, claimed: true };
+  const existing = await CheckoutIntent.findOne({ invoiceNumber });
+  return { intent: existing, claimed: false };
+}
+
 async function processSuccessfulPayment({ invoiceNumber, amount, channelId }) {
-  const intent = await CheckoutIntent.findOne({ invoiceNumber });
+  const { intent, claimed } = await claimCheckoutIntent(invoiceNumber);
 
   if (intent) {
-    if (intent.status === "Paid") {
-      return { message: "Payment already processed" };
+    if (!claimed) {
+      return {
+        message: intent.status === "Paid"
+          ? "Payment already processed"
+          : "Payment is currently being processed",
+      };
+    }
+
+    const callbackAmount = normalizeWebhookAmount(amount);
+    if (
+      callbackAmount > 0 &&
+      Number(intent.chargedAmount) > 0 &&
+      callbackAmount !== Number(intent.chargedAmount)
+    ) {
+      await CheckoutIntent.updateOne(
+        { _id: intent._id, status: "Processing" },
+        { $set: { status: "Pending" }, $unset: { processingAt: 1 } },
+      );
+      throw new Error("Nominal callback tidak sesuai dengan checkout intent");
     }
 
     const member = await findMemberByUuid(intent.studentUuid);
     if (intent.savingsAmount > 0 && !member) {
+      await CheckoutIntent.updateOne(
+        { _id: intent._id, status: "Processing" },
+        { $set: { status: "Pending" }, $unset: { processingAt: 1 } },
+      );
       throw new Error(`Member not found for UUID: ${intent.studentUuid}`);
     }
 
-    const [saving, donation] = await Promise.all([
-      createSavingsFromIntent({ member, intent, channelId }),
-      createDonationFromIntent({ member, intent, channelId }),
-    ]);
+    try {
+      const [saving, donation] = await Promise.all([
+        createSavingsFromIntent({ member, intent, channelId }),
+        createDonationFromIntent({ member, intent, channelId }),
+      ]);
 
-    intent.status = "Paid";
-    intent.processedAt = new Date();
-    await intent.save();
+      intent.status = "Paid";
+      intent.processedAt = new Date();
+      intent.processingAt = null;
+      await intent.save();
 
-    return {
-      message: "Payment processed successfully",
-      savingId: saving?._id || null,
-      donationId: donation?._id || null,
-    };
+      return {
+        message: "Payment processed successfully",
+        savingId: saving?._id || null,
+        donationId: donation?._id || null,
+      };
+    } catch (error) {
+      await CheckoutIntent.updateOne(
+        { _id: intent._id, status: "Processing" },
+        { $set: { status: "Pending" }, $unset: { processingAt: 1 } },
+      ).catch(() => {});
+      throw error;
+    }
   }
 
   const { saving } = await createLegacySaving({ invoiceNumber, amount, channelId });

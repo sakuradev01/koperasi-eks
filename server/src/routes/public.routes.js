@@ -23,6 +23,7 @@ import {
   summarizeRegistrationDocuments,
   validateRegistrationPayload,
 } from "../utils/memberRegistration.js";
+import { calculateSavingsSchedule, PAID_SAVINGS_STATUSES } from "../services/savingsSchedule.service.js";
 
 const { donasi: donasiDir } = ensureUploadsSubdirs();
 
@@ -427,7 +428,9 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
     }
 
     // Find member by UUID
-    const member = await Member.findOne({ uuid }).populate('productId');
+    const member = await Member.findOne({ uuid })
+      .populate('productId')
+      .populate('currentUpgradeId');
     
     if (!member) {
       return res.status(404).json({
@@ -446,29 +449,45 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
     // Get product details (tenor/term duration)
     const product = member.productId;
 
-    // Get deposit history for this member (only approved deposits)
+    // Use the same Approved + Partial + carry-credit calculation as the
+    // authenticated student path. This endpoint is legacy, but old clients
+    // still call it, so it must not return a different schedule.
     const depositHistory = await Savings.find({ 
       memberId: member._id,
       type: "Setoran",
-      status: "Approved"
-    }).select('installmentPeriod amount proofFile');
+      status: { $in: PAID_SAVINGS_STATUSES }
+    }).select('installmentPeriod amount proofFile status productId');
+
+    const schedule = calculateSavingsSchedule({
+      termDuration: product.termDuration,
+      baseDeposit: product.depositAmount,
+      upgrade: member.currentUpgradeId,
+      savings: depositHistory,
+    });
 
     // Map deposit history by installment period
     const realizationAmountMap = {};
     const realizationProofFileMap = {};
     
     depositHistory.forEach(deposit => {
-      realizationAmountMap[deposit.installmentPeriod] = deposit.amount;
-      realizationProofFileMap[deposit.installmentPeriod] = deposit.proofFile || 0;
+      realizationAmountMap[deposit.installmentPeriod] =
+        (realizationAmountMap[deposit.installmentPeriod] || 0) + deposit.amount;
+      if (deposit.proofFile) {
+        realizationProofFileMap[deposit.installmentPeriod] = deposit.proofFile;
+      }
     });
 
     // Generate projection data for all periods
     const delivered = [];
-    const currentDate = new Date();
+    const startDate = member.savingsStartDate
+      ? new Date(member.savingsStartDate)
+      : new Date(member.createdAt);
     
     for (let i = 1; i <= product.termDuration; i++) {
-      // Calculate date projection (adding i months to current date)
-      const projectionDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + i, 1);
+      const period = schedule.periods[i - 1];
+      // Period 1 follows savingsStartDate; do not shift the schedule by the
+      // current date on every request.
+      const projectionDate = new Date(startDate.getFullYear(), startDate.getMonth() + i - 1, 1);
       const dateProjection = projectionDate.toLocaleDateString('en-US', { 
         month: 'long', 
         year: 'numeric' 
@@ -476,10 +495,14 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
 
       delivered.push({
         installment_period: i,
-        projection: product.depositAmount.toString(),
+        projection: String(period?.effectiveTarget ?? product.depositAmount),
         dateProjection: dateProjection,
         realization: realizationAmountMap[i] ? realizationAmountMap[i].toString() : 0,
-        payment_proof: realizationProofFileMap[i] || 0
+        payment_proof: realizationProofFileMap[i] || 0,
+        remaining: period?.remaining ?? 0,
+        creditApplied: period?.creditApplied ?? 0,
+        isFullyPaid: Boolean(period?.isFullyPaid),
+        displayStatus: period?.status || "Belum Bayar",
       });
     }
 

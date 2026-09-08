@@ -2,7 +2,100 @@ import { ProductUpgrade } from "../../models/productUpgrade.model.js";
 import { Member } from "../../models/member.model.js";
 import { Product } from "../../models/product.model.js";
 import { Savings } from "../../models/savings.model.js";
-import mongoose from "mongoose";
+import {
+  calculateSavingsSchedule,
+  PAID_SAVINGS_STATUSES,
+} from "../../services/savingsSchedule.service.js";
+
+class UpgradeCalculationError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const buildUpgradeCalculation = ({ member, newProduct, savings }) => {
+  if (!member?.productId || !member.product) {
+    throw new UpgradeCalculationError(400, "Member belum memiliki produk simpanan");
+  }
+
+  if (member.hasUpgraded) {
+    throw new UpgradeCalculationError(400, "Member sudah pernah melakukan upgrade produk");
+  }
+
+  if (!newProduct) {
+    throw new UpgradeCalculationError(404, "Produk baru tidak ditemukan");
+  }
+
+  const oldMonthlyDeposit = Number(member.product.depositAmount) || 0;
+  const newMonthlyDeposit = Number(newProduct.depositAmount) || 0;
+  if (newMonthlyDeposit <= oldMonthlyDeposit) {
+    throw new UpgradeCalculationError(
+      400,
+      "Produk baru harus memiliki setoran yang lebih tinggi dari produk saat ini",
+    );
+  }
+
+  const schedule = calculateSavingsSchedule({
+    termDuration: member.product.termDuration,
+    baseDeposit: oldMonthlyDeposit,
+    savings,
+  });
+
+  let completedPeriods = 0;
+  for (const period of schedule.periods) {
+    if (!period.isFullyPaid) break;
+    completedPeriods += 1;
+  }
+
+  const remainingPeriods = schedule.termDuration - completedPeriods;
+  if (remainingPeriods <= 0) {
+    throw new UpgradeCalculationError(
+      400,
+      "Member sudah menyelesaikan seluruh periode simpanan",
+    );
+  }
+
+  const depositDifference = newMonthlyDeposit - oldMonthlyDeposit;
+  const compensationPerMonth = Math.ceil(
+    (depositDifference * completedPeriods) / remainingPeriods,
+  );
+  const newPaymentWithCompensation = newMonthlyDeposit + compensationPerMonth;
+
+  return {
+    memberId: member._id,
+    memberName: member.name,
+    memberUuid: member.uuid,
+    oldProductId: member.productId,
+    oldProductTitle: member.product.title,
+    oldMonthlyDeposit,
+    newProductId: newProduct._id,
+    newProductTitle: newProduct.title,
+    newMonthlyDeposit,
+    completedPeriodsAtUpgrade: completedPeriods,
+    remainingPeriods,
+    compensationPerMonth,
+    newPaymentWithCompensation,
+    totalPeriods: schedule.termDuration,
+  };
+};
+
+const loadUpgradeInputs = async (memberId, newProductId) => {
+  const member = await Member.findById(memberId).populate("product");
+  if (!member) throw new UpgradeCalculationError(404, "Member tidak ditemukan");
+
+  const newProduct = await Product.findById(newProductId);
+  if (!newProduct) throw new UpgradeCalculationError(404, "Produk baru tidak ditemukan");
+
+  const savings = await Savings.find({
+    memberId: member._id,
+    productId: member.productId,
+    type: "Setoran",
+    status: { $in: PAID_SAVINGS_STATUSES },
+  }).lean();
+
+  return { member, newProduct, savings };
+};
 
 // Calculate compensation for product upgrade
 export const calculateUpgradeCompensation = async (req, res) => {
@@ -17,110 +110,8 @@ export const calculateUpgradeCompensation = async (req, res) => {
       });
     }
 
-    // Ambil data member dengan populate produk saat ini
-    const member = await Member.findById(memberId).populate("product");
-    if (!member) {
-      return res.status(404).json({
-        success: false,
-        message: "Member tidak ditemukan"
-      });
-    }
-
-    if (!member.productId) {
-      return res.status(400).json({
-        success: false,
-        message: "Member belum memiliki produk simpanan"
-      });
-    }
-
-    // Cek apakah sudah pernah upgrade
-    if (member.hasUpgraded) {
-      return res.status(400).json({
-        success: false,
-        message: "Member sudah pernah melakukan upgrade produk"
-      });
-    }
-
-    // Ambil data produk baru
-    const newProduct = await Product.findById(newProductId);
-    if (!newProduct) {
-      return res.status(404).json({
-        success: false,
-        message: "Produk baru tidak ditemukan"
-      });
-    }
-
-    // Validasi produk baru harus lebih tinggi
-    if (newProduct.depositAmount <= member.product.depositAmount) {
-      return res.status(400).json({
-        success: false,
-        message: "Produk baru harus memiliki setoran yang lebih tinggi dari produk saat ini"
-      });
-    }
-
-    // Hitung periode yang sudah lunas
-    const completedSavings = await Savings.find({
-      memberId: member._id,
-      productId: member.productId,
-      status: "Approved",
-      type: "Setoran"
-    }).sort({ installmentPeriod: 1 });
-
-    // Kelompokkan berdasarkan periode dan hitung total per periode
-    const periodPayments = {};
-    completedSavings.forEach(saving => {
-      if (!periodPayments[saving.installmentPeriod]) {
-        periodPayments[saving.installmentPeriod] = 0;
-      }
-      periodPayments[saving.installmentPeriod] += saving.amount;
-    });
-
-    // Hitung berapa periode yang sudah lunas penuh
-    let completedPeriods = 0;
-    const oldMonthlyDeposit = member.product.depositAmount;
-
-    for (let period = 1; period <= member.product.termDuration; period++) {
-      if (periodPayments[period] && periodPayments[period] >= oldMonthlyDeposit) {
-        completedPeriods++;
-      } else {
-        break; // Stop at first incomplete period
-      }
-    }
-
-    // Hitung kompensasi
-    const remainingPeriods = member.product.termDuration - completedPeriods;
-    if (remainingPeriods <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Member sudah menyelesaikan seluruh periode simpanan"
-      });
-    }
-
-    const newMonthlyDeposit = newProduct.depositAmount;
-    
-    // Calculate compensation using the correct formula:
-    // Kompensasi per Bulan = (Setoran_Baru - Setoran_Lama) × Bulan_Sudah_Nabung / Sisa_Bulan
-    const depositDifference = newMonthlyDeposit - oldMonthlyDeposit;
-    const compensationPerMonth = Math.ceil((depositDifference * completedPeriods) / remainingPeriods);
-    const newPaymentWithCompensation = newMonthlyDeposit + compensationPerMonth;
-
-    // Return calculation result
-    const calculationResult = {
-      memberId: member._id,
-      memberName: member.name,
-      memberUuid: member.uuid,
-      oldProductId: member.productId,
-      oldProductTitle: member.product.title,
-      oldMonthlyDeposit,
-      newProductId: newProduct._id,
-      newProductTitle: newProduct.title,
-      newMonthlyDeposit,
-      completedPeriodsAtUpgrade: completedPeriods,
-      remainingPeriods,
-      compensationPerMonth,
-      newPaymentWithCompensation,
-      totalPeriods: member.product.termDuration
-    };
+    const { member, newProduct, savings } = await loadUpgradeInputs(memberId, newProductId);
+    const calculationResult = buildUpgradeCalculation({ member, newProduct, savings });
 
     return res.status(200).json({
       success: true,
@@ -129,6 +120,9 @@ export const calculateUpgradeCompensation = async (req, res) => {
     });
 
   } catch (error) {
+    if (error instanceof UpgradeCalculationError) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
     console.error("Error calculating upgrade compensation:", error);
     return res.status(500).json({
       success: false,
@@ -138,48 +132,27 @@ export const calculateUpgradeCompensation = async (req, res) => {
   }
 };
 
-// Execute product upgrade TANPA transaction
 export const executeProductUpgrade = async (req, res) => {
   try {
-    const { memberId, newProductId, calculationResult } = req.body;
+    const { memberId, newProductId } = req.body;
 
     // Validasi input
-    if (!memberId || !newProductId || !calculationResult) {
+    if (!memberId || !newProductId) {
       return res.status(400).json({
         success: false,
-        message: "Data tidak lengkap untuk eksekusi upgrade",
+        message: "Member ID dan product baru wajib diisi",
       });
     }
 
-    // Verifikasi ulang member
-    const member = await Member.findById(memberId);
-    if (!member) {
-      return res.status(404).json({
-        success: false,
-        message: "Member tidak ditemukan",
-      });
-    }
-
-    if (member.hasUpgraded) {
-      return res.status(400).json({
-        success: false,
-        message: "Member sudah pernah melakukan upgrade",
-      });
-    }
-
-    // Verifikasi ulang produk baru
-    const newProduct = await Product.findById(newProductId);
-    if (!newProduct) {
-      return res.status(404).json({
-        success: false,
-        message: "Produk baru tidak ditemukan",
-      });
-    }
+    // Selalu hitung ulang dari database. calculationResult dari browser hanya
+    // untuk preview dan tidak boleh menjadi sumber nilai pembukuan.
+    const { member, newProduct, savings } = await loadUpgradeInputs(memberId, newProductId);
+    const calculationResult = buildUpgradeCalculation({ member, newProduct, savings });
 
     // Buat record ProductUpgrade
     const productUpgrade = await ProductUpgrade.create({
       memberId: member._id,
-      oldProductId: calculationResult.oldProductId,
+      oldProductId: member.productId,
       newProductId: newProduct._id,
       upgradeDate: new Date(),
       completedPeriodsAtUpgrade: calculationResult.completedPeriodsAtUpgrade,
@@ -195,13 +168,18 @@ export const executeProductUpgrade = async (req, res) => {
       member.upgradeHistory = [];
     }
 
-    // Update Member
-    member.hasUpgraded = true;
-    member.currentUpgradeId = productUpgrade._id;
-    member.upgradeHistory.push(productUpgrade._id);
-    member.productId = newProduct._id;
-
-    await member.save();
+    try {
+      // Update Member. Roll back the just-created upgrade document if the
+      // member write fails, so a half-created upgrade is not left behind.
+      member.hasUpgraded = true;
+      member.currentUpgradeId = productUpgrade._id;
+      member.upgradeHistory.push(productUpgrade._id);
+      member.productId = newProduct._id;
+      await member.save();
+    } catch (saveError) {
+      await ProductUpgrade.deleteOne({ _id: productUpgrade._id }).catch(() => {});
+      throw saveError;
+    }
 
     // Populate buat response
     const populatedUpgrade = await ProductUpgrade.findById(productUpgrade._id)
@@ -215,6 +193,9 @@ export const executeProductUpgrade = async (req, res) => {
       data: populatedUpgrade,
     });
   } catch (error) {
+    if (error instanceof UpgradeCalculationError) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
     console.error("Error executing product upgrade:", error);
     return res.status(500).json({
       success: false,
@@ -251,7 +232,6 @@ export const getMemberUpgradeHistory = async (req, res) => {
   }
 };
 
-// Cancel product upgrade (for rollback purposes) TANPA transaction
 export const cancelProductUpgrade = async (req, res) => {
   try {
     const { upgradeId } = req.params;
@@ -268,6 +248,20 @@ export const cancelProductUpgrade = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Upgrade sudah dibatalkan sebelumnya",
+      });
+    }
+
+    const postUpgradeSaving = await Savings.exists({
+      memberId: upgrade.memberId,
+      productId: upgrade.newProductId,
+      type: "Setoran",
+      createdAt: { $gte: upgrade.upgradeDate },
+      status: { $in: PAID_SAVINGS_STATUSES },
+    });
+    if (postUpgradeSaving) {
+      return res.status(409).json({
+        success: false,
+        message: "Upgrade tidak dapat dibatalkan karena sudah ada pembayaran setelah upgrade",
       });
     }
 

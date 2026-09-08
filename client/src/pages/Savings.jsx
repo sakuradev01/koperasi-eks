@@ -104,6 +104,7 @@ const Savings = () => {
     rejectedPeriods: [],
     pendingTransactions: [],
     transactionsByPeriod: {},
+    periods: [],
     nextPeriod: 1,
     suggestedAmount: 0,
     isPartialPayment: false,
@@ -434,8 +435,9 @@ const Savings = () => {
         incompletePeriods: data.incompletePeriods || [],
         pendingTransactions: data.pendingTransactions || [],
         transactionsByPeriod: data.transactionsByPeriod || {},
-        nextPeriod: data.nextPeriod || 1,
-        suggestedAmount: data.expectedAmount || data.remainingAmount || data.depositAmount || 0,
+        periods: data.periods || [],
+        nextPeriod: data.nextPeriod ?? null,
+        suggestedAmount: data.expectedAmount ?? data.remainingAmount ?? data.depositAmount ?? 0,
         isPartialPayment: data.isPartialPayment || false,
         remainingAmount: data.remainingAmount || 0,
         depositAmount: data.depositAmount || 0,
@@ -444,7 +446,7 @@ const Savings = () => {
       });
 
       const last = data.lastPeriod ?? 0;
-      const next = data.nextPeriod || 1;
+      const next = Number.isInteger(data.nextPeriod) ? data.nextPeriod : null;
       setLastPeriod(last);
       
       // Get rejected periods for this member/product
@@ -456,11 +458,13 @@ const Savings = () => {
       // Use setTimeout to ensure state updates properly
       setTimeout(() => {
         if (!editingId) {
-          let suggestedAmount = data.expectedAmount || selectedProduct?.depositAmount || 0;
-          let description = `Pembayaran Simpanan Periode - ${next}`;
+          let suggestedAmount = data.expectedAmount ?? selectedProduct?.depositAmount ?? 0;
+          let description = next
+            ? `Pembayaran Simpanan Periode - ${next}`
+            : "Seluruh periode simpanan sudah lunas";
           
           // Check if member has upgraded
-          if (data.hasUpgrade && data.upgradeInfo) {
+          if (next && data.hasUpgrade && data.upgradeInfo) {
             // IMPORTANT: Use expectedAmount from API which already includes compensation
             suggestedAmount = data.expectedAmount || data.upgradeInfo.newPaymentWithCompensation;
             description = `Pembayaran Simpanan Periode - ${next} (Upgrade: Rp ${data.upgradeInfo.newMonthlyDeposit?.toLocaleString()} + Kompensasi: Rp ${data.upgradeInfo.compensationPerMonth?.toLocaleString()})`;
@@ -468,15 +472,15 @@ const Savings = () => {
             console.log("Setting amount for upgraded member:", suggestedAmount);
           }
           // Check if this is partial payment continuation
-          else if (data.isPartialPayment && data.remainingAmount > 0) {
+          else if (next && data.isPartialPayment && data.remainingAmount > 0) {
             suggestedAmount = data.remainingAmount;
             description = `Pembayaran Sisa Periode - ${next} (Rp ${data.remainingAmount.toLocaleString()})`;
           }
           
           setFormData((prev) => ({ 
             ...prev, 
-            amount: suggestedAmount,
-            installmentPeriod: next,
+            amount: next ? suggestedAmount : "",
+            installmentPeriod: next || 1,
             description: description
           }));
         }
@@ -489,6 +493,7 @@ const Savings = () => {
         rejectedPeriods: [],
         pendingTransactions: [],
         transactionsByPeriod: {},
+        periods: [],
         nextPeriod: 1,
         suggestedAmount: 0,
         isPartialPayment: false,
@@ -1959,35 +1964,20 @@ const Savings = () => {
                       onChange={(e) => {
                         const selectedPeriod = parseInt(e.target.value);
                         const product = products.find(p => p._id === formData.productId);
-                        
-                        // Calculate amount for selected period
-                        let suggestedAmount = product?.depositAmount || 0;
+
+                        // Gunakan hasil kalkulasi server agar modal tidak
+                        // menghitung ulang dengan aturan Approved-only.
+                        const serverPeriod = periodInfo.periods?.find(
+                          period => period.period === selectedPeriod
+                        );
+                        const suggestedAmount = serverPeriod
+                          ? (serverPeriod.isFullyPaid ? 0 : serverPeriod.remaining)
+                          : (product?.depositAmount || 0);
                         let description = `Pembayaran Simpanan Periode - ${selectedPeriod}`;
-                        
-                        // Check if period has existing transactions
-                        const periodTransactions = periodInfo.transactionsByPeriod?.[selectedPeriod] || [];
-                        const totalPaid = periodTransactions
-                          .filter(t => t.status === 'Approved')
-                          .reduce((sum, t) => sum + (t.amount || 0), 0);
-                        
-                        // Adjust for upgrade if applicable
-                        if (periodInfo.hasUpgrade && periodInfo.upgradeInfo) {
-                          const completedAtUpgrade = periodInfo.upgradeInfo.completedPeriodsAtUpgrade || 0;
-                          if (selectedPeriod <= completedAtUpgrade) {
-                            suggestedAmount = periodInfo.upgradeInfo.oldMonthlyDeposit || product?.depositAmount || 0;
-                          } else {
-                            suggestedAmount = periodInfo.upgradeInfo.newPaymentWithCompensation || product?.depositAmount || 0;
-                          }
-                        }
-                        
-                        // Calculate remaining if partial payment
-                        const remainingAmount = Math.max(0, suggestedAmount - totalPaid);
-                        if (totalPaid > 0 && remainingAmount > 0) {
-                          suggestedAmount = remainingAmount;
-                          description = `Pembayaran Sisa Periode - ${selectedPeriod} (Rp ${remainingAmount.toLocaleString()})`;
-                        } else if (totalPaid > 0 && remainingAmount === 0) {
-                          // Period already complete, but user can still add more
-                          description = `Pembayaran Tambahan Periode - ${selectedPeriod}`;
+                        if (serverPeriod?.isFullyPaid) {
+                          description = `Periode ${selectedPeriod} sudah lunas`;
+                        } else if (serverPeriod?.paid > 0) {
+                          description = `Pembayaran Sisa Periode - ${selectedPeriod} (Rp ${serverPeriod.remaining.toLocaleString()})`;
                         }
                         
                         setFormData({
@@ -2010,30 +2000,17 @@ const Savings = () => {
                           // Add all periods, marking complete/incomplete/pending
                           for (let i = 1; i <= maxPeriod; i++) {
                             const periodTransactions = periodInfo.transactionsByPeriod?.[i] || [];
-                            const hasApproved = periodTransactions.some(t => t.status === 'Approved');
+                            const serverPeriod = periodInfo.periods?.find(period => period.period === i);
+                            const hasPaid = periodTransactions.some(t => ['Approved', 'Partial'].includes(t.status));
                             const hasPending = periodTransactions.some(t => t.status === 'Pending');
                             const hasRejected = periodTransactions.some(t => t.status === 'Rejected');
-                            const totalPaid = periodTransactions
-                              .filter(t => t.status === 'Approved')
-                              .reduce((sum, t) => sum + (t.amount || 0), 0);
-                            
-                            // Calculate required amount for this period
-                            let requiredAmount = product?.depositAmount || 0;
-                            if (periodInfo.hasUpgrade && periodInfo.upgradeInfo) {
-                              const completedAtUpgrade = periodInfo.upgradeInfo.completedPeriodsAtUpgrade || 0;
-                              if (i <= completedAtUpgrade) {
-                                requiredAmount = periodInfo.upgradeInfo.oldMonthlyDeposit || product?.depositAmount || 0;
-                              } else {
-                                requiredAmount = periodInfo.upgradeInfo.newPaymentWithCompensation || product?.depositAmount || 0;
-                              }
-                            }
-                            
-                            const remainingAmount = Math.max(0, requiredAmount - totalPaid);
+                            const isComplete = serverPeriod?.isFullyPaid || false;
+                            const remainingAmount = serverPeriod?.remaining ?? product?.depositAmount ?? 0;
                             
                             let label = `Periode ${i}`;
-                            if (hasApproved && remainingAmount === 0) {
+                            if (isComplete) {
                               label += ' ✓ Lunas';
-                            } else if (hasApproved && remainingAmount > 0) {
+                            } else if (hasPaid && remainingAmount > 0) {
                               label += ` (Sisa: Rp ${remainingAmount.toLocaleString()})`;
                             } else if (hasPending) {
                               label += ' ⏳ Pending';
@@ -2044,7 +2021,7 @@ const Savings = () => {
                             }
                             
                             options.push(
-                              <option key={i} value={i}>
+                              <option key={i} value={i} disabled={isComplete && !editingId}>
                                 {label}
                               </option>
                             );

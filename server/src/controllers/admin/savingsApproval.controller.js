@@ -7,6 +7,7 @@ import {
   syncSavingsAccountingTransaction,
   reverseSavingsAccountingTransaction,
 } from "../../services/savingsAccounting.service.js";
+import { PAID_SAVINGS_STATUSES } from "../../services/savingsSchedule.service.js";
 
 // Approve Savings
 export const approveSavings = asyncHandler(async (req, res) => {
@@ -130,7 +131,11 @@ export const getSavingsPeriodSummary = asyncHandler(async (req, res) => {
   }).sort({ createdAt: 1 });
 
   const totalPaid = periodSavings
-    .filter((s) => s.status === "Approved")
+    .filter((s) => PAID_SAVINGS_STATUSES.includes(s.status))
+    .reduce((sum, s) => sum + s.amount, 0);
+
+  const partialAmount = periodSavings
+    .filter((s) => s.status === "Partial")
     .reduce((sum, s) => sum + s.amount, 0);
 
   const pendingAmount = periodSavings
@@ -143,9 +148,11 @@ export const getSavingsPeriodSummary = asyncHandler(async (req, res) => {
       {
         periodSavings,
         totalPaid,
+        partialAmount,
         pendingAmount,
         paymentCount: periodSavings.length,
         approvedCount: periodSavings.filter((s) => s.status === "Approved").length,
+        partialCount: periodSavings.filter((s) => s.status === "Partial").length,
       },
       "Ringkasan periode simpanan berhasil diambil",
     ),

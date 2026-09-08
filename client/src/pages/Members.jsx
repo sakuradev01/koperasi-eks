@@ -3,23 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/index.jsx";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import MemberDocumentImage from "../components/MemberDocumentImage.jsx";
 import { toast } from "react-toastify";
-
-import conf from "../conf/conf.js";
-
-const getMemberImageUrl = (val) => {
-  if (!val) return "";
-  const raw = String(val).trim();
-  if (!raw) return "";
-  if (raw.startsWith("data:")) return raw;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("/uploads/")) {
-    const base = String(conf?.server_url || import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "").replace(/\/+$/, "");
-    if (!base) return raw;
-    return `${base}${raw}`;
-  }
-  return raw;
-};
 
 const getRegistrationStatus = (member) => {
   const explicit = String(member?.registrationStatus || "").toLowerCase();
@@ -1445,13 +1430,14 @@ const Members = () => {
                             onClick={() => openAttachmentPreview(item)}
                             className="group block w-full text-left"
                           >
-                            <img
-                              src={getMemberImageUrl(item.value)}
+                            <MemberDocumentImage
+                              value={item.value}
                               alt={item.label}
                               className={`h-44 w-full rounded-xl border border-slate-200 bg-slate-50 transition-transform duration-300 group-hover:scale-[1.01] ${
                                 item.fit === "contain" ? "object-contain p-3" : "object-cover"
                               }`}
                               loading="lazy"
+                              showOriginalLink={false}
                             />
                           </button>
                         ) : (
@@ -1526,10 +1512,11 @@ const Members = () => {
             </div>
             <div className="bg-slate-100 p-4">
               <div className="flex min-h-[55vh] items-center justify-center rounded-2xl border border-slate-200 bg-white p-4">
-                <img
-                  src={getMemberImageUrl(attachmentPreview.value)}
+                <MemberDocumentImage
+                  value={attachmentPreview.value}
                   alt={attachmentPreview.label}
                   className="max-h-[70vh] w-full rounded-xl object-contain"
+                  showOriginalLink
                 />
               </div>
             </div>
@@ -1640,7 +1627,12 @@ const Members = () => {
                             }}
                             className="block w-full group"
                           >
-                            <img src={getMemberImageUrl(val)} alt={doc.label} className="h-36 w-full rounded-lg border border-slate-200 object-cover group-hover:opacity-90" />
+                            <MemberDocumentImage
+                              value={val}
+                              alt={doc.label}
+                              className="h-36 w-full rounded-lg border border-slate-200 object-cover group-hover:opacity-90"
+                              showOriginalLink={false}
+                            />
                           </button>
                         ) : (
                           <div className="h-36 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-[11px] text-slate-400">Tidak ada foto</div>

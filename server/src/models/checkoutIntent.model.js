@@ -80,9 +80,13 @@ const checkoutIntentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Pending", "Paid", "Expired", "Failed"],
+      enum: ["Pending", "Processing", "Paid", "Expired", "Failed"],
       default: "Pending",
       index: true,
+    },
+    processingAt: {
+      type: Date,
+      default: null,
     },
     processedAt: {
       type: Date,

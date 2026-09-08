@@ -1,11 +1,14 @@
 import { DonationCampaign } from "../../models/donationCampaign.model.js";
 import { Donation } from "../../models/donation.model.js";
 import { Member } from "../../models/member.model.js";
+import { Product } from "../../models/product.model.js";
+import { Savings } from "../../models/savings.model.js";
 import { CheckoutIntent } from "../../models/checkoutIntent.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { buildStudentDonationCode, maskStudentName } from "../../utils/donation.js";
+import { calculateSavingsSchedule, PAID_SAVINGS_STATUSES } from "../../services/savingsSchedule.service.js";
 
 function normalizeDate(value) {
   if (!value) return null;
@@ -21,7 +24,10 @@ async function getPreferredCampaign() {
 }
 
 async function getMemberSnapshot(studentUuid) {
-  const member = await Member.findOne({ uuid: studentUuid }).lean();
+  const member = await Member.findOne({ uuid: studentUuid })
+    .populate("productId")
+    .populate("currentUpgradeId")
+    .lean();
   return member || null;
 }
 
@@ -216,18 +222,72 @@ export const createCheckoutIntent = asyncHandler(async (req, res) => {
   }
 
   const member = await getMemberSnapshot(String(studentUuid).trim());
+  let normalizedProjection = Number(projectionAmount) || 0;
+  let normalizedPaidBefore = Number(alreadyPaidAmount) || 0;
+
+  // For savings/mixed checkout, target and remaining must be resolved from the
+  // member's current product and accepted transactions. Client-provided target
+  // and already-paid values are preview-only and cannot define a charge.
+  if (normalizedSavings > 0) {
+    if (!member?.productId) {
+      throw new ApiError(404, "Member belum memiliki produk simpanan");
+    }
+
+    const paidSavings = await Savings.find({
+      memberId: member._id,
+      type: "Setoran",
+      status: { $in: PAID_SAVINGS_STATUSES },
+    }).lean();
+    const product = member.productId?._id
+      ? member.productId
+      : await Product.findById(member.productId).lean();
+    const schedule = calculateSavingsSchedule({
+      termDuration: product?.termDuration,
+      baseDeposit: product?.depositAmount,
+      upgrade: member.currentUpgradeId,
+      savings: paidSavings,
+    });
+    const period = schedule.periods.find(
+      (item) => item.period === Number(installmentPeriod),
+    );
+
+    if (!period) {
+      throw new ApiError(400, "Periode simpanan tidak valid");
+    }
+    if (period.isFullyPaid || period.remaining <= 0) {
+      throw new ApiError(409, `Periode ${period.period} sudah lunas`);
+    }
+    if (normalizedSavings > period.remaining) {
+      throw new ApiError(
+        400,
+        `Nominal simpanan melebihi sisa periode. Maksimal Rp${period.remaining.toLocaleString("id-ID")}`,
+      );
+    }
+
+    normalizedProjection = period.effectiveTarget;
+    normalizedPaidBefore = period.paid;
+  }
+
+  const normalizedInvoiceNumber = String(invoiceNumber).trim();
+  const existingIntent = await CheckoutIntent.findOne({ invoiceNumber: normalizedInvoiceNumber });
+  if (existingIntent?.status === "Paid") {
+    throw new ApiError(409, "Checkout intent ini sudah diproses");
+  }
+  if (existingIntent?.status === "Processing") {
+    throw new ApiError(409, "Checkout intent ini sedang diproses");
+  }
 
   const intent = await CheckoutIntent.findOneAndUpdate(
-    { invoiceNumber: String(invoiceNumber).trim() },
+    { invoiceNumber: normalizedInvoiceNumber },
     {
-      invoiceNumber: String(invoiceNumber).trim(),
+      invoiceNumber: normalizedInvoiceNumber,
       studentUuid: String(studentUuid).trim(),
       studentName: String(studentName || "").trim(),
       memberId: member?._id || null,
       campaignId: campaign?._id || null,
       installmentPeriod: installmentPeriod ? Number(installmentPeriod) : null,
-      projectionAmount: Number(projectionAmount) || 0,
-      alreadyPaidAmount: Number(alreadyPaidAmount) || 0,
+      projectionAmount: normalizedProjection,
+      alreadyPaidAmount: normalizedPaidBefore,
       savingsAmount: normalizedSavings,
       donationAmount: normalizedDonation,
       chargedAmount: normalizedCharge,

@@ -303,7 +303,22 @@ const updateMember = asyncHandler(async (req, res) => {
   member.completeAddress = completeAddress || member.completeAddress;
   member.accountNumber = accountNumber !== undefined ? accountNumber : member.accountNumber;
   if (productId !== undefined) {
-    member.productId = productId || null;
+    const nextProductId = productId || null;
+    const productChanged = String(nextProductId || "") !== String(member.productId || "");
+    if (productChanged) {
+      const existingSavings = await Savings.exists({
+        memberId: member._id,
+        type: "Setoran",
+      });
+      if (existingSavings) {
+        return res.status(409).json({
+          success: false,
+          code: "PRODUCT_CHANGE_REQUIRES_UPGRADE",
+          message: "Anggota yang sudah memiliki pembayaran harus memakai alur upgrade produk.",
+        });
+      }
+    }
+    member.productId = nextProductId;
   }
   if (savingsStartDate !== undefined) {
     member.savingsStartDate = savingsStartDate ? new Date(savingsStartDate) : null;

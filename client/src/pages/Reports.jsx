@@ -10,6 +10,7 @@ import "jspdf-autotable";
 const ITEMS_PER_PAGE = 15;
 const SAVINGS_FILTERS = ["paid", "partial", "pending", "rejected", "unpaid"];
 const MEMBER_FILTERS = ["completed", "not_completed", "has_overdue", "has_partial", "all_paid"];
+const OVERPAY_THRESHOLD = 30_000;
 
 const STATUS_META = {
   paid: {
@@ -147,10 +148,9 @@ const getMemberSavingsCollection = (member, savingsByMember) =>
   savingsByMember.get(String(member?._id)) || savingsByMember.get(member?.uuid) || [];
 
 const getMemberProductSavings = (member, savingsByMember) => {
-  const currentProductId = normalizeId(member?.product?._id || member?.productId);
-  return getMemberSavingsCollection(member, savingsByMember).filter(
-    (saving) => !currentProductId || normalizeId(saving.productId) === currentProductId
-  );
+  // Riwayat produk lama tetap diperlukan setelah upgrade agar periode lama,
+  // Partial, dan carry-credit tidak hilang dari laporan.
+  return getMemberSavingsCollection(member, savingsByMember);
 };
 
 const getRequiredAmountForPeriod = (member, fallbackProduct, installmentPeriod) => {
@@ -173,6 +173,48 @@ const getRequiredAmountForPeriod = (member, fallbackProduct, installmentPeriod) 
   }
 
   return requiredAmount;
+};
+
+const getMemberPeriodSchedule = (member, memberSavings, fallbackProduct = null) => {
+  const product = member?.product || fallbackProduct;
+  const totalPeriods = Number(product?.termDuration) || 0;
+  let carriedOverpay = 0;
+  const periods = [];
+
+  for (let period = 1; period <= totalPeriods; period += 1) {
+    const baseTarget = getRequiredAmountForPeriod(member, product, period);
+    const creditApplied = Math.min(carriedOverpay, baseTarget);
+    const effectiveTarget = Math.max(0, baseTarget - creditApplied);
+    const periodSavings = memberSavings.filter(
+      (saving) =>
+        saving.type === "Setoran" &&
+        Number(saving.installmentPeriod) === period &&
+        (saving.status === "Approved" || saving.status === "Partial")
+    );
+    const paid = periodSavings.reduce((sum, saving) => sum + (Number(saving.amount) || 0), 0);
+    const remaining = Math.max(0, effectiveTarget - paid);
+    const isFullyPaid =
+      (effectiveTarget > 0 && paid >= effectiveTarget) ||
+      (effectiveTarget === 0 && creditApplied > 0);
+    const overpayment = Math.max(0, paid - effectiveTarget);
+
+    carriedOverpay -= creditApplied;
+    if (overpayment >= OVERPAY_THRESHOLD) carriedOverpay += overpayment;
+
+    periods.push({
+      period,
+      baseTarget,
+      effectiveTarget,
+      paid,
+      creditApplied,
+      remaining,
+      overpayment,
+      isFullyPaid,
+      status: isFullyPaid ? "paid" : paid > 0 ? "partial" : "unpaid",
+    });
+  }
+
+  return periods;
 };
 
 const getSavingActivityDate = (saving) =>
@@ -226,7 +268,8 @@ const getMemberPaymentStatus = (member, memberSavings, fallbackProduct = null) =
     };
   }
 
-  const totalPeriods = Number(product.termDuration) || 0;
+  const periodSchedule = getMemberPeriodSchedule(member, memberSavings, product);
+  const totalPeriods = periodSchedule.length;
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
@@ -237,14 +280,8 @@ const getMemberPaymentStatus = (member, memberSavings, fallbackProduct = null) =
   let partialPeriods = 0;
   let overduePeriods = 0;
 
-  for (let period = 1; period <= totalPeriods; period += 1) {
-    const periodSavings = memberSavings.filter(
-      (saving) =>
-        Number(saving.installmentPeriod) === period &&
-        (saving.status === "Approved" || saving.status === "Partial")
-    );
-    const paid = periodSavings.reduce((sum, saving) => sum + (Number(saving.amount) || 0), 0);
-    const required = getRequiredAmountForPeriod(member, product, period);
+  for (const periodData of periodSchedule) {
+    const { period, paid, effectiveTarget: required, isFullyPaid } = periodData;
     const dueDate = getMemberPeriodDate(member, period, memberSavings);
 
     const isPastMonth =
@@ -253,7 +290,7 @@ const getMemberPaymentStatus = (member, memberSavings, fallbackProduct = null) =
     const isCurrentMonth =
       dueDate.getFullYear() === currentYear && dueDate.getMonth() === currentMonth;
 
-    if (paid >= required && required > 0) {
+    if (isFullyPaid) {
       paidPeriods += 1;
     } else if (paid > 0) {
       partialPeriods += 1;
@@ -883,6 +920,7 @@ const Reports = () => {
       }
 
       const totalPeriods = Number(member.product.termDuration) || 0;
+      const periodSchedule = getMemberPeriodSchedule(member, memberSavings, member.product);
 
       for (let period = 1; period <= totalPeriods; period += 1) {
         const periodDate = getMemberPeriodDate(member, period, memberSavings);
@@ -910,15 +948,18 @@ const Reports = () => {
           attempts[0] ||
           null;
 
-        const projectionAmount = getRequiredAmountForPeriod(member, member.product, period);
-        const realizedAmount = [...approvedAttempts, ...partialAttempts].reduce(
-          (sum, attempt) => sum + (Number(attempt.amount) || 0),
-          0
-        );
+        const periodData = periodSchedule[period - 1] || {
+          effectiveTarget: 0,
+          paid: 0,
+          isFullyPaid: false,
+          creditApplied: 0,
+        };
+        const projectionAmount = periodData.effectiveTarget;
+        const realizedAmount = periodData.paid;
         const differenceAmount = projectionAmount - realizedAmount;
 
         let statusKey = "unpaid";
-        if (realizedAmount >= projectionAmount && projectionAmount > 0) {
+        if (periodData.isFullyPaid) {
           statusKey = "paid";
         } else if (realizedAmount > 0) {
           statusKey = "partial";
