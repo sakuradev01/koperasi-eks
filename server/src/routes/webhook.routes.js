@@ -6,6 +6,7 @@ import { Donation } from "../models/donation.model.js";
 import { DonationCampaign } from "../models/donationCampaign.model.js";
 import { CheckoutIntent } from "../models/checkoutIntent.model.js";
 import { buildStudentDonationCode } from "../utils/donation.js";
+import { getEffectiveMembershipStatus, getMembershipStatusMessage } from "../utils/membershipStatus.js";
 
 const router = express.Router();
 
@@ -59,6 +60,11 @@ async function createSavingsFromIntent({ member, intent, channelId }) {
 
   if (existingSaving) {
     return existingSaving;
+  }
+
+  const membershipStatus = getEffectiveMembershipStatus(member);
+  if (membershipStatus !== "active") {
+    throw new Error(getMembershipStatusMessage(membershipStatus));
   }
 
   const product = await resolveProductForMember(member);
@@ -178,6 +184,11 @@ async function createLegacySaving({ invoiceNumber, amount, channelId }) {
     return { saving: existingSaving, member };
   }
 
+  const membershipStatus = getEffectiveMembershipStatus(member);
+  if (membershipStatus !== "active") {
+    throw new Error(getMembershipStatusMessage(membershipStatus));
+  }
+
   const product = await resolveProductForMember(member);
   if (!product) {
     throw new Error("Produk simpanan member tidak ditemukan");
@@ -282,6 +293,14 @@ async function processSuccessfulPayment({ invoiceNumber, amount, channelId }) {
         { $set: { status: "Pending" }, $unset: { processingAt: 1 } },
       );
       throw new Error(`Member not found for UUID: ${intent.studentUuid}`);
+    }
+
+    if (intent.savingsAmount > 0 && getEffectiveMembershipStatus(member) !== "active") {
+      await CheckoutIntent.updateOne(
+        { _id: intent._id, status: "Processing" },
+        { $set: { status: "Pending" }, $unset: { processingAt: 1 } },
+      );
+      throw new Error(getMembershipStatusMessage(getEffectiveMembershipStatus(member)));
     }
 
     try {

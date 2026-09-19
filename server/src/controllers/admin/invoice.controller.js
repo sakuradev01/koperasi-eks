@@ -5,6 +5,10 @@ import mongoose from "mongoose";
 import fs from "fs";
 import { Invoice } from "../../models/invoice.model.js";
 import { Member } from "../../models/member.model.js";
+import {
+  getEffectiveMembershipStatus,
+  getMembershipStatusMessage,
+} from "../../utils/membershipStatus.js";
 import { Tos } from "../../models/tos.model.js";
 import { AccountingTransaction } from "../../models/accountingTransaction.model.js";
 import { TransactionSplit } from "../../models/transactionSplit.model.js";
@@ -1774,13 +1778,20 @@ export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
   })
     .sort({ issuedDate: -1, createdAt: -1 })
     .lean();
-  const invoices = await Promise.all(
-    rawInvoices.map((inv) => serializePublicInvoice(inv)),
-  );
+  const membershipStatus = getEffectiveMembershipStatus(member);
+  const invoices = membershipStatus === "active"
+    ? await Promise.all(rawInvoices.map((inv) => serializePublicInvoice(inv)))
+    : [];
 
   res.status(200).json(
     new ApiResponse(200, {
-      status: member.isVerified ? "verified" : "pending_verification",
+      status: !member.isVerified
+        ? "pending_verification"
+        : membershipStatus === "draft"
+          ? "membership_draft"
+          : membershipStatus === "inactive"
+            ? "membership_inactive"
+            : "verified",
       member: {
         id: member._id,
         uuid: member.uuid,
@@ -1788,6 +1799,8 @@ export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
         email: member.email || "",
         phone: member.phone || "",
         isVerified: Boolean(member.isVerified),
+        membershipStatus,
+        membershipMessage: getMembershipStatusMessage(membershipStatus),
         registeredAt: member.createdAt,
         product: member.productId
           ? {

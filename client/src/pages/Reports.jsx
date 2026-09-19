@@ -144,6 +144,11 @@ const getResolvedProduct = (member, productLookup) => {
   return productLookup.get(productId) || null;
 };
 
+const getMembershipStatus = (member) => {
+  const status = String(member?.membershipStatus || "").toLowerCase();
+  return ["draft", "active", "inactive"].includes(status) ? status : "active";
+};
+
 const getMemberSavingsCollection = (member, savingsByMember) =>
   savingsByMember.get(String(member?._id)) || savingsByMember.get(member?.uuid) || [];
 
@@ -747,7 +752,9 @@ const Reports = () => {
   }, [products]);
 
   const reportMembers = useMemo(
-    () => members.filter((member) => member?.isVerified === true),
+    () => members.filter(
+      (member) => member?.isVerified === true && getMembershipStatus(member) === "active",
+    ),
     [members],
   );
 
@@ -1013,7 +1020,7 @@ const Reports = () => {
 
     return rows.sort((first, second) => second.sortDate - first.sortDate);
   }, [
-    members,
+    reportMembers,
     productLookup,
     savingsByMember,
     dateFrom,
@@ -1118,7 +1125,7 @@ const Reports = () => {
     }
 
     return rows.sort((first, second) => first.name.localeCompare(second.name, "id-ID"));
-  }, [members, savingsByMember, productLookup, filterMember, filterProduct, normalizedSearchTerm]);
+  }, [reportMembers, savingsByMember, productLookup, filterMember, filterProduct, normalizedSearchTerm]);
 
   const memberStatusRows = useMemo(() => {
     if (filterStatus === "completed") {
@@ -1611,6 +1618,7 @@ const Reports = () => {
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Filter akan langsung memperbarui kartu ringkasan, tab cepat, tabel, dan file export.
+              Anggota berstatus Draft atau Nonaktif tidak masuk proyeksi maupun hitungan laporan.
             </p>
           </div>
         </div>

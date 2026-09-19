@@ -12,6 +12,20 @@ const getRegistrationStatus = (member) => {
   return member?.isVerified ? "approved" : "pending";
 };
 
+const MEMBERSHIP_STATUS_META = {
+  legacy: { label: "Lama — belum diatur", badgeClass: "bg-slate-100 text-slate-700" },
+  draft: { label: "Draft — tabungan belum dibuka", badgeClass: "bg-amber-100 text-amber-800" },
+  active: { label: "Aktif", badgeClass: "bg-emerald-100 text-emerald-800" },
+  inactive: { label: "Nonaktif — tabungan ditutup", badgeClass: "bg-slate-200 text-slate-700" },
+};
+
+const getMembershipStatus = (member) => {
+  const status = String(
+    member?.membershipStatusClassification || member?.membershipStatusRaw || "",
+  ).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(MEMBERSHIP_STATUS_META, status) ? status : "active";
+};
+
 
 const normalizeDateInputValue = (value) => {
   if (!value) return "";
@@ -58,12 +72,14 @@ const Members = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
   const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, rejected, address-pending, identity-pending
+  const [filterMembershipStatus, setFilterMembershipStatus] = useState("all");
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [exporting, setExporting] = useState(false);
   const [verifyMember, setVerifyMember] = useState(null);
   const [verifyConfirmed, setVerifyConfirmed] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyLoadingDetail, setVerifyLoadingDetail] = useState(false);
+  const [verifyMembershipStatus, setVerifyMembershipStatus] = useState("draft");
   const [registrationRejectTarget, setRegistrationRejectTarget] = useState(null);
   const [registrationRejectReason, setRegistrationRejectReason] = useState("");
   const [registrationRejectLoading, setRegistrationRejectLoading] = useState(false);
@@ -94,6 +110,7 @@ const Members = () => {
     password: "",
     productId: "",
     savingsStartDate: "", // Tanggal mulai tabungan
+    membershipStatus: "active",
   });
   useEffect(() => {
     // Read URL query param for filter
@@ -270,6 +287,7 @@ const Members = () => {
             password: "",
             productId: "",
             savingsStartDate: "",
+            membershipStatus: "active",
           });
         }
       }
@@ -309,6 +327,7 @@ const Members = () => {
       password: "",
       productId: member.productId || "",
       savingsStartDate: member.savingsStartDate ? member.savingsStartDate.split("T")[0] : "",
+      membershipStatus: member.membershipStatusRaw || "",
     });
     setShowModal(true);
     // List API strips base64 docs for perf — reload full member for edit form images
@@ -328,6 +347,8 @@ const Members = () => {
           livenessLeftImage: full.livenessLeftImage || "",
           livenessRightImage: full.livenessRightImage || "",
           faceMatchScore: full.faceMatchScore ?? null,
+          membershipStatus: full.membershipStatusRaw || "",
+          membershipStatusClassification: full.membershipStatusClassification || "legacy",
         }));
       }
     } catch (err) {
@@ -365,12 +386,23 @@ const Members = () => {
   const openVerifyPreview = async (member) => {
     setVerifyMember(member);
     setVerifyConfirmed(false);
+    setVerifyMembershipStatus(
+      ["draft", "active", "inactive"].includes(member.membershipStatusRaw)
+        ? member.membershipStatusRaw
+        : "draft",
+    );
     setVerifyLoadingDetail(true);
     try {
       // List intentionally omits ktp/selfie/liveness/signature/ripl — detail has full docs
       const res = await api.get(`/api/admin/members/${member.uuid}`);
       if (res.data?.success && res.data.data) {
-        setVerifyMember({ ...member, ...res.data.data, totalSavings: member.totalSavings });
+        const detail = { ...member, ...res.data.data, totalSavings: member.totalSavings };
+        setVerifyMember(detail);
+        setVerifyMembershipStatus(
+          ["draft", "active", "inactive"].includes(detail.membershipStatusRaw)
+            ? detail.membershipStatusRaw
+            : "draft",
+        );
       }
     } catch (err) {
       console.error("Load member detail for verify:", err);
@@ -385,6 +417,7 @@ const Members = () => {
     setVerifyConfirmed(false);
     setVerifyLoading(false);
     setVerifyLoadingDetail(false);
+    setVerifyMembershipStatus("draft");
   };
 
   const handleDoVerify = async () => {
@@ -395,7 +428,9 @@ const Members = () => {
     }
     setVerifyLoading(true);
     try {
-      const response = await api.patch(`/api/admin/members/${verifyMember.uuid}/verify`);
+      const response = await api.patch(`/api/admin/members/${verifyMember.uuid}/verify`, {
+        membershipStatus: verifyMembershipStatus,
+      });
       if (response.data.success) {
         toast.success("✅ Anggota berhasil diverifikasi");
         fetchMembers();
@@ -528,6 +563,7 @@ const Members = () => {
       password: "",
       productId: "",
       savingsStartDate: "",
+      membershipStatus: "active",
     });
     setShowModal(true);
   };
@@ -544,6 +580,7 @@ const Members = () => {
       else if (filterVerification === "rejected") params.set("registrationStatus", "rejected");
       else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
       else if (filterVerification === "identity-pending") params.set("identityVerifyStatus", "pending");
+      if (filterMembershipStatus !== "all") params.set("membershipStatus", filterMembershipStatus);
       if (filterProduct) params.set("productId", filterProduct);
       if (searchTerm) params.set("search", searchTerm);
 
@@ -603,6 +640,10 @@ const Members = () => {
       result = result.filter(member => member.identityVerifyStatus === "pending");
     }
 
+    if (filterMembershipStatus !== "all") {
+      result = result.filter(member => getMembershipStatus(member) === filterMembershipStatus);
+    }
+
     // Filter by product
     if (filterProduct) {
       result = result.filter(member => {
@@ -622,7 +663,7 @@ const Members = () => {
     }
     
     return result;
-  }, [members, searchTerm, filterStatus, filterVerification, filterProduct]);
+  }, [members, searchTerm, filterStatus, filterVerification, filterMembershipStatus, filterProduct]);
 
   // Pagination logic with useMemo for performance
   const paginationData = useMemo(() => {
@@ -796,6 +837,25 @@ const Members = () => {
             </select>
           </div>
 
+          {/* Filter Status Keanggotaan */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 whitespace-nowrap">Keanggotaan:</label>
+            <select
+              value={filterMembershipStatus}
+              onChange={(e) => {
+                setFilterMembershipStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
+            >
+              <option value="all">📋 Semua</option>
+              <option value="legacy">⚪ Lama / Belum Diatur</option>
+              <option value="draft">🟡 Draft</option>
+              <option value="active">🟢 Aktif</option>
+              <option value="inactive">⚫ Nonaktif</option>
+            </select>
+          </div>
+
           {/* Filter Produk */}
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 whitespace-nowrap">Produk:</label>
@@ -818,7 +878,7 @@ const Members = () => {
           
           {/* Search Results Info */}
           <div className="text-sm text-gray-600">
-            {searchTerm || filterStatus !== "all" || filterVerification !== "all" || filterProduct ? (
+            {searchTerm || filterStatus !== "all" || filterVerification !== "all" || filterMembershipStatus !== "all" || filterProduct ? (
               <span className="flex items-center flex-wrap gap-1">
                 <span className="font-medium text-pink-600">{filteredMembers.length}</span>
                 <span>dari {members.length} anggota</span>
@@ -843,6 +903,11 @@ const Members = () => {
                         : filterVerification === "identity-pending"
                           ? "🤳 Wajah Pending"
                         : "🕐 Belum Verifikasi"}
+                  </span>
+                )}
+                {filterMembershipStatus !== "all" && (
+                  <span className={`px-2 py-1 rounded-full text-xs ${MEMBERSHIP_STATUS_META[filterMembershipStatus].badgeClass}`}>
+                    {MEMBERSHIP_STATUS_META[filterMembershipStatus].label}
                   </span>
                 )}
                 {filterProduct ? (
@@ -894,6 +959,9 @@ const Members = () => {
                 Status
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
+                Keanggotaan
+              </th>
+              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                 Verifikasi
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
@@ -904,7 +972,7 @@ const Members = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {currentMembers.length === 0 ? (
               <tr>
-                <td colSpan="12" className="px-6 py-12 text-center">
+                <td colSpan="13" className="px-6 py-12 text-center">
                   <div className="flex flex-col items-center">
                     <div className="text-6xl mb-4">🔍</div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -986,6 +1054,11 @@ const Members = () => {
                       ⏳ Belum
                     </span>
                   )}
+                </td>
+                <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${MEMBERSHIP_STATUS_META[getMembershipStatus(member)].badgeClass}`}>
+                    {MEMBERSHIP_STATUS_META[getMembershipStatus(member)].label}
+                  </span>
                 </td>
                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
                   <div className="flex flex-col items-start gap-1">
@@ -1213,6 +1286,24 @@ const Members = () => {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="mb-4 rounded-lg border border-amber-100 bg-amber-50 p-3">
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Status Keanggotaan / Akses Tabungan
+                  </label>
+                  <select
+                    value={formData.membershipStatus}
+                    onChange={(e) => setFormData({ ...formData, membershipStatus: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    <option value="">Belum diatur (data lama)</option>
+                    <option value="draft">Draft — tabungan belum dibuka</option>
+                    <option value="active">Aktif — tabungan berjalan</option>
+                    <option value="inactive">Nonaktif — tabungan ditutup</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Draft tidak masuk proyeksi/laporan dan belum dapat membayar. Nonaktif menutup pembayaran baru.
+                  </p>
                 </div>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1652,6 +1743,25 @@ const Members = () => {
 
             {/* Footer with checkbox + actions */}
             <div className="border-t border-slate-200 px-6 py-4 bg-slate-50 space-y-3">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <label htmlFor="verify-membership-status" className="block text-sm font-semibold text-amber-950">
+                  Status keanggotaan setelah verifikasi
+                </label>
+                <select
+                  id="verify-membership-status"
+                  value={verifyMembershipStatus}
+                  onChange={(event) => setVerifyMembershipStatus(event.target.value)}
+                  disabled={verifyLoading || verifyLoadingDetail}
+                  className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                >
+                  <option value="draft">Draft — verifikasi selesai, tabungan belum dibuka</option>
+                  <option value="active">Aktif — tabungan dapat digunakan</option>
+                  <option value="inactive">Nonaktif — tabungan ditutup</option>
+                </select>
+                <p className="mt-1 text-xs text-amber-800">
+                  Default Draft menjaga anggota tidak masuk proyeksi sebelum Finance membuka tabungannya.
+                </p>
+              </div>
               <label className="flex items-start gap-3 cursor-pointer group">
                 <input
                   type="checkbox"

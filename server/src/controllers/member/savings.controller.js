@@ -10,6 +10,10 @@ import {
   PAID_SAVINGS_STATUSES,
 } from "../../services/savingsSchedule.service.js";
 import fs from "fs/promises";
+import {
+  getEffectiveMembershipStatus,
+  getMembershipStatusMessage,
+} from "../../utils/membershipStatus.js";
 
 const isBlankAddress = (value) => !String(value || "").trim();
 
@@ -51,6 +55,7 @@ export const getMemberSavings = asyncHandler(async (req, res) => {
         member: {
           uuid: member.uuid,
           name: member.name,
+          membershipStatus: getEffectiveMembershipStatus(member),
         },
         savings: savings,
         total: savings.length,
@@ -101,6 +106,17 @@ export const createMemberSaving = asyncHandler(async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Member tidak ditemukan",
+      });
+    }
+
+    const membershipStatus = getEffectiveMembershipStatus(member);
+    if (membershipStatus !== "active") {
+      await discardUploadedProof(req.file);
+      return res.status(409).json({
+        success: false,
+        code: membershipStatus === "draft" ? "MEMBERSHIP_DRAFT" : "MEMBERSHIP_INACTIVE",
+        membershipStatus,
+        message: getMembershipStatusMessage(membershipStatus),
       });
     }
 

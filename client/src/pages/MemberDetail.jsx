@@ -1981,6 +1981,24 @@ const MemberDetail = () => {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Produk & Saldo</h3>
             <div className="space-y-3">
               <div>
+                <label className="text-sm font-medium text-gray-500">Status Keanggotaan</label>
+                <p className="mt-1 text-sm font-semibold">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs ${
+                    member.membershipStatus === "draft"
+                      ? "bg-amber-100 text-amber-800"
+                      : member.membershipStatus === "inactive"
+                        ? "bg-slate-200 text-slate-700"
+                        : "bg-emerald-100 text-emerald-800"
+                  }`}>
+                    {member.membershipStatus === "draft"
+                      ? "Draft — tabungan belum dibuka"
+                      : member.membershipStatus === "inactive"
+                        ? "Nonaktif — tabungan ditutup"
+                        : "Aktif"}
+                  </span>
+                </p>
+              </div>
+              <div>
                 <label className="text-sm font-medium text-gray-500">Produk Simpanan</label>
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-gray-900">

@@ -9,6 +9,7 @@ import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { buildStudentDonationCode, maskStudentName } from "../../utils/donation.js";
 import { calculateSavingsSchedule, PAID_SAVINGS_STATUSES } from "../../services/savingsSchedule.service.js";
+import { getEffectiveMembershipStatus, getMembershipStatusMessage } from "../../utils/membershipStatus.js";
 
 function normalizeDate(value) {
   if (!value) return null;
@@ -150,6 +151,12 @@ export const createDonation = asyncHandler(async (req, res) => {
   }
 
   const member = await getMemberSnapshot(normalizedStudentUuid);
+  if (source === "savings_payment") {
+    const membershipStatus = getEffectiveMembershipStatus(member || {});
+    if (membershipStatus !== "active") {
+      throw new ApiError(409, getMembershipStatusMessage(membershipStatus));
+    }
+  }
 
   const donation = await Donation.create({
     studentUuid: normalizedStudentUuid,
@@ -229,6 +236,14 @@ export const createCheckoutIntent = asyncHandler(async (req, res) => {
   // member's current product and accepted transactions. Client-provided target
   // and already-paid values are preview-only and cannot define a charge.
   if (normalizedSavings > 0) {
+    const membershipStatus = getEffectiveMembershipStatus(member || {});
+    if (membershipStatus !== "active") {
+      const error = new ApiError(409, getMembershipStatusMessage(membershipStatus));
+      error.code = membershipStatus === "draft" ? "MEMBERSHIP_DRAFT" : "MEMBERSHIP_INACTIVE";
+      error.membershipStatus = membershipStatus;
+      throw error;
+    }
+
     if (!member?.productId) {
       throw new ApiError(404, "Member belum memiliki produk simpanan");
     }

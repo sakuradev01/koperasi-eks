@@ -2,6 +2,7 @@ import { Member } from "../../models/member.model.js";
 import jwt from "jsonwebtoken";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { saveBase64ImageToFile } from "../../utils/uploadsDir.js";
+import { getEffectiveMembershipStatus } from "../../utils/membershipStatus.js";
 
 
 // Generate JWT Token for Member
@@ -119,6 +120,7 @@ export const loginMember = asyncHandler(async (req, res) => {
           city: member.city,
           ...getAddressState(member),
           ...getIdentityState(member),
+          membershipStatus: getEffectiveMembershipStatus(member),
           productId: member.productId, // Include productId in response
           hasUpgraded: member.hasUpgraded || false,
           currentUpgradeId: member.currentUpgradeId || null,
@@ -171,6 +173,7 @@ export const getCurrentMember = asyncHandler(async (req, res) => {
           city: member.city,
           ...getAddressState(member),
           ...getIdentityState(member),
+          membershipStatus: getEffectiveMembershipStatus(member),
           productId: member.productId, // Include productId
           hasUpgraded: member.hasUpgraded || false,
           currentUpgradeId: member.currentUpgradeId || null,

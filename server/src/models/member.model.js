@@ -116,6 +116,14 @@ const memberSchema = new Schema(
       default: undefined,
       index: true,
     },
+    // Separate membership access from the registration/verification workflow.
+    // Legacy members intentionally remain unset until Finance edits them.
+    membershipStatus: {
+      type: String,
+      enum: ["draft", "active", "inactive"],
+      default: undefined,
+      index: true,
+    },
     registrationRejectionReason: {
       type: String,
       default: null,
@@ -268,6 +276,7 @@ memberSchema.index({ isCompleted: 1 });
 memberSchema.index({ productId: 1 });
 memberSchema.index({ createdAt: -1 });
 memberSchema.index({ registrationStatus: 1, createdAt: -1 });
+memberSchema.index({ membershipStatus: 1, createdAt: -1 });
 // hasUpgraded & addressUpdateStatus already indexed above
 
 // Generate UUID sebelum disimpan

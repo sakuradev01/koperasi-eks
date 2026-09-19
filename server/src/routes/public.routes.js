@@ -24,6 +24,10 @@ import {
   validateRegistrationPayload,
 } from "../utils/memberRegistration.js";
 import { calculateSavingsSchedule, PAID_SAVINGS_STATUSES } from "../services/savingsSchedule.service.js";
+import {
+  getEffectiveMembershipStatus,
+  getMembershipStatusMessage,
+} from "../utils/membershipStatus.js";
 
 const { donasi: donasiDir } = ensureUploadsSubdirs();
 
@@ -439,12 +443,17 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
       });
     }
 
+    if (getEffectiveMembershipStatus(member) !== "active") {
+      return res.status(200).json([]);
+    }
+
     if (!member.productId) {
       return res.status(404).json({
         success: false,
         message: "Member belum memiliki produk simpanan yang dipilih"
       });
     }
+
 
     // Get product details (tenor/term duration)
     const product = member.productId;
@@ -622,6 +631,7 @@ const registerKoperasi = asyncHandler(async (req, res) => {
       user: user._id,
       isVerified: false,
       registrationStatus: "pending",
+      membershipStatus: "draft",
       registrationAttempt: 1,
       registrationSource: "student_dashboard",
       // New registrations with full face docs skip legacy identity gate after admin verifies membership
@@ -639,6 +649,8 @@ const registerKoperasi = asyncHandler(async (req, res) => {
         uuid: member.uuid,
         name: member.name,
         isVerified: member.isVerified,
+        registrationStatus: member.registrationStatus,
+        membershipStatus: member.membershipStatus,
         ...getPublicAddressState(member),
       },
     });
@@ -722,6 +734,7 @@ const resubmitKoperasi = asyncHandler(async (req, res) => {
       riplVersion: payload.riplVersion,
       riplAgreedAt: new Date(payload.riplAgreedAt),
       registrationStatus: "pending",
+      membershipStatus: "draft",
       registrationAttempt: Math.max(1, Number(member.registrationAttempt) || 1) + 1,
       registrationRejectionReason: null,
       registrationRejectedAt: null,
@@ -741,6 +754,7 @@ const resubmitKoperasi = asyncHandler(async (req, res) => {
         name: member.name,
         isVerified: member.isVerified,
         registrationStatus: "pending",
+        membershipStatus: "draft",
         registrationAttempt: member.registrationAttempt,
         ...getPublicAddressState(member),
       },
@@ -797,6 +811,7 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
           name: member.name,
           registeredAt: member.createdAt,
           registrationStatus,
+          membershipStatus: getEffectiveMembershipStatus(member),
           registrationAttempt: member.registrationAttempt || 1,
           registrationRejectionReason: member.registrationRejectionReason || "",
           registrationRejectedAt: member.registrationRejectedAt || null,
@@ -819,8 +834,29 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
           name: member.name,
           registeredAt: member.createdAt,
           registrationStatus,
+          membershipStatus: getEffectiveMembershipStatus(member),
           registrationAttempt: member.registrationAttempt || 1,
           ...getPublicAddressState(member),
+          product: member.productId ? {
+            title: member.productId.title,
+            depositAmount: member.productId.depositAmount,
+          } : null,
+        },
+      });
+    }
+
+    const membershipStatus = getEffectiveMembershipStatus(member);
+    if (membershipStatus !== "active") {
+      return res.status(200).json({
+        success: true,
+        status: membershipStatus === "draft" ? "membership_draft" : "membership_inactive",
+        message: getMembershipStatusMessage(membershipStatus),
+        data: {
+          uuid: member.uuid,
+          name: member.name,
+          registeredAt: member.createdAt,
+          registrationStatus,
+          membershipStatus,
           product: member.productId ? {
             title: member.productId.title,
             depositAmount: member.productId.depositAmount,
@@ -838,6 +874,7 @@ const checkMemberStatus = asyncHandler(async (req, res) => {
         name: member.name,
         isVerified: member.isVerified,
         registrationStatus,
+        membershipStatus,
       },
     });
   } catch (error) {
