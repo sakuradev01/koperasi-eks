@@ -1829,6 +1829,59 @@ export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
   );
 });
 
+export const getAuthenticatedMemberInvoices = asyncHandler(async (req, res) => {
+  const member = await Member.findById(req.member.memberId)
+    .populate("productId", "title depositAmount returnProfit termDuration")
+    .lean();
+
+  if (!member) {
+    throw new ApiError(404, "Member tidak ditemukan");
+  }
+
+  const rawInvoices = await Invoice.find({ memberId: member._id })
+    .sort({ issuedDate: -1, createdAt: -1 })
+    .lean();
+  const invoices = await Promise.all(rawInvoices.map((invoice) => serializePublicInvoice(invoice)));
+  const membershipStatus = getEffectiveMembershipStatus(member);
+
+  return res.status(200).json(
+    new ApiResponse(200, {
+      status: membershipStatus === "draft"
+        ? "membership_draft"
+        : membershipStatus === "inactive"
+          ? "membership_inactive"
+          : "verified",
+      member: {
+        id: member._id,
+        uuid: member.uuid,
+        name: member.name,
+        email: member.email || "",
+        phone: member.phone || "",
+        isVerified: Boolean(member.isVerified),
+        membershipStatus,
+        registeredAt: member.createdAt,
+        product: member.productId
+          ? {
+              title: member.productId.title,
+              depositAmount: member.productId.depositAmount,
+              returnProfit: member.productId.returnProfit,
+              termDuration: member.productId.termDuration,
+            }
+          : null,
+      },
+      invoices,
+      summary: {
+        totalInvoices: invoices.length,
+        totalPaid: invoices.filter((invoice) => invoice.status === "paid").length,
+        totalOutstanding: clampMoney(
+          invoices.reduce((sum, invoice) => sum + Math.max(invoice.amountDue || 0, 0), 0),
+        ),
+        totalValue: clampMoney(invoices.reduce((sum, invoice) => sum + (invoice.total || 0), 0)),
+      },
+    }),
+  );
+});
+
 export const createInvoice = asyncHandler(async (req, res) => {
   const payload = await buildInvoicePayload(req.body);
 

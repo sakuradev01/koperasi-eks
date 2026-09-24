@@ -14,6 +14,7 @@ import {
   getMemberSavingsSummary 
 } from "../controllers/member/savings.controller.js";
 import { verifyMemberToken } from "../middlewares/memberAuth.middleware.js";
+import { getAuthenticatedMemberInvoices } from "../controllers/admin/invoice.controller.js";
 import multer from "multer";
 import loanRoutes from "./member/loan.routes.js";
 import danaDaruratRoutes from "./member/danaDarurat.routes.js";
@@ -74,6 +75,7 @@ router.post("/auth/logout", verifyMemberToken, logoutMember);
 router.get("/auth/me", verifyMemberToken, getCurrentMember);
 router.patch("/profile/address", verifyMemberToken, updateMemberAddress);
 router.patch("/profile/identity", verifyMemberToken, updateMemberIdentity);
+router.get("/invoices", verifyMemberToken, getAuthenticatedMemberInvoices);
 // Savings routes
 router.get("/savings", verifyMemberToken, getMemberSavings);
 router.post("/savings", verifyMemberToken, upload.single("proofFile"), createMemberSaving);
