@@ -8,6 +8,7 @@ import { CoaSubmenu } from "../../models/coaSubmenu.model.js";
 import { BankReconciliationItem } from "../../models/bankReconciliationItem.model.js";
 import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
+import { updateAccountBalance } from "../../services/accountBalance.service.js";
 import {
   buildTransactionListFilter,
   buildTransactionSort,
@@ -185,26 +186,6 @@ function removeReceiptFile(storedValue) {
       // ignore cleanup errors so transaction flow is not blocked
     }
   }
-}
-
-/**
- * Helper: update account balance
- */
-async function updateAccountBalance(accountId, amount, type, reverse = false) {
-  const account = await CoaAccount.findById(accountId);
-  if (!account) return false;
-
-  let newBalance = account.balance || 0;
-  if (reverse) {
-    newBalance += type === "Deposit" ? -amount : amount;
-  } else {
-    newBalance += type === "Deposit" ? amount : -amount;
-  }
-
-  account.balance = newBalance;
-  account.lastTransaction = new Date();
-  await account.save();
-  return true;
 }
 
 /**

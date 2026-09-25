@@ -18,6 +18,7 @@ import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
+import { updateAccountBalance } from "../../services/accountBalance.service.js";
 
 const AVAILABLE_CURRENCIES = ["IDR", "JPY", "USD", "AUD", "EUR", "GBP"];
 const AVAILABLE_PAYMENT_METHODS = [
@@ -145,27 +146,6 @@ function removeTransactionReceiptFile(storedValue) {
       // File cleanup should not block invoice/payment flow.
     }
   }
-}
-
-async function updateAccountBalance(
-  accountId,
-  amount,
-  transactionType,
-  reverse = false,
-) {
-  if (!accountId) return false;
-  const account = await CoaAccount.findById(accountId);
-  if (!account) return false;
-
-  const safeAmount = clampMoney(amount);
-  if (reverse) {
-    account.balance += transactionType === "Deposit" ? -safeAmount : safeAmount;
-  } else {
-    account.balance += transactionType === "Deposit" ? safeAmount : -safeAmount;
-  }
-  account.lastTransaction = new Date();
-  await account.save();
-  return true;
 }
 
 function startOfDay(value) {

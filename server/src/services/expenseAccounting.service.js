@@ -2,12 +2,12 @@ import fs from "fs";
 import path from "path";
 import { AccountingTransaction } from "../models/accountingTransaction.model.js";
 import { TransactionSplit } from "../models/transactionSplit.model.js";
-import { CoaAccount } from "../models/coaAccount.model.js";
 import { ExpenseLine } from "../models/expenseLine.model.js";
 import { ExpenseAttachment } from "../models/expenseAttachment.model.js";
 import { BankReconciliationItem } from "../models/bankReconciliationItem.model.js";
 import { BankReconciliation } from "../models/bankReconciliation.model.js";
 import { ensureUploadsSubdirs, resolveUploadedFilePath } from "../utils/uploadsDir.js";
+import { updateAccountBalance } from "./accountBalance.service.js";
 
 function toIdString(value) {
   if (!value) return "";
@@ -20,23 +20,6 @@ function normalizeMoney(value) {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed)) return 0;
   return Math.abs(parsed);
-}
-
-async function updateAccountBalance(accountId, amount, transactionType, reverse = false) {
-  const account = await CoaAccount.findById(accountId);
-  if (!account) return false;
-
-  let nextBalance = Number(account.balance || 0);
-  if (reverse) {
-    nextBalance += transactionType === "Deposit" ? -amount : amount;
-  } else {
-    nextBalance += transactionType === "Deposit" ? amount : -amount;
-  }
-
-  account.balance = nextBalance;
-  account.lastTransaction = new Date();
-  await account.save();
-  return true;
 }
 
 function removeTransactionReceiptFile(storedValue) {

@@ -3,6 +3,7 @@ import { TransactionSplit } from "../models/transactionSplit.model.js";
 import { CoaAccount } from "../models/coaAccount.model.js";
 import { BankReconciliationItem } from "../models/bankReconciliationItem.model.js";
 import { ApiError } from "../utils/ApiError.js";
+import { updateAccountBalance } from "./accountBalance.service.js";
 
 function toIdString(value) {
   if (!value) return "";
@@ -62,22 +63,6 @@ function normalizeSplitRows(raw) {
       return { amount, categoryId, categoryType, description };
     })
     .filter((row) => row.amount > 0 && row.categoryId);
-}
-
-export async function updateAccountBalance(accountId, amount, transactionType, reverse = false) {
-  if (!accountId) return false;
-  const account = await CoaAccount.findById(accountId);
-  if (!account) return false;
-
-  const safeAmount = normalizeMoney(amount);
-  if (reverse) {
-    account.balance += transactionType === "Deposit" ? -safeAmount : safeAmount;
-  } else {
-    account.balance += transactionType === "Deposit" ? safeAmount : -safeAmount;
-  }
-  account.lastTransaction = new Date();
-  await account.save();
-  return true;
 }
 
 /**
