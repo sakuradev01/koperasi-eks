@@ -18,6 +18,7 @@ import {
   updateClosingBalance,
 } from "../../api/accountingApi";
 import { API_URL } from "../../api/config";
+import { getVisiblePageNumbers } from "../../utils/transactionPagination";
 
 // ==================== UTILITY FUNCTIONS ====================
 function formatNumber(num) {
@@ -53,15 +54,6 @@ function getAmountFloat(displayVal) {
   const parts = displayVal.split(",");
   const intPart = (parts[0] || "").replace(/\./g, "");
   return parseFloat(intPart + "." + (parts[1] || "0")) || 0;
-}
-
-function parseDateFilter(value, endOfDay = false) {
-  if (!value) return null;
-  const text = String(value).trim();
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(text)
-    ? new Date(`${text}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`)
-    : new Date(text);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function formatCurrency(amount, currency = "Rp") {
@@ -256,12 +248,14 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionPageSize, setTransactionPageSize] = useState("10");
   const [transactionPagination, setTransactionPagination] = useState({
     currentPage: 1,
     totalPages: 1,
     totalItems: 0,
-    itemsPerPage: 100,
+    itemsPerPage: 10,
   });
+  const transactionRequestId = useRef(0);
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
   const isLegacyTransactionsPath = location.pathname === "/transactions" || location.pathname === "/transactions/upload";
@@ -302,6 +296,7 @@ export default function Transactions() {
 
   // ===== Search / Filter / Sort State =====
   const [searchQuery, setSearchQuery] = useState("");
+  const [serverSearchQuery, setServerSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
   const [filters, setFilters] = useState({
     type: "", description: "", account: "", category: "", reviewed: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "",
@@ -408,78 +403,135 @@ export default function Transactions() {
   }, [location.search, selectedAccountId]);
 
   // ==================== DATA FETCHING ====================
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const refreshReferenceData = useCallback(async () => {
     try {
-      const promises = [
-        getTransactions(selectedAccountId || null, {
-          ...reportQuery,
-          page: transactionPage,
-          limit: 100,
-        }),
+      const [assetsRes, catRes, taxRes, membersRes] = await Promise.all([
         getAssetsAccounts(),
         getAllCategories(),
         getSalesTaxes("active"),
         getMembers(),
-      ];
-      if (selectedAccountId) {
-        promises.push(getReconciliation(selectedAccountId));
-      }
-      const results = await Promise.all(promises);
-      const [txnRes, assetsRes, catRes, taxRes, membersRes, reconRes] = results;
-      if (txnRes.success) {
-        setTransactions(txnRes.data || []);
-        setTransactionPagination(txnRes.pagination || {
-          currentPage: transactionPage,
-          totalPages: 1,
-          totalItems: (txnRes.data || []).length,
-          itemsPerPage: 100,
-        });
-      }
+      ]);
       if (assetsRes.success) setAssetsAccounts(assetsRes.data || {});
       if (catRes.success) setCategories(catRes.data || []);
       if (taxRes.success) setSalesTaxes(taxRes.data || []);
       if (membersRes.success) {
-        const mappedMembers = (membersRes.data || []).map((member) => ({
+        setCustomers((membersRes.data || []).map((member) => ({
           id: member._id,
           name: member.name || "-",
           email: member.email || member.user?.email || "",
           uuid: member.uuid || "",
-        }));
-        setCustomers(mappedMembers);
+        })));
       }
-      if (selectedAccountId && reconRes) {
-        if (reconRes.success && reconRes.data) {
-          const active = reconRes.data.find?.((r) => r.status === "in_progress") || reconRes.data;
-          if (active && active.status === "in_progress") {
-            setActiveRecon(active);
-            setReconStatus(`Unfinished for period ending ${new Date(active.statementEndDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}`);
-            setClosingBalanceDisplay(formatNumber(active.closingBalance || 0));
-          } else {
-            setActiveRecon(null);
-            const last = Array.isArray(reconRes.data) ? reconRes.data.find?.((r) => r.status === "completed") : null;
-            if (last) {
-              setReconStatus(`Reconciled up to ${new Date(last.statementEndDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}`);
-            } else {
-              setReconStatus("Not reconciled");
-            }
-          }
-        } else {
-          setActiveRecon(null);
-          setReconStatus("Not reconciled");
+    } catch {
+      toast.error("Failed to load accounting options");
+    }
+  }, []);
+
+  useEffect(() => { refreshReferenceData(); }, [refreshReferenceData]);
+
+  const refreshReconciliationData = useCallback(async () => {
+    if (!selectedAccountId) {
+      setActiveRecon(null);
+      setReconStatus("Not reconciled");
+      return;
+    }
+
+    try {
+      const reconRes = await getReconciliation(selectedAccountId);
+      if (reconRes.success && reconRes.data) {
+        const active = reconRes.data.find?.((row) => row.status === "in_progress") || reconRes.data;
+        if (active && active.status === "in_progress") {
+          setActiveRecon(active);
+          setReconStatus(`Unfinished for period ending ${new Date(active.statementEndDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}`);
+          setClosingBalanceDisplay(formatNumber(active.closingBalance || 0));
+          return;
         }
+
+        setActiveRecon(null);
+        const last = Array.isArray(reconRes.data)
+          ? reconRes.data.find((row) => row.status === "completed")
+          : null;
+        setReconStatus(last
+          ? `Reconciled up to ${new Date(last.statementEndDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}`
+          : "Not reconciled");
       } else {
         setActiveRecon(null);
         setReconStatus("Not reconciled");
       }
     } catch {
-      toast.error("Failed to load transactions");
-    } finally {
-      setLoading(false);
+      setActiveRecon(null);
+      setReconStatus("Not reconciled");
     }
-  }, [reportQuery, selectedAccountId, transactionPage]);
+  }, [selectedAccountId]);
+
+  useEffect(() => { refreshReconciliationData(); }, [refreshReconciliationData]);
+
+  const fetchData = useCallback(async () => {
+    const requestId = ++transactionRequestId.current;
+    setLoading(true);
+    try {
+      const txnRes = await getTransactions(selectedAccountId || null, {
+        ...reportQuery,
+        page: transactionPage,
+        limit: transactionPageSize,
+        sortBy,
+        transactionType: appliedFilters.type,
+        description: appliedFilters.description,
+        filter_account_name: appliedFilters.account,
+        filter_category_name: appliedFilters.category === reportQuery.filter_category
+          ? ""
+          : appliedFilters.category,
+        reviewed: appliedFilters.reviewed,
+        filter_date_from: appliedFilters.dateFrom || reportQuery.filter_date_from || "",
+        filter_date_to: appliedFilters.dateTo || reportQuery.filter_date_to || "",
+        amountMin: appliedFilters.amountMin,
+        amountMax: appliedFilters.amountMax,
+        search: serverSearchQuery,
+      });
+      if (requestId !== transactionRequestId.current) return;
+      if (txnRes.success) {
+        setTransactions(txnRes.data || []);
+        const pagination = txnRes.pagination || {
+          currentPage: transactionPage,
+          totalPages: 1,
+          totalItems: (txnRes.data || []).length,
+          itemsPerPage: transactionPageSize === "all"
+            ? (txnRes.data || []).length
+            : Number(transactionPageSize) || 10,
+        };
+        setTransactionPagination(pagination);
+        if (transactionPageSize !== "all" && transactionPage > pagination.totalPages) {
+          setTransactionPage(Math.max(pagination.totalPages, 1));
+        }
+      } else {
+        setTransactions([]);
+        setTransactionPagination({ currentPage: 1, totalPages: 1, totalItems: 0, itemsPerPage: 10 });
+        toast.error(txnRes.message || "Failed to load transactions");
+      }
+    } catch {
+      if (requestId === transactionRequestId.current) {
+        toast.error("Failed to load transactions");
+      }
+    } finally {
+      if (requestId === transactionRequestId.current) setLoading(false);
+    }
+  }, [appliedFilters, reportQuery, selectedAccountId, serverSearchQuery, sortBy, transactionPage, transactionPageSize]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const refreshAfterMutation = useCallback(() => {
+    fetchData();
+    refreshReconciliationData();
+  }, [fetchData, refreshReconciliationData]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setServerSearchQuery(searchQuery.trim()), 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setSelectedRows(new Set());
+  }, [appliedFilters, selectedAccountId, serverSearchQuery, sortBy, transactionPage, transactionPageSize]);
 
   // ==================== OUTSIDE CLICK HANDLERS ====================
   useEffect(() => {
@@ -552,17 +604,26 @@ export default function Transactions() {
 
   // Filter account options for filter dropdown
   const filterAccountOptions = useMemo(() => {
-    const names = new Set();
-    transactions.forEach((t) => { if (t.accountId?.accountName) names.add(t.accountId.accountName); });
-    return [{ value: "", label: "All Accounts" }, ...Array.from(names).sort().map((n) => ({ value: n, label: n }))];
-  }, [transactions]);
+    return [
+      { value: "", label: "All Accounts" },
+      ...allAssetsAccounts
+        .map((account) => account.accountName)
+        .filter(Boolean)
+        .filter((name, index, names) => names.indexOf(name) === index)
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({ value: name, label: name })),
+    ];
+  }, [allAssetsAccounts]);
 
   // Filter category options for filter dropdown
   const filterCategoryOptions = useMemo(() => {
-    const names = new Set();
-    transactions.forEach((t) => { if (t.categoryName) names.add(t.categoryName); });
-    return [{ value: "", label: "All Categories" }, ...Array.from(names).sort().map((n) => ({ value: n, label: n }))];
-  }, [transactions]);
+    const names = categories
+      .map((category) => category.name)
+      .filter(Boolean)
+      .filter((name, index, allNames) => allNames.indexOf(name) === index)
+      .sort((a, b) => a.localeCompare(b));
+    return [{ value: "", label: "All Categories" }, ...names.map((name) => ({ value: name, label: name }))];
+  }, [categories]);
 
   // ==================== FILTER & SORT LOGIC ====================
   const activeFilterCount = useMemo(() => {
@@ -577,78 +638,7 @@ export default function Transactions() {
     return count;
   }, [appliedFilters]);
 
-  const filteredTransactions = useMemo(() => {
-    let result = [...transactions];
-
-    // Apply filters
-    const f = appliedFilters;
-    if (f.type) result = result.filter((t) => t.transactionType === f.type);
-    if (f.description) {
-      const q = f.description.toLowerCase();
-      result = result.filter((t) => (t.description || "").toLowerCase().includes(q));
-    }
-    if (f.account) {
-      const q = f.account.toLowerCase();
-      result = result.filter((t) => (t.accountId?.accountName || "").toLowerCase().includes(q));
-    }
-    if (f.category) {
-      const q = f.category.toLowerCase();
-      result = result.filter((t) => {
-        if ((t.categoryName || "").toLowerCase().includes(q)) return true;
-        if (t.isSplit && t.splitCategories) {
-          return t.splitCategories.some((s) => (s.categoryName || "").toLowerCase().includes(q));
-        }
-        return false;
-      });
-    }
-    if (f.reviewed === "1") result = result.filter((t) => t.reviewed);
-    else if (f.reviewed === "0") result = result.filter((t) => !t.reviewed);
-    if (f.dateFrom) {
-      const from = parseDateFilter(f.dateFrom);
-      if (from) result = result.filter((t) => new Date(t.transactionDate) >= from);
-    }
-    if (f.dateTo) {
-      const to = parseDateFilter(f.dateTo, true);
-      if (to) result = result.filter((t) => new Date(t.transactionDate) <= to);
-    }
-    if (f.amountMin) {
-      const min = parseFloat(f.amountMin);
-      result = result.filter((t) => Math.abs(t.amount || 0) >= min);
-    }
-    if (f.amountMax) {
-      const max = parseFloat(f.amountMax);
-      result = result.filter((t) => Math.abs(t.amount || 0) <= max);
-    }
-
-    // Search
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((t) =>
-        (t.description || "").toLowerCase().includes(q) ||
-        (t.senderName || "").toLowerCase().includes(q) ||
-        (t.accountId?.accountName || "").toLowerCase().includes(q) ||
-        (t.categoryName || "").toLowerCase().includes(q) ||
-        String(t.amount).includes(q)
-      );
-    }
-
-    // Sort
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case "date_asc": return new Date(a.transactionDate) - new Date(b.transactionDate);
-        case "date_desc": return new Date(b.transactionDate) - new Date(a.transactionDate);
-        case "amount_asc": return (a.amount || 0) - (b.amount || 0);
-        case "amount_desc": return (b.amount || 0) - (a.amount || 0);
-        case "desc_asc": return (a.description || "").localeCompare(b.description || "");
-        case "desc_desc": return (b.description || "").localeCompare(a.description || "");
-        case "reviewed_desc": return (b.reviewed ? 1 : 0) - (a.reviewed ? 1 : 0);
-        case "reviewed_asc": return (a.reviewed ? 1 : 0) - (b.reviewed ? 1 : 0);
-        default: return 0;
-      }
-    });
-
-    return result;
-  }, [transactions, appliedFilters, searchQuery, sortBy]);
+  const filteredTransactions = transactions;
 
   useEffect(() => {
     if (!reportHighlightId) return;
@@ -663,6 +653,7 @@ export default function Transactions() {
   // ==================== FILTER ACTIONS ====================
   const applyFilters = () => {
     setAppliedFilters({ ...filters });
+    setTransactionPage(1);
     setShowFilterPanel(false);
   };
 
@@ -670,6 +661,7 @@ export default function Transactions() {
     const empty = { type: "", description: "", account: "", category: "", reviewed: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "" };
     setFilters(empty);
     setAppliedFilters(empty);
+    setTransactionPage(1);
 
     const params = new URLSearchParams(location.search);
     [
@@ -816,7 +808,7 @@ export default function Transactions() {
         if (res.success) toast.success("Transaction created");
       }
       setShowModal(false);
-      fetchData();
+      refreshAfterMutation();
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to save");
     }
@@ -829,7 +821,7 @@ export default function Transactions() {
       await deleteTransaction(id);
       toast.success("Transaction deleted");
       setOpenRowDropdown(null);
-      fetchData();
+      refreshAfterMutation();
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to delete");
     }
@@ -838,7 +830,7 @@ export default function Transactions() {
   const handleToggleReviewed = async (id) => {
     try {
       await toggleTransactionReviewed(id);
-      fetchData();
+      refreshAfterMutation();
     } catch {
       toast.error("Failed to update status");
     }
@@ -926,7 +918,7 @@ export default function Transactions() {
         toast.success(res.message);
         setShowUploadModal(false);
         setUploadData({ accountId: "", csvText: "" });
-        fetchData();
+        refreshAfterMutation();
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Upload failed");
@@ -956,7 +948,7 @@ export default function Transactions() {
     try {
       const res = await toggleMatch({ reconciliationId: activeRecon._id, transactionId: txnId });
       if (res.success) {
-        fetchData();
+        refreshAfterMutation();
       }
     } catch {
       toast.error("Failed to toggle match");
@@ -970,7 +962,7 @@ export default function Transactions() {
       if (res.success) {
         toast.success("Your books are now reconciled!");
         setReconMode(false);
-        fetchData();
+        refreshAfterMutation();
       } else {
         toast.error(res.message || "Failed to complete reconciliation");
       }
@@ -985,7 +977,7 @@ export default function Transactions() {
     const numVal = parseFormattedNumber(val);
     try {
       await updateClosingBalance({ reconciliationId: activeRecon._id, closingBalance: numVal });
-      fetchData();
+      refreshAfterMutation();
     } catch {
       toast.error("Failed to update closing balance");
     }
@@ -1185,7 +1177,7 @@ export default function Transactions() {
 
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5 flex flex-wrap items-center gap-4 shadow-sm">
             <div className="flex flex-col">
-              <span className="text-xs text-gray-400 font-medium">Unmatched transactions</span>
+              <span className="text-xs text-gray-400 font-medium">Unmatched on this page</span>
               <span className="text-lg font-bold text-gray-900">
                 {filteredTransactions.filter((t) => !t.isMatched).length}
               </span>
@@ -1328,7 +1320,7 @@ export default function Transactions() {
             {showSortPanel && (
               <div className="absolute left-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-40 py-1">
                 {sortOptions.map((opt) => (
-                  <button key={opt.key} onClick={() => { setSortBy(opt.key); setShowSortPanel(false); }}
+                  <button key={opt.key} onClick={() => { setSortBy(opt.key); setTransactionPage(1); setShowSortPanel(false); }}
                     className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between transition hover:bg-pink-50 ${
                       sortBy === opt.key ? "text-pink-700 font-semibold bg-pink-50/50" : "text-gray-700"
                     }`}>
@@ -1347,7 +1339,7 @@ export default function Transactions() {
             <circle cx="11" cy="11" r="7" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
-          <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          <input type="text" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setTransactionPage(1); }}
             placeholder="Search transactions"
             className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-56 focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none" />
         </div>
@@ -1357,6 +1349,16 @@ export default function Transactions() {
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="w-8 h-8 border-[3px] border-pink-200 border-t-pink-600 rounded-full animate-spin" />
+        </div>
+      ) : transactionPagination.totalItems === 0 && (
+        activeFilterCount > 0
+        || serverSearchQuery
+        || hasReportCategoryFilter
+        || reportQuery.filter_date_from
+        || reportQuery.filter_date_to
+      ) ? (
+        <div className="flex flex-col items-center justify-center py-16">
+          <p className="text-sm text-gray-500">No transactions match your filters.</p>
         </div>
       ) : transactions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16">
@@ -1592,38 +1594,91 @@ export default function Transactions() {
         </div>
       )}
 
-      {!loading && transactionPagination.totalPages > 1 ? (
+      {!loading && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
-          <span>
-            Showing {((transactionPagination.currentPage - 1) * transactionPagination.itemsPerPage) + 1}
-            -{Math.min(
-              transactionPagination.currentPage * transactionPagination.itemsPerPage,
-              transactionPagination.totalItems
-            )} of {transactionPagination.totalItems} transactions
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={transactionPagination.currentPage <= 1}
-              onClick={() => setTransactionPage((page) => Math.max(page - 1, 1))}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <span className="min-w-20 text-center">
-              Page {transactionPagination.currentPage} of {transactionPagination.totalPages}
+          <div className="flex flex-wrap items-center gap-3">
+            <span>
+              Showing {transactionPagination.totalItems === 0
+                ? 0
+                : ((transactionPagination.currentPage - 1) * transactionPagination.itemsPerPage) + 1}
+              -{Math.min(
+                transactionPagination.currentPage * transactionPagination.itemsPerPage,
+                transactionPagination.totalItems
+              )} of {transactionPagination.totalItems} transactions
             </span>
-            <button
-              type="button"
-              disabled={transactionPagination.currentPage >= transactionPagination.totalPages}
-              onClick={() => setTransactionPage((page) => Math.min(page + 1, transactionPagination.totalPages))}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
-            >
-              Next
-            </button>
+            <label className="flex items-center gap-2">
+              <span>Rows:</span>
+              <select
+                value={transactionPageSize}
+                onChange={(event) => {
+                  setTransactionPageSize(event.target.value);
+                  setTransactionPage(1);
+                }}
+                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700 outline-none focus:border-pink-400"
+                aria-label="Rows per page"
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="all">All</option>
+              </select>
+            </label>
           </div>
+          {transactionPagination.totalPages > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-label="Go to first page"
+                disabled={transactionPagination.currentPage <= 1}
+                onClick={() => setTransactionPage(1)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+              >
+                «
+              </button>
+              <button
+                type="button"
+                disabled={transactionPagination.currentPage <= 1}
+                onClick={() => setTransactionPage((page) => Math.max(page - 1, 1))}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+              >
+                Previous
+              </button>
+              {getVisiblePageNumbers(transactionPagination.currentPage, transactionPagination.totalPages).map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  aria-current={page === transactionPagination.currentPage ? "page" : undefined}
+                  onClick={() => setTransactionPage(page)}
+                  className={`min-w-9 rounded-lg border px-2.5 py-1.5 ${
+                    page === transactionPagination.currentPage
+                      ? "border-pink-600 bg-pink-600 text-white"
+                      : "border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={transactionPagination.currentPage >= transactionPagination.totalPages}
+                onClick={() => setTransactionPage((page) => Math.min(page + 1, transactionPagination.totalPages))}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                aria-label="Go to last page"
+                disabled={transactionPagination.currentPage >= transactionPagination.totalPages}
+                onClick={() => setTransactionPage(transactionPagination.totalPages)}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-gray-50"
+              >
+                »
+              </button>
+            </div>
+          )}
         </div>
-      ) : null}
+      )}
 
       {/* ==================== TRANSACTION MODAL ==================== */}
       {showModal && (

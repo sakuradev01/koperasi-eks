@@ -8,7 +8,12 @@ import { CoaSubmenu } from "../../models/coaSubmenu.model.js";
 import { BankReconciliationItem } from "../../models/bankReconciliationItem.model.js";
 import { BankReconciliation } from "../../models/bankReconciliation.model.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
-import { buildTransactionListFilter } from "../../utils/transactionQuery.js";
+import {
+  buildTransactionListFilter,
+  buildTransactionSort,
+  buildRunningBalanceHistoryFilter,
+  normalizeTransactionPagination,
+} from "../../utils/transactionQuery.js";
 import { buildTransactionDrilldown } from "../../utils/transactionDrilldown.js";
 import {
   calculateRunningBalances,
@@ -66,7 +71,7 @@ function categoryClauseKey(clause) {
   return `${clause.categoryType}:${String(clause.categoryId)}`;
 }
 
-async function resolveCategoryClauses({ categoryId, categoryType, categoryName }) {
+async function resolveCategoryClauses({ categoryId, categoryType, categoryName, partialName = false }) {
   const clauses = [];
   const addClause = (id, type) => {
     if (!id || !type) return;
@@ -93,7 +98,8 @@ async function resolveCategoryClauses({ categoryId, categoryType, categoryName }
 
   if (!categoryName) return clauses;
 
-  const nameMatcher = new RegExp(`^${escapeRegExp(categoryName)}$`, "i");
+  const escapedName = escapeRegExp(categoryName);
+  const nameMatcher = new RegExp(partialName ? escapedName : `^${escapedName}$`, "i");
   const searches = [];
   if (!requestedType || requestedType === "master") {
     searches.push(
@@ -229,25 +235,80 @@ async function resolveCategoryName(categoryId, categoryType) {
 export const getTransactions = async (req, res) => {
   try {
     const account = firstQueryValue(req.query, ["account"]);
+    const accountNameFilter = firstQueryValue(req.query, ["filter_account_name", "filter_account", "accountName"]);
     const dateFrom = firstQueryValue(req.query, ["filter_date_from", "date_from", "dateFrom"]);
     const dateTo = firstQueryValue(req.query, ["filter_date_to", "date_to", "dateTo"]);
     const requestedCategoryId = firstQueryValue(req.query, ["filter_category_id", "category_id", "categoryId"]);
     const categoryType = firstQueryValue(req.query, ["filter_category_type", "category_type", "categoryType"]);
     const categoryName = firstQueryValue(req.query, ["filter_category", "category", "categoryName"]);
+    const pageCategoryName = firstQueryValue(req.query, ["filter_category_name", "filterCategoryName"]);
+    const description = (firstQueryValue(req.query, ["description"]) || "").slice(0, 120);
+    const searchText = (firstQueryValue(req.query, ["search"]) || "").slice(0, 120);
+    const transactionType = normalizeTransactionType(firstQueryValue(req.query, ["transactionType", "type"]));
+    const reviewed = firstQueryValue(req.query, ["reviewed"]);
+    const amountMin = firstQueryValue(req.query, ["amountMin", "amount_min"]);
+    const amountMax = firstQueryValue(req.query, ["amountMax", "amount_max"]);
     const categoryId = requestedCategoryId && mongoose.Types.ObjectId.isValid(requestedCategoryId)
       ? requestedCategoryId
       : null;
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const { page, limit, isAll } = normalizeTransactionPagination(req.query.page, req.query.limit);
+    const sort = buildTransactionSort(firstQueryValue(req.query, ["sortBy", "sort_by"]));
 
     const categoryFilterActive = !!(requestedCategoryId || categoryName);
     const categoryClauses = await resolveCategoryClauses({ categoryId, categoryType, categoryName });
     const splitTransactionIds = categoryClauses.length
       ? await TransactionSplit.find({ $or: categoryClauses }).distinct("transactionId")
       : [];
+    const pageCategoryFilterActive = !!pageCategoryName;
+    const pageCategoryClauses = pageCategoryFilterActive
+      ? await resolveCategoryClauses({ categoryName: pageCategoryName })
+      : [];
+    const pageSplitTransactionIds = pageCategoryClauses.length
+      ? await TransactionSplit.find({ $or: pageCategoryClauses }).distinct("transactionId")
+      : [];
+    const accountFilterActive = !!accountNameFilter;
+    const accountIds = accountFilterActive
+      ? await CoaAccount.find({ accountName: accountNameFilter.slice(0, 120) }).distinct("_id")
+      : [];
+
+    const searchClauses = [];
+    if (searchText) {
+      const searchPattern = new RegExp(escapeRegExp(searchText), "i");
+      const [searchAccounts, searchCategoryClauses] = await Promise.all([
+        CoaAccount.find({ accountName: searchPattern }).select("_id").lean(),
+        resolveCategoryClauses({ categoryName: searchText, partialName: true }),
+      ]);
+      searchClauses.push({ description: searchPattern }, { senderName: searchPattern });
+      if (searchAccounts.length > 0) {
+        searchClauses.push({ accountId: { $in: searchAccounts.map((row) => row._id) } });
+      }
+      if (searchCategoryClauses.length > 0) {
+        searchClauses.push(...searchCategoryClauses.map(({ categoryId: id, categoryType: type }) => ({
+          categoryId: id,
+          categoryType: type,
+        })));
+        const searchSplitTransactionIds = await TransactionSplit.find({ $or: searchCategoryClauses })
+          .distinct("transactionId");
+        if (searchSplitTransactionIds.length > 0) {
+          searchClauses.push({ _id: { $in: searchSplitTransactionIds } });
+        }
+      }
+      if (/^-?\d+(?:\.\d+)?$/.test(searchText)) {
+        searchClauses.push({ amount: Number(searchText) });
+      }
+    }
+
+    const pageCategoryFilter = {
+      clauses: pageCategoryClauses,
+      splitTransactionIds: pageSplitTransactionIds,
+      active: pageCategoryFilterActive,
+    };
+    const hasPageCategoryFilter = pageCategoryFilterActive;
+    const categoryMovementClauses = categoryClauses.length ? categoryClauses : pageCategoryClauses;
+    const categoryMovementSplitIds = splitTransactionIds.length ? splitTransactionIds : pageSplitTransactionIds;
     const categoryAccountIds = [
       ...new Set(
-        categoryClauses
+        categoryMovementClauses
           .filter((clause) => clause.categoryType === "account")
           .map((clause) => String(clause.categoryId)),
       ),
@@ -256,22 +317,31 @@ export const getTransactions = async (req, res) => {
       account,
       dateFrom,
       dateTo,
+      accountIds,
+      accountFilterActive,
+      transactionType,
+      description,
+      reviewed,
+      amountMin,
+      amountMax,
       categoryClauses,
       splitTransactionIds,
       categoryFilterActive,
+      additionalCategoryFilters: hasPageCategoryFilter ? [pageCategoryFilter] : [],
+      searchClauses,
     });
 
     // List read: paginate + batch enrich (no per-row N+1)
+    const transactionQuery = AccountingTransaction.find(filter)
+      .populate("accountId", "accountName accountCode currency balance")
+      .populate("salesTaxId", "taxName abbreviation taxRate")
+      .populate("customerId", "name uuid email")
+      .sort(sort);
+    if (!isAll) transactionQuery.skip((page - 1) * limit).limit(limit);
+
     const [totalItems, transactions] = await Promise.all([
       AccountingTransaction.countDocuments(filter),
-      AccountingTransaction.find(filter)
-        .populate("accountId", "accountName accountCode currency balance")
-        .populate("salesTaxId", "taxName abbreviation taxRate")
-        .populate("customerId", "name uuid email")
-        .sort({ transactionDate: -1, createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
+      transactionQuery.lean(),
     ]);
 
     const txnIds = transactions.map((t) => t._id);
@@ -284,6 +354,9 @@ export const getTransactions = async (req, res) => {
           .map((accountId) => String(accountId)),
       ),
     ];
+    const runningBalanceHistoryFilter = categoryAccountIds.length
+      ? null
+      : buildRunningBalanceHistoryFilter(displayAccountIds, transactions);
 
     const [
       allSplits,
@@ -316,30 +389,30 @@ export const getTransactions = async (req, res) => {
       displayAccountIds.length
         ? CoaAccount.find({ _id: { $in: displayAccountIds } }).select("_id balance").lean()
         : [],
-      displayAccountIds.length
-        ? AccountingTransaction.find({ accountId: { $in: displayAccountIds } })
+      runningBalanceHistoryFilter
+        ? AccountingTransaction.find(runningBalanceHistoryFilter)
             .select("_id accountId transactionDate createdAt transactionType amount")
             .sort({ transactionDate: -1, createdAt: -1, _id: -1 })
             .lean()
         : [],
-      categoryAccountIds.length && categoryClauses.length
+      categoryAccountIds.length && categoryMovementClauses.length
         ? AccountingTransaction.find({
             $and: [
-              { $or: categoryClauses },
+              { $or: categoryMovementClauses },
               { $or: [{ isSplit: false }, { isSplit: null }, { isSplit: { $exists: false } }] },
             ],
           })
             .select("_id categoryId categoryType transactionDate createdAt transactionType amount")
             .lean()
         : [],
-      categoryAccountIds.length && splitTransactionIds.length
-        ? AccountingTransaction.find({ _id: { $in: splitTransactionIds } })
+      categoryAccountIds.length && categoryMovementSplitIds.length
+        ? AccountingTransaction.find({ _id: { $in: categoryMovementSplitIds } })
             .select("_id transactionDate createdAt transactionType")
             .lean()
         : [],
-      categoryAccountIds.length && splitTransactionIds.length
+      categoryAccountIds.length && categoryMovementSplitIds.length
         ? TransactionSplit.find({
-            transactionId: { $in: splitTransactionIds },
+            transactionId: { $in: categoryMovementSplitIds },
             categoryType: "account",
             categoryId: { $in: categoryAccountIds },
           })
@@ -451,10 +524,10 @@ export const getTransactions = async (req, res) => {
       success: true,
       data: enriched,
       pagination: {
-        currentPage: page,
-        totalPages: Math.max(Math.ceil(totalItems / limit), 1),
+        currentPage: isAll ? 1 : page,
+        totalPages: isAll ? 1 : Math.max(Math.ceil(totalItems / limit), 1),
         totalItems,
-        itemsPerPage: limit,
+        itemsPerPage: isAll ? totalItems : limit,
       },
     });
   } catch (error) {
