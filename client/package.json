@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:transaction-export": "node --test test/transaction-export.test.js test/transaction-pagination.test.js",
     "test:payment-display": "node --test test/payment-display.test.js"
   },
   "dependencies": {

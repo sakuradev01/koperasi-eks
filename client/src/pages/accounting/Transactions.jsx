@@ -19,6 +19,14 @@ import {
 } from "../../api/accountingApi";
 import { API_URL } from "../../api/config";
 import { getVisiblePageNumbers } from "../../utils/transactionPagination";
+import {
+  buildTransactionExcelTsv,
+  buildTransactionExportRows,
+  buildTransactionRequestParams,
+  createTransactionExportFilename,
+  summarizeTransactionExport,
+} from "../../utils/transactionExport";
+import { buildTransactionPdf } from "../../utils/transactionPdfExport";
 
 // ==================== UTILITY FUNCTIONS ====================
 function formatNumber(num) {
@@ -249,6 +257,7 @@ export default function Transactions() {
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [transactionPage, setTransactionPage] = useState(1);
   const [transactionPageSize, setTransactionPageSize] = useState("10");
+  const [exportingTransactions, setExportingTransactions] = useState("");
   const [transactionPagination, setTransactionPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -470,24 +479,14 @@ export default function Transactions() {
     const requestId = ++transactionRequestId.current;
     setLoading(true);
     try {
-      const txnRes = await getTransactions(selectedAccountId || null, {
-        ...reportQuery,
+      const txnRes = await getTransactions(selectedAccountId || null, buildTransactionRequestParams({
+        reportQuery,
         page: transactionPage,
-        limit: transactionPageSize,
+        pageSize: transactionPageSize,
         sortBy,
-        transactionType: appliedFilters.type,
-        description: appliedFilters.description,
-        filter_account_name: appliedFilters.account,
-        filter_category_name: appliedFilters.category === reportQuery.filter_category
-          ? ""
-          : appliedFilters.category,
-        reviewed: appliedFilters.reviewed,
-        filter_date_from: appliedFilters.dateFrom || reportQuery.filter_date_from || "",
-        filter_date_to: appliedFilters.dateTo || reportQuery.filter_date_to || "",
-        amountMin: appliedFilters.amountMin,
-        amountMax: appliedFilters.amountMax,
-        search: serverSearchQuery,
-      });
+        appliedFilters,
+        searchQuery: serverSearchQuery,
+      }));
       if (requestId !== transactionRequestId.current) return;
       if (txnRes.success) {
         setTransactions(txnRes.data || []);
@@ -673,6 +672,79 @@ export default function Transactions() {
       "filter_date_to",
     ].forEach((key) => params.delete(key));
     setSearchParams(params, { replace: true });
+  };
+
+  const loadAllTransactionsForExport = async () => {
+    const response = await getTransactions(selectedAccountId || null, buildTransactionRequestParams({
+      reportQuery,
+      page: 1,
+      pageSize: "all",
+      sortBy,
+      appliedFilters,
+      searchQuery,
+      exportAll: true,
+    }));
+    if (!response?.success) {
+      throw new Error(response?.message || "Gagal memuat seluruh transaksi untuk export.");
+    }
+
+    const rows = buildTransactionExportRows(response.data || [], { hasReportCategoryFilter });
+    return { rows, summary: summarizeTransactionExport(rows) };
+  };
+
+  const downloadTransactionExcel = async () => {
+    setExportingTransactions("excel");
+    setShowMoreDropdown(false);
+    try {
+      const { rows, summary } = await loadAllTransactionsForExport();
+      const file = new Blob([buildTransactionExcelTsv(rows, summary)], {
+        type: "application/vnd.ms-excel;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = createTransactionExportFilename("xls");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(`Export Excel selesai: ${summary.transactionCount} transaksi.`);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error.message || "Gagal export transaksi ke Excel.");
+    } finally {
+      setExportingTransactions("");
+    }
+  };
+
+  const downloadTransactionPdf = async () => {
+    setExportingTransactions("pdf");
+    setShowMoreDropdown(false);
+    try {
+      const { rows, summary } = await loadAllTransactionsForExport();
+      const filterDescriptions = [
+        selectedAccount?.accountName || "Semua rekening",
+        appliedFilters.type ? `Tipe: ${appliedFilters.type}` : "",
+        appliedFilters.category ? `Kategori: ${appliedFilters.category}` : (reportQuery.filter_category || ""),
+        appliedFilters.dateFrom || reportQuery.filter_date_from
+          ? `Dari: ${appliedFilters.dateFrom || reportQuery.filter_date_from}`
+          : "",
+        appliedFilters.dateTo || reportQuery.filter_date_to
+          ? `Sampai: ${appliedFilters.dateTo || reportQuery.filter_date_to}`
+          : "",
+        appliedFilters.reviewed === "1" ? "Sudah diperiksa" : (appliedFilters.reviewed === "0" ? "Belum diperiksa" : ""),
+        searchQuery.trim() ? `Pencarian: ${searchQuery.trim()}` : "",
+      ];
+      const document = buildTransactionPdf(rows, summary, {
+        accountName: selectedAccount?.accountName || "Semua rekening",
+        filters: filterDescriptions,
+      });
+      document.save(createTransactionExportFilename("pdf"));
+      toast.success(`PDF transaksi selesai: ${summary.transactionCount} transaksi.`);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error.message || "Gagal export transaksi ke PDF.");
+    } finally {
+      setExportingTransactions("");
+    }
   };
 
   // ==================== SORT OPTIONS ====================
@@ -1058,7 +1130,7 @@ export default function Transactions() {
             </button>
             {showMoreDropdown && (
               <div className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-xl shadow-xl py-2 z-30 min-w-[200px]">
-                <button onClick={() => { setShowUploadModal(true); setShowMoreDropdown(false); }}
+                <button type="button" onClick={() => { setShowUploadModal(true); setShowMoreDropdown(false); }}
                   className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-pink-50 transition flex items-center gap-3">
                   <svg className="w-5 h-5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -1066,6 +1138,23 @@ export default function Transactions() {
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   Upload Transactions
+                </button>
+                <div className="my-1 border-t border-gray-100" />
+                <button type="button" onClick={downloadTransactionExcel} disabled={Boolean(exportingTransactions)}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-pink-50 transition flex items-center gap-3 disabled:cursor-wait disabled:opacity-60">
+                  <svg className="w-5 h-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6M8 13l4 6m0-6l-4 6m10-6h-3m3 6h-3" />
+                  </svg>
+                  {exportingTransactions === "excel" ? "Menyiapkan Excel..." : "Export to Excel"}
+                </button>
+                <button type="button" onClick={downloadTransactionPdf} disabled={Boolean(exportingTransactions)}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-pink-50 transition flex items-center gap-3 disabled:cursor-wait disabled:opacity-60">
+                  <svg className="w-5 h-5 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6M8 13h2a1.5 1.5 0 0 1 0 3H8v-3Zm6 3v-3h1.5a1.5 1.5 0 0 1 0 3H14Z" />
+                  </svg>
+                  {exportingTransactions === "pdf" ? "Menyiapkan PDF..." : "Export to PDF"}
                 </button>
               </div>
             )}
