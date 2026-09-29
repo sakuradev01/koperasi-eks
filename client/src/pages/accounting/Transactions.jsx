@@ -20,7 +20,7 @@ import {
 import { API_URL } from "../../api/config";
 import { getVisiblePageNumbers } from "../../utils/transactionPagination";
 import {
-  buildTransactionExcelTsv,
+  buildTransactionXlsx,
   buildTransactionExportRows,
   buildTransactionRequestParams,
   createTransactionExportFilename,
@@ -697,13 +697,13 @@ export default function Transactions() {
     setShowMoreDropdown(false);
     try {
       const { rows, summary } = await loadAllTransactionsForExport();
-      const file = new Blob([buildTransactionExcelTsv(rows, summary)], {
-        type: "application/vnd.ms-excel;charset=utf-8;",
+      const file = new Blob([buildTransactionXlsx(rows, summary)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = URL.createObjectURL(file);
       const link = document.createElement("a");
       link.href = url;
-      link.download = createTransactionExportFilename("xls");
+      link.download = createTransactionExportFilename("xlsx");
       document.body.appendChild(link);
       link.click();
       link.remove();

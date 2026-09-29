@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { strFromU8, unzipSync } from "fflate";
 import {
   buildTransactionExportRows,
-  buildTransactionExcelTsv,
+  buildTransactionXlsx,
   buildTransactionRequestParams,
   summarizeTransactionExport,
 } from "../src/utils/transactionExport.js";
@@ -151,8 +152,8 @@ test("summarizes exported transactions without adding split-category amounts twi
   });
 });
 
-test("creates an Excel-readable tabular export and neutralizes formula-like text", () => {
-  const tsv = buildTransactionExcelTsv([
+test("creates a valid XLSX workbook, preserves numeric amounts, and keeps formula-like text inert", () => {
+  const workbookBytes = buildTransactionXlsx([
     {
       date: "2026-08-12",
       description: "\t=HYPERLINK(\"https://bad.example\")",
@@ -167,11 +168,16 @@ test("creates an Excel-readable tabular export and neutralizes formula-like text
       notes: "memo",
     },
   ]);
+  const files = unzipSync(workbookBytes);
+  const contentTypes = strFromU8(files["[Content_Types].xml"]);
+  const worksheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
 
-  assert.ok(tsv.startsWith("\uFEFFTanggal\tKeterangan"));
-  assert.match(tsv, /\n2026-08-12\t'=HYPERLINK/);
-  assert.match(tsv, /2\.500\.000,00\t-6\.339\.000,00/);
-  assert.match(tsv, /Total Deposit \(Rp\)\t2\.500\.000,00/);
+  assert.match(contentTypes, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet\.main\+xml/);
+  assert.match(worksheet, /<c r="B2"[^>]*t="inlineStr"><is><t[^>]*>=HYPERLINK/);
+  assert.match(worksheet, /<c r="G2"[^>]*><v>2500000<\/v><\/c>/);
+  assert.match(worksheet, /<c r="H2"[^>]*><v>-6339000<\/v><\/c>/);
+  assert.match(worksheet, /Total Deposit \(Rp\)/);
+  assert.doesNotMatch(worksheet, /<f>/);
 });
 
 test("builds a valid multi-page PDF with transaction rows and report metadata", () => {
