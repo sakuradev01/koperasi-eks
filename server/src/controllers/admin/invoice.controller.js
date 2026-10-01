@@ -1759,9 +1759,7 @@ export const getPublicMemberInvoicesByUuid = asyncHandler(async (req, res) => {
     .sort({ issuedDate: -1, createdAt: -1 })
     .lean();
   const membershipStatus = getEffectiveMembershipStatus(member);
-  const invoices = membershipStatus === "active"
-    ? await Promise.all(rawInvoices.map((inv) => serializePublicInvoice(inv)))
-    : [];
+  const invoices = await Promise.all(rawInvoices.map((inv) => serializePublicInvoice(inv)));
 
   res.status(200).json(
     new ApiResponse(200, {
