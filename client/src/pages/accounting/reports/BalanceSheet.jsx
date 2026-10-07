@@ -6,7 +6,12 @@ import {
   exportBalanceSheetCsv,
   checkBalanceSheetSplitIssues,
 } from "../../../api/accountingApi";
+import { buildBalanceSheetTransactionHref } from "../../../utils/accountingReportLinks.js";
 import "./balance-sheet.css";
+
+function toDateInputValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function formatMoney(value) {
   return `Rp ${Math.abs(Number(value || 0)).toLocaleString("id-ID", {
@@ -38,6 +43,7 @@ function triggerBlobDownload(response, fallbackName) {
 
 export default function BalanceSheet() {
   const now = new Date();
+  const today = toDateInputValue(now);
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -46,8 +52,7 @@ export default function BalanceSheet() {
 
   const [filters, setFilters] = useState({
     year: String(now.getFullYear()),
-    as_of_date: now.toISOString().slice(0, 10),
-    report_type: "accrual",
+    as_of_date: today,
     view_mode: "summary",
   });
 
@@ -68,7 +73,6 @@ export default function BalanceSheet() {
           ...prev,
           year: String(res.data.year || prev.year),
           as_of_date: res.data.asOfDate || prev.as_of_date,
-          report_type: res.data.reportType || prev.report_type,
           view_mode: res.data.viewMode || prev.view_mode,
         }));
       } catch (err) {
@@ -94,6 +98,14 @@ export default function BalanceSheet() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleYearChange = (year) => {
+    setFilters((prev) => ({
+      ...prev,
+      year,
+      as_of_date: year === String(now.getFullYear()) ? today : `${year}-12-31`,
+    }));
   };
 
   const handleExportCsv = async () => {
@@ -167,7 +179,7 @@ export default function BalanceSheet() {
               <select
                 id="bs-year"
                 value={filters.year}
-                onChange={(event) => setFilters((prev) => ({ ...prev, year: event.target.value }))}
+                onChange={(event) => handleYearChange(event.target.value)}
               >
                 {(payload.availableYears || []).map((year) => (
                   <option key={year} value={year}>
@@ -182,31 +194,15 @@ export default function BalanceSheet() {
               <input
                 id="bs-as-of"
                 type="date"
-                value={filters.as_of_date}
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    as_of_date: event.target.value,
-                  }))
-                }
+              value={filters.as_of_date}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  year: event.target.value.slice(0, 4) || prev.year,
+                  as_of_date: event.target.value,
+                }))
+              }
               />
-            </div>
-
-            <div className="bs-filter-group">
-              <label htmlFor="bs-report-type">Report Type</label>
-              <select
-                id="bs-report-type"
-                value={filters.report_type}
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    report_type: event.target.value,
-                  }))
-                }
-              >
-                <option value="accrual">Accrual (Paid &amp; Unpaid)</option>
-                <option value="cash">Cash Basis</option>
-              </select>
             </div>
 
             <button type="submit" className="bs-update-btn" disabled={submitting}>
@@ -214,6 +210,8 @@ export default function BalanceSheet() {
             </button>
           </div>
         </form>
+
+        <p className="mb-3 text-xs text-gray-500">Balance dihitung dari transaksi yang sudah dicatat di accounting ledger.</p>
 
         {error ? <div className="bs-error">{error}</div> : null}
 
@@ -263,9 +261,7 @@ export default function BalanceSheet() {
                       <span>
                         <a
                           className="bs-link"
-                          href={`/akuntansi/transaksi?filter_account=${encodeURIComponent(
-                            account.account_name
-                          )}&filter_date_to=${payload.asOfDate}`}
+                          href={buildBalanceSheetTransactionHref(account, payload.asOfDate)}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -302,9 +298,7 @@ export default function BalanceSheet() {
                       <span>
                         <a
                           className="bs-link"
-                          href={`/akuntansi/transaksi?filter_account=${encodeURIComponent(
-                            account.account_name
-                          )}&filter_date_to=${payload.asOfDate}`}
+                          href={buildBalanceSheetTransactionHref(account, payload.asOfDate)}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -338,9 +332,7 @@ export default function BalanceSheet() {
                   if ((account.balance || 0) === 0) return null;
                   const accountLink = account.is_calculated
                     ? account.link || "#"
-                    : `/akuntansi/transaksi?filter_account=${encodeURIComponent(
-                      account.account_name
-                    )}&filter_date_to=${payload.asOfDate}`;
+                    : buildBalanceSheetTransactionHref(account, payload.asOfDate);
                   return (
                     <div key={account.id} className="bs-report-row sub-item">
                       <span>
@@ -373,7 +365,7 @@ export default function BalanceSheet() {
         <div className={`bs-balance-check ${reportData.is_balanced ? "good" : "bad"}`}>
           {reportData.is_balanced
             ? "Balance check passed: Assets = Liabilities + Equity"
-            : "Balance check failed: Assets do not match Liabilities + Equity"}
+            : `Balance check failed: difference ${formatSignedMoney(reportData.balance_difference || 0)} (Assets − Liabilities − Equity)`}
         </div>
       </div>
 
@@ -401,15 +393,17 @@ export default function BalanceSheet() {
             {!splitLoading && splitIssues.length > 0 ? (
               <>
                 <div className="bs-issues-summary">
-                  Ditemukan {splitIssues.length} split transaction dengan remaining unallocated.
+                  Ditemukan {splitIssues.length} masalah split amount atau kategori COA nonaktif.
                 </div>
                 <div className="bs-issues-table-wrap">
                   <table className="bs-issues-table">
                     <thead>
                       <tr>
+                        <th>Issue</th>
                         <th>ID</th>
                         <th>Date</th>
                         <th>Description</th>
+                        <th>COA Category</th>
                         <th>Account</th>
                         <th className="num">Amount</th>
                         <th className="num">Total Split</th>
@@ -420,9 +414,11 @@ export default function BalanceSheet() {
                     <tbody>
                       {splitIssues.map((issue) => (
                         <tr key={issue.id}>
+                          <td>{issue.issue_reason || "Split amount mismatch"}</td>
                           <td>#{issue.id}</td>
                           <td>{issue.transaction_date}</td>
                           <td>{issue.description || "-"}</td>
+                          <td>{issue.category_name || "-"}</td>
                           <td>{issue.account_name || "-"}</td>
                           <td className="num">{formatMoney(issue.transaction_amount)}</td>
                           <td className="num">{formatMoney(issue.total_split_amount)}</td>

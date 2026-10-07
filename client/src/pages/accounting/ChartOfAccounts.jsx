@@ -868,9 +868,9 @@ export default function ChartOfAccounts() {
   };
 
   const formatBalance = (balance, currency = "Rp") => {
-    const num = parseFloat(balance) || 0;
+    const num = Number(balance || 0);
     const symbol = getCurrencySymbol(currency);
-    return `${symbol} ${num.toLocaleString("id-ID", { minimumFractionDigits: 0 })}`;
+    return `${symbol} ${num.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   // Check if an account code indicates a child (e.g. "1001.1")
@@ -1018,10 +1018,10 @@ export default function ChartOfAccounts() {
                               ({acc.currency || "Rp"})
                             </span>
                           </div>
-                          <p
-                            className={`text-xs text-gray-400 mt-0.5 ${isChild ? "ml-9" : "ml-0"}`}
-                          >
-                            No transactions for this account
+                          <p className={`text-xs text-gray-400 mt-0.5 ${isChild ? "ml-9" : "ml-0"}`}>
+                            {acc.transactionCount > 0
+                              ? `${acc.transactionCount} posting${acc.transactionCount === 1 ? "" : "s"} in the ledger`
+                              : "No transactions for this account"}
                           </p>
                           {acc.description && (
                             <p
@@ -1035,9 +1035,9 @@ export default function ChartOfAccounts() {
                         <div className="flex items-center gap-4 ml-4 shrink-0">
                           {/* Balance */}
                           <span
-                            className={`font-mono text-sm ${(acc.balance || 0) < 0 ? "text-red-600" : "text-gray-700"}`}
+                            className={`font-mono text-sm ${(acc.reportBalance ?? acc.balance ?? 0) < 0 ? "text-red-600" : "text-gray-700"}`}
                           >
-                            {formatBalance(acc.balance, acc.currency)}
+                            {formatBalance(acc.reportBalance ?? acc.balance, acc.currency)}
                           </span>
 
                           {/* Action Dropdown */}
@@ -1386,9 +1386,10 @@ export default function ChartOfAccounts() {
 	                        Belum ada suffix titik di base ini.
 	                      </p>
 	                    )}
-	                  </div>
-	                ) : null}
-	              </div>
+                </div>
+              ) : null}
+
+            </div>
 
               {/* --- Description --- */}
               <div>

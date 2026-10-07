@@ -1,6 +1,9 @@
 import { CoaMaster } from "../../models/coaMaster.model.js";
 import { CoaSubmenu } from "../../models/coaSubmenu.model.js";
 import { CoaAccount } from "../../models/coaAccount.model.js";
+import { AccountingTransaction } from "../../models/accountingTransaction.model.js";
+import { TransactionSplit } from "../../models/transactionSplit.model.js";
+import { buildAccountBalanceSnapshot } from "../../utils/accountingReportMath.js";
 
 const MASTER_TYPES = ["Assets", "Liabilities", "Income", "Expenses", "Equity"];
 
@@ -112,6 +115,61 @@ function sortSubmenus(masterType, submenus) {
     if (aRank !== bRank) return aRank - bRank;
     return a.submenuName.localeCompare(b.submenuName);
   });
+}
+
+async function loadCoaBalanceSnapshot(accounts, submenus, masters) {
+  const accountIds = accounts.map((account) => String(account._id || account.id));
+  const submenuIds = submenus.map((submenu) => String(submenu._id || submenu.id));
+  const masterIds = masters.map((master) => String(master._id || master.id));
+  const cashAccountIds = accounts
+    .filter((account) => account.masterName === "Assets" && [
+      "Cash and Bank",
+      "Cash on Hand",
+      "Bank Accounts",
+      "Money in Transit",
+    ].includes(account.submenuName))
+    .map((account) => String(account._id || account.id));
+
+  const splitCategoryClauses = [];
+  if (accountIds.length) splitCategoryClauses.push({ categoryType: "account", categoryId: { $in: accountIds } });
+  if (submenuIds.length) splitCategoryClauses.push({ categoryType: "submenu", categoryId: { $in: submenuIds } });
+  if (masterIds.length) splitCategoryClauses.push({ categoryType: "master", categoryId: { $in: masterIds } });
+
+  const relatedSplits = splitCategoryClauses.length
+    ? await TransactionSplit.find({ $or: splitCategoryClauses })
+      .select("transactionId amount categoryId categoryType")
+      .lean()
+    : [];
+  const splitParentIds = [...new Set(relatedSplits.map((split) => String(split.transactionId)))];
+
+  const transactionClauses = [];
+  if (cashAccountIds.length) transactionClauses.push({ accountId: { $in: cashAccountIds } });
+  if (accountIds.length) transactionClauses.push({
+    isSplit: { $ne: true },
+    categoryType: "account",
+    categoryId: { $in: accountIds },
+  });
+  if (submenuIds.length) transactionClauses.push({
+    isSplit: { $ne: true },
+    categoryType: "submenu",
+    categoryId: { $in: submenuIds },
+  });
+  if (masterIds.length) transactionClauses.push({
+    isSplit: { $ne: true },
+    categoryType: "master",
+    categoryId: { $in: masterIds },
+  });
+  if (splitParentIds.length) transactionClauses.push({ _id: { $in: splitParentIds } });
+
+  const transactions = await AccountingTransaction.find(
+    transactionClauses.length ? { $or: transactionClauses } : { _id: { $in: [] } },
+  )
+    .select("_id transactionDate transactionType amount accountId categoryId categoryType isSplit")
+    .lean();
+  const transactionIds = new Set(transactions.map((transaction) => String(transaction._id)));
+  const splits = relatedSplits.filter((split) => transactionIds.has(String(split.transactionId)));
+
+  return buildAccountBalanceSnapshot({ accounts, submenus, masters, transactions, splits });
 }
 
 function toAccountCodeSegment(segment) {
@@ -269,14 +327,50 @@ export const getAccountsByType = async (req, res) => {
     let accountsBySubtype = {};
 
     if (master) {
+      const pendingGroups = [];
+      const reportAccounts = [];
       for (const sub of submenus) {
         const accounts = await CoaAccount.find({
           submenuId: sub._id,
           isActive: true,
-        });
-        accountsBySubtype[sub.submenuName] = {
-          submenuId: sub._id,
-          accounts: sortAccountsByCode(accounts),
+        }).lean();
+        const sortedAccounts = sortAccountsByCode(accounts);
+        pendingGroups.push({ submenu: sub, accounts: sortedAccounts });
+        reportAccounts.push(...sortedAccounts.map((account) => ({
+          ...account,
+          id: String(account._id),
+          submenuId: String(sub._id),
+          submenuName: sub.submenuName,
+          masterId: String(master._id),
+          masterName: currentType,
+        })));
+      }
+
+      const balanceSnapshot = await loadCoaBalanceSnapshot(
+        reportAccounts,
+        submenus.map((submenu) => ({
+          ...submenu,
+          id: String(submenu._id),
+          masterId: String(submenu.masterId),
+          masterName: currentType,
+        })),
+        [{ ...master, id: String(master._id) }],
+      );
+
+      for (const { submenu, accounts } of pendingGroups) {
+        const submenuId = String(submenu._id);
+        accountsBySubtype[submenu.submenuName] = {
+          submenuId: submenu._id,
+          balance: balanceSnapshot.bySubmenuId[submenuId]?.balance || 0,
+          directBalance: balanceSnapshot.directBySubmenuId[submenuId]?.balance || 0,
+          accounts: accounts.map((account) => {
+            const reportBalance = balanceSnapshot.byAccountId[String(account._id)];
+            return {
+              ...account,
+              reportBalance: reportBalance?.balance ?? Number(account.balance || 0),
+              transactionCount: reportBalance?.transactionCount || 0,
+            };
+          }),
         };
       }
     }
@@ -309,7 +403,29 @@ export const getAccountDetail = async (req, res) => {
         .json({ success: false, message: "Account not found" });
     }
 
-    res.status(200).json({ success: true, data: account });
+    const data = account.toObject();
+    const submenu = data.submenuId;
+    const master = submenu?.masterId;
+    if (submenu && master) {
+      const id = String(data._id);
+      const balanceSnapshot = await loadCoaBalanceSnapshot(
+        [{
+          ...data,
+          id,
+          submenuId: String(submenu._id),
+          submenuName: submenu.submenuName,
+          masterId: String(master._id),
+          masterName: master.masterName,
+        }],
+        [{ ...submenu, id: String(submenu._id), masterId: String(master._id), masterName: master.masterName }],
+        [{ ...master, id: String(master._id) }],
+      );
+      const reportBalance = balanceSnapshot.byAccountId[id];
+      data.reportBalance = reportBalance?.balance ?? Number(data.balance || 0);
+      data.transactionCount = reportBalance?.transactionCount || 0;
+    }
+
+    res.status(200).json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

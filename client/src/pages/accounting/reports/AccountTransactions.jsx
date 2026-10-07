@@ -5,7 +5,12 @@ import {
   filterAccountTransactionsReport,
   exportAccountTransactionsCsv,
 } from "../../../api/accountingApi";
+import { buildAccountTransactionsRowHref } from "../../../utils/accountingReportLinks.js";
 import "./account-transactions.css";
+
+function toDateInputValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function formatMoney(value) {
   return `Rp ${Math.abs(Number(value || 0)).toLocaleString("id-ID", {
@@ -37,6 +42,7 @@ function triggerBlobDownload(response, fallbackName) {
 
 export default function AccountTransactions() {
   const now = new Date();
+  const today = toDateInputValue(now);
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -46,10 +52,9 @@ export default function AccountTransactions() {
   const [filters, setFilters] = useState({
     year: String(now.getFullYear()),
     start_date: `${now.getFullYear()}-01-01`,
-    end_date: now.toISOString().slice(0, 10),
+    end_date: today,
     account_filter: "all",
     contact_filter: "all",
-    report_type: "accrual",
     date_preset: "custom",
   });
 
@@ -69,7 +74,6 @@ export default function AccountTransactions() {
           end_date: res.data.endDate || prev.end_date,
           account_filter: res.data.accountFilter || prev.account_filter,
           contact_filter: res.data.contactFilter || prev.contact_filter,
-          report_type: res.data.reportType || prev.report_type,
           date_preset: res.data.datePreset || prev.date_preset,
         }));
       } catch (err) {
@@ -111,7 +115,7 @@ export default function AccountTransactions() {
       ...prev,
       year,
       start_date: `${year}-01-01`,
-      end_date: `${year}-12-31`,
+      end_date: year === String(now.getFullYear()) ? today : `${year}-12-31`,
       date_preset: "custom",
     }));
   };
@@ -205,6 +209,7 @@ export default function AccountTransactions() {
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
+                  year: event.target.value.slice(0, 4) || prev.year,
                   start_date: event.target.value,
                   date_preset: "custom",
                 }))
@@ -221,28 +226,12 @@ export default function AccountTransactions() {
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
+                  year: event.target.value.slice(0, 4) || prev.year,
                   end_date: event.target.value,
                   date_preset: "custom",
                 }))
               }
             />
-          </div>
-
-          <div className="at-filter-group">
-            <label htmlFor="at-report-type">Report Type</label>
-            <select
-              id="at-report-type"
-              value={filters.report_type}
-              onChange={(event) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  report_type: event.target.value,
-                }))
-              }
-            >
-              <option value="accrual">Accrual (Paid &amp; Unpaid)</option>
-              <option value="cash">Cash Basis</option>
-            </select>
           </div>
 
           <div className="at-filter-group">
@@ -332,9 +321,7 @@ export default function AccountTransactions() {
                         <td>
                           <a
                             className="at-link"
-                            href={`/akuntansi/transaksi?highlight=${encodeURIComponent(
-                              txn.transaction_id
-                            )}&filter_account=${encodeURIComponent(account.account_name || "")}`}
+                            href={buildAccountTransactionsRowHref(account, txn.transaction_id)}
                             target="_blank"
                             rel="noreferrer"
                           >

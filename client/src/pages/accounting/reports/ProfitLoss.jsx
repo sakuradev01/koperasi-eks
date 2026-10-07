@@ -5,7 +5,12 @@ import {
   filterProfitLossReport,
   exportProfitLossCsv,
 } from "../../../api/accountingApi";
+import { buildProfitLossTransactionHref } from "../../../utils/accountingReportLinks.js";
 import "./profit-loss.css";
+
+function toDateInputValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function formatMoney(value) {
   return `Rp ${Number(value || 0).toLocaleString("id-ID", {
@@ -17,8 +22,13 @@ function formatMoney(value) {
 function calcChange(currentValue, compareValue) {
   const current = Number(currentValue || 0);
   const compare = Number(compareValue || 0);
-  if (Math.abs(compare) < 0.000001) return 0;
+  if (Math.abs(compare) < 0.000001) return Math.abs(current) < 0.000001 ? 0 : null;
   return ((current - compare) / Math.abs(compare)) * 100;
+}
+
+function formatChange(currentValue, compareValue) {
+  const change = calcChange(currentValue, compareValue);
+  return change === null ? "Baru" : `${change.toFixed(2)}%`;
 }
 
 function triggerBlobDownload(response, fallbackName) {
@@ -36,19 +46,9 @@ function triggerBlobDownload(response, fallbackName) {
   URL.revokeObjectURL(url);
 }
 
-function buildTransactionDrilldownHref(account, startDate, endDate) {
-  const params = new URLSearchParams({
-    filter_category: account.account_name || "",
-    filter_category_id: account.id || "",
-    filter_category_type: "account",
-    filter_date_from: startDate || "",
-    filter_date_to: endDate || "",
-  });
-  return `/akuntansi/transaksi?${params.toString()}`;
-}
-
 export default function ProfitLoss() {
   const now = new Date();
+  const today = toDateInputValue(now);
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -58,8 +58,7 @@ export default function ProfitLoss() {
   const [filters, setFilters] = useState({
     year: String(now.getFullYear()),
     start_date: `${now.getFullYear()}-01-01`,
-    end_date: now.toISOString().slice(0, 10),
-    report_type: "accrual",
+    end_date: today,
     compare_enabled: false,
     compare_period: "custom",
     compare_start_date: "",
@@ -81,7 +80,6 @@ export default function ProfitLoss() {
           year: String(res.data.year || prev.year),
           start_date: res.data.startDate || prev.start_date,
           end_date: res.data.endDate || prev.end_date,
-          report_type: res.data.reportType || prev.report_type,
           compare_enabled: !!res.data.compareEnabled,
           compare_period: res.data.comparePeriod || prev.compare_period,
           compare_start_date: res.data.compareStartDate || "",
@@ -129,6 +127,23 @@ export default function ProfitLoss() {
     }
   };
 
+  const handleYearChange = (year) => {
+    setFilters((prev) => ({
+      ...prev,
+      year,
+      start_date: `${year}-01-01`,
+      end_date: year === String(now.getFullYear()) ? today : `${year}-12-31`,
+    }));
+  };
+
+  const comparisonTotal = (section, account) => {
+    if (!payload?.comparisonData) return undefined;
+    const rows = payload.comparisonData[section]?.accounts || [];
+    const key = `${account.category_type || "account"}:${account.category_id || account.id}`;
+    const comparison = rows.find((row) => `${row.category_type || "account"}:${row.category_id || row.id}` === key);
+    return comparison?.total ?? 0;
+  };
+
   const comparisonEnabled = !!payload?.compareEnabled;
 
   const summaryCards = useMemo(() => {
@@ -174,7 +189,7 @@ export default function ProfitLoss() {
             <select
               id="pl-year"
               value={filters.year}
-              onChange={(event) => setFilters((prev) => ({ ...prev, year: event.target.value }))}
+              onChange={(event) => handleYearChange(event.target.value)}
             >
               {(payload.availableYears || []).map((year) => (
                 <option key={year} value={year}>
@@ -189,7 +204,11 @@ export default function ProfitLoss() {
               id="pl-start-date"
               type="date"
               value={filters.start_date}
-              onChange={(event) => setFilters((prev) => ({ ...prev, start_date: event.target.value }))}
+              onChange={(event) => setFilters((prev) => ({
+                ...prev,
+                year: event.target.value.slice(0, 4) || prev.year,
+                start_date: event.target.value,
+              }))}
             />
           </div>
           <div className="pl-filter-group">
@@ -198,19 +217,11 @@ export default function ProfitLoss() {
               id="pl-end-date"
               type="date"
               value={filters.end_date}
-              onChange={(event) => setFilters((prev) => ({ ...prev, end_date: event.target.value }))}
+              onChange={(event) => setFilters((prev) => ({
+                ...prev,
+                end_date: event.target.value,
+              }))}
             />
-          </div>
-          <div className="pl-filter-group">
-            <label htmlFor="pl-report-type">Report Type</label>
-            <select
-              id="pl-report-type"
-              value={filters.report_type}
-              onChange={(event) => setFilters((prev) => ({ ...prev, report_type: event.target.value }))}
-            >
-              <option value="accrual">Accrual (Paid &amp; Unpaid)</option>
-              <option value="cash">Cash Basis</option>
-            </select>
           </div>
           <div className="pl-filter-group">
             <label htmlFor="pl-view-mode">View</label>
@@ -264,6 +275,8 @@ export default function ProfitLoss() {
         </div>
       </form>
 
+      <p className="mb-3 text-xs text-gray-500">Basis: transaksi yang sudah dicatat di accounting ledger.</p>
+
       {error ? <div className="mb-3 text-sm text-red-600">{error}</div> : null}
 
       <div className="pl-stats-strip">
@@ -310,8 +323,8 @@ export default function ProfitLoss() {
           <span className="pl-amount">
             {comparisonEnabled ? formatMoney(payload.comparisonData?.total_income || 0) : "-"}
           </span>
-          <span className={`pl-change ${calcChange(payload.reportData.total_income, payload.comparisonData?.total_income || 0) >= 0 ? "positive" : "negative"}`}>
-            {comparisonEnabled ? `${calcChange(payload.reportData.total_income, payload.comparisonData?.total_income || 0).toFixed(2)}%` : "-"}
+          <span className={`pl-change ${calcChange(payload.reportData.total_income, payload.comparisonData?.total_income || 0) === null || calcChange(payload.reportData.total_income, payload.comparisonData?.total_income || 0) >= 0 ? "positive" : "negative"}`}>
+            {comparisonEnabled ? formatChange(payload.reportData.total_income, payload.comparisonData?.total_income || 0) : "-"}
           </span>
         </div>
 
@@ -321,7 +334,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
+                  href={buildProfitLossTransactionHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -329,8 +342,16 @@ export default function ProfitLoss() {
                 </a>
               </span>
               <span className="pl-amount">{formatMoney(account.total)}</span>
-              <span className="pl-amount">-</span>
-              <span className="pl-change">-</span>
+              <span className="pl-amount">
+                {comparisonEnabled && comparisonTotal("income", account) !== undefined
+                  ? formatMoney(comparisonTotal("income", account))
+                  : "-"}
+              </span>
+              <span className="pl-change">
+                {comparisonEnabled && comparisonTotal("income", account) !== undefined
+                  ? formatChange(account.total, comparisonTotal("income", account))
+                  : "-"}
+              </span>
             </div>
           ))
           : null}
@@ -341,8 +362,8 @@ export default function ProfitLoss() {
           <span className="pl-amount">
             {comparisonEnabled ? formatMoney(payload.comparisonData?.total_cogs || 0) : "-"}
           </span>
-          <span className={`pl-change ${calcChange(payload.reportData.total_cogs, payload.comparisonData?.total_cogs || 0) >= 0 ? "positive" : "negative"}`}>
-            {comparisonEnabled ? `${calcChange(payload.reportData.total_cogs, payload.comparisonData?.total_cogs || 0).toFixed(2)}%` : "-"}
+          <span className={`pl-change ${calcChange(payload.reportData.total_cogs, payload.comparisonData?.total_cogs || 0) === null || calcChange(payload.reportData.total_cogs, payload.comparisonData?.total_cogs || 0) >= 0 ? "positive" : "negative"}`}>
+            {comparisonEnabled ? formatChange(payload.reportData.total_cogs, payload.comparisonData?.total_cogs || 0) : "-"}
           </span>
         </div>
 
@@ -352,7 +373,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
+                  href={buildProfitLossTransactionHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -360,8 +381,16 @@ export default function ProfitLoss() {
                 </a>
               </span>
               <span className="pl-amount">{formatMoney(account.total)}</span>
-              <span className="pl-amount">-</span>
-              <span className="pl-change">-</span>
+              <span className="pl-amount">
+                {comparisonEnabled && comparisonTotal("cogs", account) !== undefined
+                  ? formatMoney(comparisonTotal("cogs", account))
+                  : "-"}
+              </span>
+              <span className="pl-change">
+                {comparisonEnabled && comparisonTotal("cogs", account) !== undefined
+                  ? formatChange(account.total, comparisonTotal("cogs", account))
+                  : "-"}
+              </span>
             </div>
           ))
           : null}
@@ -372,8 +401,8 @@ export default function ProfitLoss() {
           <span className="pl-amount">
             {comparisonEnabled ? formatMoney(payload.comparisonData?.gross_profit || 0) : "-"}
           </span>
-          <span className={`pl-change ${calcChange(payload.reportData.gross_profit, payload.comparisonData?.gross_profit || 0) >= 0 ? "positive" : "negative"}`}>
-            {comparisonEnabled ? `${calcChange(payload.reportData.gross_profit, payload.comparisonData?.gross_profit || 0).toFixed(2)}%` : "-"}
+          <span className={`pl-change ${calcChange(payload.reportData.gross_profit, payload.comparisonData?.gross_profit || 0) === null || calcChange(payload.reportData.gross_profit, payload.comparisonData?.gross_profit || 0) >= 0 ? "positive" : "negative"}`}>
+            {comparisonEnabled ? formatChange(payload.reportData.gross_profit, payload.comparisonData?.gross_profit || 0) : "-"}
           </span>
         </div>
 
@@ -383,8 +412,8 @@ export default function ProfitLoss() {
           <span className="pl-amount">
             {comparisonEnabled ? formatMoney(payload.comparisonData?.total_operating_expenses || 0) : "-"}
           </span>
-          <span className={`pl-change ${calcChange(payload.reportData.total_operating_expenses, payload.comparisonData?.total_operating_expenses || 0) >= 0 ? "positive" : "negative"}`}>
-            {comparisonEnabled ? `${calcChange(payload.reportData.total_operating_expenses, payload.comparisonData?.total_operating_expenses || 0).toFixed(2)}%` : "-"}
+          <span className={`pl-change ${calcChange(payload.reportData.total_operating_expenses, payload.comparisonData?.total_operating_expenses || 0) === null || calcChange(payload.reportData.total_operating_expenses, payload.comparisonData?.total_operating_expenses || 0) >= 0 ? "positive" : "negative"}`}>
+            {comparisonEnabled ? formatChange(payload.reportData.total_operating_expenses, payload.comparisonData?.total_operating_expenses || 0) : "-"}
           </span>
         </div>
 
@@ -394,7 +423,7 @@ export default function ProfitLoss() {
               <span>
                 <a
                   className="pl-link"
-                  href={buildTransactionDrilldownHref(account, payload.startDate, payload.endDate)}
+                  href={buildProfitLossTransactionHref(account, payload.startDate, payload.endDate)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -402,8 +431,16 @@ export default function ProfitLoss() {
                 </a>
               </span>
               <span className="pl-amount">{formatMoney(account.total)}</span>
-              <span className="pl-amount">-</span>
-              <span className="pl-change">-</span>
+              <span className="pl-amount">
+                {comparisonEnabled && comparisonTotal("operating_expenses", account) !== undefined
+                  ? formatMoney(comparisonTotal("operating_expenses", account))
+                  : "-"}
+              </span>
+              <span className="pl-change">
+                {comparisonEnabled && comparisonTotal("operating_expenses", account) !== undefined
+                  ? formatChange(account.total, comparisonTotal("operating_expenses", account))
+                  : "-"}
+              </span>
             </div>
           ))
           : null}
@@ -414,8 +451,8 @@ export default function ProfitLoss() {
           <span className="pl-amount">
             {comparisonEnabled ? formatMoney(payload.comparisonData?.net_profit || 0) : "-"}
           </span>
-          <span className={`pl-change ${calcChange(payload.reportData.net_profit, payload.comparisonData?.net_profit || 0) >= 0 ? "positive" : "negative"}`}>
-            {comparisonEnabled ? `${calcChange(payload.reportData.net_profit, payload.comparisonData?.net_profit || 0).toFixed(2)}%` : "-"}
+          <span className={`pl-change ${calcChange(payload.reportData.net_profit, payload.comparisonData?.net_profit || 0) === null || calcChange(payload.reportData.net_profit, payload.comparisonData?.net_profit || 0) >= 0 ? "positive" : "negative"}`}>
+            {comparisonEnabled ? formatChange(payload.reportData.net_profit, payload.comparisonData?.net_profit || 0) : "-"}
           </span>
         </div>
       </div>

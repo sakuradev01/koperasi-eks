@@ -5,12 +5,22 @@ import { CoaSubmenu } from "../../models/coaSubmenu.model.js";
 import { CoaAccount } from "../../models/coaAccount.model.js";
 import { Member } from "../../models/member.model.js";
 import { Invoice } from "../../models/invoice.model.js";
+import {
+  categoryBalanceMovement,
+  cashFlowMovement,
+  hasSplitAmountMismatch,
+  maxReportDate,
+  profitLossMovement,
+  resolveBalanceSheetAsOfDate,
+  resolveProfitLossPeriod,
+  roundReportMoney,
+} from "../../utils/accountingReportMath.js";
 
-const DEBIT_NORMAL_MASTERS = new Set(["Assets", "Expenses"]);
 const COGS_SUBMENUS = new Set(["Cost of Goods Sold", "COGS", "Direct Costs", "Cost of Sales"]);
 const CASH_ASSET_SUBMENUS = new Set(["Cash and Bank", "Cash on Hand", "Bank Accounts", "Money in Transit"]);
 const LIABILITY_LONG_TERM_SUBMENUS = new Set([
   "Loan and Line of Credit",
+  "Long Term Liabilities",
   "Long-term Liabilities",
   "Notes Payable",
   "Loans Payable",
@@ -117,6 +127,11 @@ function sendCsv(res, filename, rows) {
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.status(200).send(csvContent);
+}
+
+function respondReportError(res, error) {
+  const status = error instanceof RangeError ? 400 : 500;
+  return res.status(status).json({ success: false, message: error.message });
 }
 
 function roundMoney(value) {
@@ -514,35 +529,8 @@ async function buildAgedReceivablesPayload(options = {}) {
   };
 }
 
-function computeBalanceSigned(masterName, transactionType, amount) {
-  const money = normalizeMoney(amount);
-  if (DEBIT_NORMAL_MASTERS.has(masterName)) {
-    return transactionType === "Deposit" ? money : -money;
-  }
-  return transactionType === "Deposit" ? -money : money;
-}
-
 function computeMasterReportSigned(masterName, transactionType, amount) {
-  const money = normalizeMoney(amount);
-  if (masterName === "Income") {
-    return transactionType === "Deposit" ? money : -money;
-  }
-  if (masterName === "Expenses") {
-    return transactionType === "Withdrawal" ? money : -money;
-  }
-  return computeBalanceSigned(masterName, transactionType, money);
-}
-
-function computeDebitCredit(masterName, transactionType, amount) {
-  const money = normalizeMoney(amount);
-  const isDebit = DEBIT_NORMAL_MASTERS.has(masterName)
-    ? transactionType === "Deposit"
-    : transactionType === "Withdrawal";
-  return {
-    debit: isDebit ? money : 0,
-    credit: isDebit ? 0 : money,
-    signed: isDebit ? money : -money,
-  };
+  return profitLossMovement(masterName, transactionType, amount);
 }
 
 function inDateRange(date, start, end) {
@@ -646,21 +634,21 @@ function buildDatePresets() {
     {
       label: "Last 30 Days",
       value: "last_30_days",
-      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30)),
+      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)),
       end: formatYmd(now),
       group: "Other",
     },
     {
       label: "Last 60 Days",
       value: "last_60_days",
-      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 60)),
+      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 59)),
       end: formatYmd(now),
       group: "Other",
     },
     {
       label: "Last 90 Days",
       value: "last_90_days",
-      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 90)),
+      start: formatYmd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89)),
       end: formatYmd(now),
       group: "Other",
     },
@@ -697,14 +685,14 @@ async function getAvailableYears() {
   return years;
 }
 
-async function loadCoaContext() {
-  const masters = await CoaMaster.find({ isActive: true }).sort({ masterName: 1 }).lean();
+export async function loadCoaContext() {
+  const masters = await CoaMaster.find({}).sort({ masterName: 1 }).lean();
   const masterMap = new Map();
   for (const master of masters) {
     masterMap.set(toIdString(master._id), { ...master, id: toIdString(master._id) });
   }
 
-  const submenusRaw = await CoaSubmenu.find({ isActive: true }).sort({ submenuName: 1 }).lean();
+  const submenusRaw = await CoaSubmenu.find({}).sort({ submenuName: 1 }).lean();
   const submenus = [];
   const submenuMap = new Map();
   for (const submenu of submenusRaw) {
@@ -721,7 +709,7 @@ async function loadCoaContext() {
     submenus.push(normalizedSubmenu);
   }
 
-  const accountsRaw = await CoaAccount.find({ isActive: true }).sort({ accountName: 1 }).lean();
+  const accountsRaw = await CoaAccount.find({}).sort({ accountName: 1 }).lean();
   const accounts = [];
   const accountMap = new Map();
   const accountsBySubmenu = new Map();
@@ -892,7 +880,7 @@ function transactionMatchesContact(transaction, contactFilter) {
     return String(transaction.vendorId || "").trim().toLowerCase() === vendorName;
   }
 
-  return true;
+  return false;
 }
 
 function buildAccountTotalsByMaster({
@@ -915,94 +903,147 @@ function buildAccountTotalsByMaster({
   });
 
   const validAccountIds = new Set(accounts.map((account) => account.id));
-  const validSubmenuIds = new Set(accounts.map((account) => account.submenuId));
-
   const nonSplitAccountTotals = new Map();
-  const nonSplitSubmenuTotals = new Map();
   const splitTotals = new Map();
+  const directSubmenuTotals = new Map();
+  const directMasterTotals = new Map();
+
+  const includeSubmenu = (submenuName) => {
+    if (includeSet && !includeSet.has(submenuName)) return false;
+    if (excludeSet && excludeSet.has(submenuName)) return false;
+    return true;
+  };
+
+  const addCategoryMovement = (categoryId, categoryType, transaction, amount) => {
+    const id = toIdString(categoryId);
+    const signed = computeMasterReportSigned(masterName, transaction.transactionType, amount);
+
+    if (categoryType === "account") {
+      if (!validAccountIds.has(id)) return;
+      const target = transaction.isSplit ? splitTotals : nonSplitAccountTotals;
+      target.set(id, (target.get(id) || 0) + signed);
+      return;
+    }
+
+    if (categoryType === "submenu") {
+      const submenu = coaContext.submenuMap.get(id);
+      if (!submenu || submenu.masterName !== masterName || !includeSubmenu(submenu.submenuName)) return;
+      directSubmenuTotals.set(id, (directSubmenuTotals.get(id) || 0) + signed);
+      return;
+    }
+
+    if (categoryType === "master") {
+      const master = coaContext.masterMap.get(id);
+      if (!master || master.masterName !== masterName || includeSet) return;
+      directMasterTotals.set(id, (directMasterTotals.get(id) || 0) + signed);
+    }
+  };
 
   for (const transaction of transactionsContext.transactions) {
     if (!inDateRange(transaction.transactionDate, startDate, endDate)) continue;
     const txnId = toIdString(transaction._id);
-    const transactionType = transaction.transactionType;
 
     if (transaction.isSplit) {
       const splits = transactionsContext.splitsByTransactionId.get(txnId) || [];
       for (const split of splits) {
-        if (split.categoryType !== "account") continue;
-        const accountId = toIdString(split.categoryId);
-        if (!validAccountIds.has(accountId)) continue;
-        const signed = computeMasterReportSigned(masterName, transactionType, split.amount);
-        splitTotals.set(accountId, (splitTotals.get(accountId) || 0) + signed);
+        addCategoryMovement(split.categoryId, split.categoryType || "account", transaction, split.amount);
       }
       continue;
     }
 
-    if (transaction.categoryType === "account") {
-      const accountId = toIdString(transaction.categoryId);
-      if (!validAccountIds.has(accountId)) continue;
-      const signed = computeMasterReportSigned(masterName, transactionType, transaction.amount);
-      nonSplitAccountTotals.set(accountId, (nonSplitAccountTotals.get(accountId) || 0) + signed);
-      continue;
-    }
-
-    if (transaction.categoryType === "submenu") {
-      const submenuId = toIdString(transaction.categoryId);
-      if (!validSubmenuIds.has(submenuId)) continue;
-      const signed = computeMasterReportSigned(masterName, transactionType, transaction.amount);
-      nonSplitSubmenuTotals.set(submenuId, (nonSplitSubmenuTotals.get(submenuId) || 0) + signed);
-    }
+    addCategoryMovement(transaction.categoryId, transaction.categoryType, transaction, transaction.amount);
   }
 
   const groupedMap = new Map();
   const flatAccounts = [];
   let total = 0;
 
-  for (const account of accounts) {
-    const rawTotal = (nonSplitAccountTotals.get(account.id) || 0)
-      + (nonSplitSubmenuTotals.get(account.submenuId) || 0)
-      + (splitTotals.get(account.id) || 0);
-    const displayTotal = Math.abs(rawTotal);
-    if (skipZero && displayTotal < 0.01) continue;
+  const appendLine = ({
+    id,
+    accountCode = "",
+    accountName,
+    currency = "Rp",
+    submenuName = "",
+    categoryId,
+    categoryType,
+    rawTotal,
+  }) => {
+    const displayTotal = roundReportMoney(rawTotal);
+    if (skipZero && Math.abs(displayTotal) < 0.01) return;
 
-    if (!groupedMap.has(account.submenuName)) {
-      groupedMap.set(account.submenuName, {
-        submenu_name: account.submenuName,
-        submenu_id: account.submenuId,
+    const groupName = submenuName || `${masterName} (Direct Posting)`;
+    if (!groupedMap.has(groupName)) {
+      groupedMap.set(groupName, {
+        submenu_name: groupName,
+        submenu_id: categoryType === "submenu" ? toIdString(categoryId) : "",
         accounts: [],
         subtotal: 0,
       });
     }
 
-    groupedMap.get(account.submenuName).accounts.push({
-      id: account.id,
-      account_code: account.accountCode || "",
-      account_name: account.accountName,
-      currency: account.currency || "Rp",
+    const row = {
+      id,
+      account_code: accountCode,
+      account_name: accountName,
+      currency,
+      submenu_name: submenuName,
+      category_id: toIdString(categoryId),
+      category_type: categoryType,
       total: displayTotal,
-      raw_total: rawTotal,
-    });
-    groupedMap.get(account.submenuName).subtotal += displayTotal;
-    flatAccounts.push({
+      raw_total: displayTotal,
+    };
+    groupedMap.get(groupName).accounts.push(row);
+    groupedMap.get(groupName).subtotal = roundReportMoney(groupedMap.get(groupName).subtotal + displayTotal);
+    flatAccounts.push(row);
+    total = roundReportMoney(total + displayTotal);
+  };
+
+  for (const account of accounts) {
+    const rawTotal = (nonSplitAccountTotals.get(account.id) || 0)
+      + (splitTotals.get(account.id) || 0);
+    appendLine({
       id: account.id,
-      account_code: account.accountCode || "",
-      account_name: account.accountName,
+      accountCode: account.accountCode || "",
+      accountName: account.accountName,
       currency: account.currency || "Rp",
-      submenu_name: account.submenuName,
-      total: displayTotal,
-      raw_total: rawTotal,
+      submenuName: account.submenuName,
+      categoryId: account.id,
+      categoryType: "account",
+      rawTotal,
     });
-    total += displayTotal;
+  }
+
+  for (const [submenuId, rawTotal] of directSubmenuTotals) {
+    const submenu = coaContext.submenuMap.get(submenuId);
+    if (!submenu) continue;
+    appendLine({
+      id: `direct-submenu-${submenuId}`,
+      accountName: `${submenu.submenuName} (Direct Posting)`,
+      submenuName: submenu.submenuName,
+      categoryId: submenuId,
+      categoryType: "submenu",
+      rawTotal,
+    });
+  }
+
+  for (const [masterId, rawTotal] of directMasterTotals) {
+    appendLine({
+      id: `direct-master-${masterId}`,
+      accountName: `${masterName} (Direct Posting)`,
+      categoryId: masterId,
+      categoryType: "master",
+      rawTotal,
+    });
   }
 
   return {
     accounts: flatAccounts,
     grouped: Array.from(groupedMap.values()),
-    total,
+    total: roundReportMoney(total),
   };
 }
 
-function buildProfitLossData(startDate, endDate, coaContext, transactionsContext) {
+export function buildProfitLossData(startDate, endDate, coaContext, transactionsContext) {
   const income = buildAccountTotalsByMaster({
     masterName: "Income",
     startDate,
@@ -1032,9 +1073,9 @@ function buildProfitLossData(startDate, endDate, coaContext, transactionsContext
 
   const totalIncome = income.total;
   const totalCOGS = cogs.total;
-  const grossProfit = totalIncome - totalCOGS;
+  const grossProfit = roundReportMoney(totalIncome - totalCOGS);
   const totalOperatingExpenses = operatingExpenses.total;
-  const netProfit = grossProfit - totalOperatingExpenses;
+  const netProfit = roundReportMoney(grossProfit - totalOperatingExpenses);
   const grossProfitPercentage = totalIncome > 0 ? (grossProfit / totalIncome) * 100 : 0;
   const netProfitPercentage = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
@@ -1088,10 +1129,8 @@ function calculateAccountCategoryBalance({
     const txnDate = new Date(transaction.transactionDate);
     if (Number.isNaN(txnDate.getTime()) || txnDate > asOfDate) continue;
 
-    if (useAccountFlowForCash) {
-      if (toIdString(transaction.accountId) !== account.id) continue;
-      balance += computeBalanceSigned("Assets", transaction.transactionType, transaction.amount);
-      continue;
+    if (useAccountFlowForCash && toIdString(transaction.accountId) === account.id) {
+      balance += cashFlowMovement(transaction.transactionType, transaction.amount);
     }
 
     if (transaction.isSplit) {
@@ -1099,22 +1138,17 @@ function calculateAccountCategoryBalance({
       for (const split of splits) {
         if (split.categoryType !== "account") continue;
         if (toIdString(split.categoryId) !== account.id) continue;
-        balance += computeBalanceSigned(account.masterName, transaction.transactionType, split.amount);
+        balance += categoryBalanceMovement(account.masterName, transaction.transactionType, split.amount);
       }
       continue;
     }
 
     if (transaction.categoryType === "account" && toIdString(transaction.categoryId) === account.id) {
-      balance += computeBalanceSigned(account.masterName, transaction.transactionType, transaction.amount);
-      continue;
-    }
-
-    if (transaction.categoryType === "submenu" && toIdString(transaction.categoryId) === account.submenuId) {
-      balance += computeBalanceSigned(account.masterName, transaction.transactionType, transaction.amount);
+      balance += categoryBalanceMovement(account.masterName, transaction.transactionType, transaction.amount);
     }
   }
 
-  return balance;
+  return roundReportMoney(balance);
 }
 
 function calculateMasterProfit({
@@ -1135,9 +1169,18 @@ function calculateMasterProfit({
     if (transaction.isSplit) {
       const splits = transactionsContext.splitsByTransactionId.get(toIdString(transaction._id)) || [];
       for (const split of splits) {
-        if (split.categoryType !== "account") continue;
-        const account = coaContext.accountMap.get(toIdString(split.categoryId));
-        if (!account || account.masterName !== masterName) continue;
+        if (split.categoryType === "account") {
+          const account = coaContext.accountMap.get(toIdString(split.categoryId));
+          if (!account || account.masterName !== masterName) continue;
+        } else if (split.categoryType === "submenu") {
+          const submenu = coaContext.submenuMap.get(toIdString(split.categoryId));
+          if (!submenu || submenu.masterName !== masterName) continue;
+        } else if (split.categoryType === "master") {
+          const categoryMaster = coaContext.masterMap.get(toIdString(split.categoryId));
+          if (!categoryMaster || categoryMaster.masterName !== masterName) continue;
+        } else {
+          continue;
+        }
         total += computeMasterReportSigned(masterName, transaction.transactionType, split.amount);
       }
       continue;
@@ -1154,21 +1197,81 @@ function calculateMasterProfit({
       const submenu = coaContext.submenuMap.get(toIdString(transaction.categoryId));
       if (!submenu || submenu.masterName !== masterName) continue;
       total += computeMasterReportSigned(masterName, transaction.transactionType, transaction.amount);
+      continue;
+    }
+
+    if (transaction.categoryType === "master") {
+      const categoryMaster = coaContext.masterMap.get(toIdString(transaction.categoryId));
+      if (!categoryMaster || categoryMaster.masterName !== masterName) continue;
+      total += computeMasterReportSigned(masterName, transaction.transactionType, transaction.amount);
     }
   }
 
-  return Math.abs(total);
+  return roundReportMoney(total);
 }
 
-function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
+function calculateDirectBalanceSheetPostings(asOfDate, coaContext, transactionsContext) {
+  const directRows = new Map();
+
+  for (const transaction of transactionsContext.transactions) {
+    const transactionDate = new Date(transaction.transactionDate);
+    if (Number.isNaN(transactionDate.getTime()) || transactionDate > asOfDate) continue;
+    const postings = transaction.isSplit
+      ? transactionsContext.splitsByTransactionId.get(toIdString(transaction._id)) || []
+      : [transaction];
+
+    for (const posting of postings) {
+      if (!["master", "submenu"].includes(posting.categoryType)) continue;
+      const categoryId = toIdString(posting.categoryId);
+      const master = posting.categoryType === "master"
+        ? coaContext.masterMap.get(categoryId)
+        : null;
+      const submenu = posting.categoryType === "submenu"
+        ? coaContext.submenuMap.get(categoryId)
+        : null;
+      const masterName = master?.masterName || submenu?.masterName;
+      if (!["Assets", "Liabilities", "Equity"].includes(masterName)) continue;
+
+      const rawBalance = categoryBalanceMovement(
+        masterName,
+        transaction.transactionType,
+        posting.amount ?? transaction.amount,
+      );
+      const balance = ["Liabilities", "Equity"].includes(masterName)
+        ? -rawBalance
+        : rawBalance;
+      const key = `${posting.categoryType}:${categoryId}`;
+      const row = directRows.get(key) || {
+        id: `direct-${posting.categoryType}-${categoryId}`,
+        account_code: "",
+        account_name: `${submenu?.submenuName || masterName} (Direct Posting)`,
+        currency: "Rp",
+        submenu_name: submenu?.submenuName || masterName,
+        category_id: categoryId,
+        category_type: posting.categoryType,
+        is_direct_posting: true,
+        master_name: masterName,
+        balance: 0,
+      };
+      row.balance = roundReportMoney(row.balance + balance);
+      directRows.set(key, row);
+    }
+  }
+
+  return [...directRows.values()];
+}
+
+export function buildBalanceSheetData(asOfDate, coaContext, transactionsContext, reportStartDate = null) {
   const assetCategories = {
     "Cash and Bank": { accounts: [], total: 0 },
     "Other Current Assets": { accounts: [], total: 0 },
     "Long-term Assets": { accounts: [], total: 0 },
+    "Unallocated Assets": { accounts: [], total: 0 },
   };
   const liabilityCategories = {
     "Current Liabilities": { accounts: [], total: 0 },
     "Long-term Liabilities": { accounts: [], total: 0 },
+    "Unallocated Liabilities": { accounts: [], total: 0 },
   };
 
   let totalAssets = 0;
@@ -1191,10 +1294,13 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
       account_name: account.accountName,
       currency: account.currency || "Rp",
       submenu_name: account.submenuName,
+      category_id: account.id,
+      category_type: "account",
+      is_cash_flow: useCashFlow,
       balance: rawBalance,
     });
-    assetCategories[categoryName].total += rawBalance;
-    totalAssets += rawBalance;
+    assetCategories[categoryName].total = roundReportMoney(assetCategories[categoryName].total + rawBalance);
+    totalAssets = roundReportMoney(totalAssets + rawBalance);
   }
 
   const liabilityAccounts = coaContext.accountsByMaster.get("Liabilities") || [];
@@ -1206,7 +1312,7 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
       coaContext,
       useAccountFlowForCash: false,
     });
-    const displayBalance = Math.abs(rawBalance);
+    const displayBalance = roundReportMoney(-rawBalance);
     const categoryName = buildLiabilityCategoryName(account.submenuName);
     liabilityCategories[categoryName].accounts.push({
       id: account.id,
@@ -1214,10 +1320,12 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
       account_name: account.accountName,
       currency: account.currency || "Rp",
       submenu_name: account.submenuName,
+      category_id: account.id,
+      category_type: "account",
       balance: displayBalance,
     });
-    liabilityCategories[categoryName].total += displayBalance;
-    totalLiabilities += displayBalance;
+    liabilityCategories[categoryName].total = roundReportMoney(liabilityCategories[categoryName].total + displayBalance);
+    totalLiabilities = roundReportMoney(totalLiabilities + displayBalance);
   }
 
   const equityAccounts = coaContext.accountsByMaster.get("Equity") || [];
@@ -1231,17 +1339,53 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
       coaContext,
       useAccountFlowForCash: false,
     });
-    const displayBalance = Math.abs(rawBalance);
+    const displayBalance = roundReportMoney(-rawBalance);
     otherEquityAccounts.push({
       id: account.id,
       account_code: account.accountCode || "",
       account_name: account.accountName,
       currency: account.currency || "Rp",
       submenu_name: account.submenuName,
+      category_id: account.id,
+      category_type: "account",
       balance: displayBalance,
     });
-    otherEquityTotal += displayBalance;
+    otherEquityTotal = roundReportMoney(otherEquityTotal + displayBalance);
   }
+
+  const directRows = calculateDirectBalanceSheetPostings(asOfDate, coaContext, transactionsContext);
+  for (const row of directRows) {
+    const masterName = row.master_name;
+    if (row.category_type === "submenu") {
+      if (masterName === "Assets") {
+        const categoryName = buildAssetCategoryName(row.submenu_name);
+        assetCategories[categoryName].accounts.push(row);
+        assetCategories[categoryName].total = roundReportMoney(assetCategories[categoryName].total + row.balance);
+      } else if (masterName === "Liabilities") {
+        const categoryName = buildLiabilityCategoryName(row.submenu_name);
+        liabilityCategories[categoryName].accounts.push(row);
+        liabilityCategories[categoryName].total = roundReportMoney(liabilityCategories[categoryName].total + row.balance);
+      } else {
+        otherEquityAccounts.push(row);
+        otherEquityTotal = roundReportMoney(otherEquityTotal + row.balance);
+      }
+      continue;
+    }
+
+    if (masterName === "Assets") {
+      assetCategories["Unallocated Assets"].accounts.push(row);
+      assetCategories["Unallocated Assets"].total = roundReportMoney(assetCategories["Unallocated Assets"].total + row.balance);
+    } else if (masterName === "Liabilities") {
+      liabilityCategories["Unallocated Liabilities"].accounts.push(row);
+      liabilityCategories["Unallocated Liabilities"].total = roundReportMoney(liabilityCategories["Unallocated Liabilities"].total + row.balance);
+    } else {
+      otherEquityAccounts.push(row);
+      otherEquityTotal = roundReportMoney(otherEquityTotal + row.balance);
+    }
+  }
+
+  totalAssets = roundReportMoney(Object.values(assetCategories).reduce((sum, category) => sum + category.total, 0));
+  totalLiabilities = roundReportMoney(Object.values(liabilityCategories).reduce((sum, category) => sum + category.total, 0));
 
   const currentYearStart = new Date(asOfDate.getFullYear(), 0, 1);
   const totalIncomeAllTime = calculateMasterProfit({
@@ -1256,7 +1400,7 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
     transactionsContext,
     coaContext,
   });
-  const retainedEarnings = totalIncomeAllTime - totalExpenseAllTime;
+  const retainedEarnings = roundReportMoney(totalIncomeAllTime - totalExpenseAllTime);
 
   const totalIncomeCurrentYear = calculateMasterProfit({
     masterName: "Income",
@@ -1272,8 +1416,16 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
     transactionsContext,
     coaContext,
   });
-  const currentYearProfit = totalIncomeCurrentYear - totalExpenseCurrentYear;
-  const priorYearsProfit = retainedEarnings - currentYearProfit;
+  const currentYearProfit = roundReportMoney(totalIncomeCurrentYear - totalExpenseCurrentYear);
+  const priorYearsProfit = roundReportMoney(retainedEarnings - currentYearProfit);
+  const firstTransactionDate = reportStartDate || transactionsContext.transactions.reduce((earliest, transaction) => {
+    const transactionDate = new Date(transaction.transactionDate);
+    if (Number.isNaN(transactionDate.getTime()) || transactionDate > asOfDate) return earliest;
+    return !earliest || transactionDate < earliest ? transactionDate : earliest;
+  }, null);
+  const firstReportDate = firstTransactionDate
+    ? formatYmd(firstTransactionDate)
+    : formatYmd(new Date(asOfDate.getFullYear(), 0, 1));
 
   const equityCategories = {
     "Other Equity": {
@@ -1287,7 +1439,7 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
           account_name: "Profit for all prior years",
           balance: priorYearsProfit,
           is_calculated: true,
-          link: `/reports/profit-loss?end_date=${formatYmd(new Date(asOfDate.getFullYear() - 1, 11, 31))}`,
+          link: `/reports/profit-loss?start_date=${firstReportDate}&end_date=${formatYmd(new Date(asOfDate.getFullYear() - 1, 11, 31))}`,
         },
         {
           id: "current_period",
@@ -1309,8 +1461,9 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
     },
   };
 
-  const totalEquity = otherEquityTotal + retainedEarnings;
-  const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+  const totalEquity = roundReportMoney(otherEquityTotal + retainedEarnings);
+  const totalLiabilitiesAndEquity = roundReportMoney(totalLiabilities + totalEquity);
+  const balanceDifference = roundReportMoney(totalAssets - totalLiabilitiesAndEquity);
 
   return {
     assets: {
@@ -1332,9 +1485,10 @@ function buildBalanceSheetData(asOfDate, coaContext, transactionsContext) {
     cash_and_bank: assetCategories["Cash and Bank"].total,
     to_be_received: assetCategories["Other Current Assets"].total,
     to_be_paid_out: liabilityCategories["Current Liabilities"].total,
-    net_worth: totalAssets - totalLiabilities,
+    net_worth: roundReportMoney(totalAssets - totalLiabilities),
     total_liabilities_equity: totalLiabilitiesAndEquity,
-    is_balanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01,
+    balance_difference: balanceDifference,
+    is_balanced: Math.abs(balanceDifference) < 0.01,
   };
 }
 
@@ -1360,10 +1514,10 @@ function resolveFilteredAccounts(accountFilter, coaContext) {
     return (coaContext.accountsByMaster.get(master.masterName) || []).slice();
   }
 
-  return coaContext.accounts.slice();
+  return [];
 }
 
-function buildAccountTransactionsData({
+export function buildAccountTransactionsData({
   startDate,
   endDate,
   accountFilter,
@@ -1376,8 +1530,7 @@ function buildAccountTransactionsData({
   const accountById = new Map(filteredAccounts.map((account) => [account.id, account]));
   const ledgerMap = new Map();
 
-  for (const account of filteredAccounts) {
-    ledgerMap.set(account.id, {
+  const createLedger = (account) => ({
       account_id: account.id,
       account_code: account.accountCode || "",
       account_name: account.accountName,
@@ -1390,77 +1543,119 @@ function buildAccountTransactionsData({
       total_credit: 0,
       ending_balance: 0,
     });
-  }
+  const getLedger = (account) => {
+    if (!ledgerMap.has(account.id)) ledgerMap.set(account.id, createLedger(account));
+    return ledgerMap.get(account.id);
+  };
+  const splitDebitCredit = (signed) => ({
+    debit: signed > 0 ? signed : 0,
+    credit: signed < 0 ? -signed : 0,
+    signed,
+  });
 
-  for (const transaction of transactionsContext.transactions) {
-    if (!transactionMatchesContact(transaction, contactFilter)) continue;
+  const getParentCategoryAccount = (categoryId, categoryType) => {
+    const id = toIdString(categoryId);
+    const filter = String(accountFilter || "all");
+    if (filter !== "all" && !filter.startsWith("master_") && !filter.startsWith("submenu_")) return null;
 
-    const txnDate = new Date(transaction.transactionDate);
-    if (Number.isNaN(txnDate.getTime()) || txnDate > endDate) continue;
-    const transactionType = transaction.transactionType;
-    const txnId = toIdString(transaction._id);
-
-    const contributions = [];
-
-    if (transaction.isSplit) {
-      const splits = transactionsContext.splitsByTransactionId.get(txnId) || [];
-      for (const split of splits) {
-        if (split.categoryType !== "account") continue;
-        const accountId = toIdString(split.categoryId);
-        if (!accountById.has(accountId)) continue;
-        contributions.push({
-          accountId,
-          amount: normalizeMoney(split.amount),
-        });
-      }
-    } else if (transaction.categoryType === "account") {
-      const accountId = toIdString(transaction.categoryId);
-      if (accountById.has(accountId)) {
-        contributions.push({
-          accountId,
-          amount: normalizeMoney(transaction.amount),
-        });
-      }
-    } else if (transaction.categoryType === "submenu") {
-      const submenuId = toIdString(transaction.categoryId);
-      const submenuAccounts = coaContext.accountsBySubmenu.get(submenuId) || [];
-      for (const submenuAccount of submenuAccounts) {
-        if (!accountById.has(submenuAccount.id)) continue;
-        contributions.push({
-          accountId: submenuAccount.id,
-          amount: normalizeMoney(transaction.amount),
-        });
-      }
+    let masterName = "";
+    let submenuName = "";
+    if (categoryType === "submenu") {
+      const submenu = coaContext.submenuMap.get(id);
+      if (!submenu) return null;
+      masterName = submenu.masterName;
+      submenuName = submenu.submenuName;
+      if (filter.startsWith("submenu_") && filter !== `submenu_${id}`) return null;
+      if (filter.startsWith("master_") && submenu.masterId !== filter.slice("master_".length)) return null;
+    } else if (categoryType === "master") {
+      const master = coaContext.masterMap.get(id);
+      if (!master) return null;
+      masterName = master.masterName;
+      if (filter.startsWith("master_") && filter !== `master_${id}`) return null;
+      if (filter.startsWith("submenu_")) return null;
+    } else {
+      return null;
     }
 
-    if (contributions.length === 0) continue;
+    return {
+      id: `direct-${categoryType}-${id}`,
+      accountCode: "",
+      accountName: `${submenuName || masterName} (Direct Posting)`,
+      currency: "Rp",
+      submenuName: submenuName || masterName,
+      masterName,
+    };
+  };
+
+  const addContribution = (account, transaction, signedAmount) => {
+    const ledger = getLedger(account);
+    const txnDate = new Date(transaction.transactionDate);
+    if (Number.isNaN(txnDate.getTime()) || txnDate > endDate) return;
+    const debitCredit = splitDebitCredit(signedAmount);
+
+    if (txnDate < startDate) {
+      ledger.starting_balance = roundReportMoney(ledger.starting_balance + debitCredit.signed);
+      return;
+    }
 
     const contactName = transaction.customerId
       ? (memberNameMap.get(toIdString(transaction.customerId)) || "")
       : (transaction.vendorId || "");
+    ledger.transactions.push({
+      transaction_id: toIdString(transaction._id),
+      date: formatYmd(txnDate),
+      date_obj: txnDate,
+      created_at: transaction.createdAt ? new Date(transaction.createdAt) : txnDate,
+      account_name: account.accountName,
+      description: transaction.description || "",
+      notes: transaction.notes || "",
+      contact_name: contactName || "",
+      debit: roundReportMoney(debitCredit.debit),
+      credit: roundReportMoney(debitCredit.credit),
+    });
+  };
 
-    for (const contribution of contributions) {
-      const ledger = ledgerMap.get(contribution.accountId);
-      const account = accountById.get(contribution.accountId);
-      const debitCredit = computeDebitCredit(account.masterName, transactionType, contribution.amount);
+  for (const transaction of transactionsContext.transactions) {
+    if (!transactionMatchesContact(transaction, contactFilter)) continue;
 
-      if (txnDate < startDate) {
-        ledger.starting_balance += debitCredit.signed;
-        continue;
+    const txnId = toIdString(transaction._id);
+    const cashAccount = accountById.get(toIdString(transaction.accountId));
+    if (cashAccount) {
+      addContribution(cashAccount, transaction, cashFlowMovement(transaction.transactionType, transaction.amount));
+    }
+
+    if (transaction.isSplit) {
+      const splits = transactionsContext.splitsByTransactionId.get(txnId) || [];
+      for (const split of splits) {
+        const categoryType = split.categoryType || "account";
+        const account = categoryType === "account"
+          ? accountById.get(toIdString(split.categoryId))
+          : getParentCategoryAccount(split.categoryId, categoryType);
+        if (!account) continue;
+        addContribution(
+          account,
+          transaction,
+          categoryBalanceMovement(account.masterName, transaction.transactionType, split.amount),
+        );
       }
-
-      ledger.transactions.push({
-        transaction_id: txnId,
-        date: formatYmd(txnDate),
-        date_obj: txnDate,
-        created_at: transaction.createdAt ? new Date(transaction.createdAt) : txnDate,
-        account_name: account.accountName,
-        description: transaction.description || "",
-        notes: transaction.notes || "",
-        contact_name: contactName || "",
-        debit: debitCredit.debit,
-        credit: debitCredit.credit,
-      });
+    } else if (transaction.categoryType === "account") {
+      const account = accountById.get(toIdString(transaction.categoryId));
+      if (account) {
+        addContribution(
+          account,
+          transaction,
+          categoryBalanceMovement(account.masterName, transaction.transactionType, transaction.amount),
+        );
+      }
+    } else if (["submenu", "master"].includes(transaction.categoryType)) {
+      const account = getParentCategoryAccount(transaction.categoryId, transaction.categoryType);
+      if (account) {
+        addContribution(
+          account,
+          transaction,
+          categoryBalanceMovement(account.masterName, transaction.transactionType, transaction.amount),
+        );
+      }
     }
   }
 
@@ -1491,9 +1686,12 @@ function buildAccountTransactionsData({
 
     ledger.total_debit = running.totalDebit;
     ledger.total_credit = running.totalCredit;
-    ledger.ending_balance = running.balance;
+    ledger.starting_balance = roundReportMoney(ledger.starting_balance);
+    ledger.total_debit = roundReportMoney(running.totalDebit);
+    ledger.total_credit = roundReportMoney(running.totalCredit);
+    ledger.ending_balance = roundReportMoney(running.balance);
 
-    if (String(accountFilter || "all") === "all" && ledger.transactions.length === 0) {
+    if (String(accountFilter || "all") === "all" && ledger.transactions.length === 0 && Math.abs(ledger.starting_balance) < 0.01) {
       continue;
     }
 
@@ -1515,7 +1713,6 @@ function serializeProfitLossPayload(payload) {
     year: payload.year,
     startDate: payload.startDate,
     endDate: payload.endDate,
-    reportType: payload.reportType,
     compareEnabled: payload.compareEnabled,
     comparePeriod: payload.comparePeriod,
     compareStartDate: payload.compareStartDate,
@@ -1530,46 +1727,57 @@ function serializeProfitLossPayload(payload) {
 
 async function buildProfitLossPayload(options = {}) {
   const now = new Date();
-  const startDefault = `${now.getFullYear()}-01-01`;
-  const endDefault = formatYmd(now);
-  const startDateText = options.start_date || options.startDate || startDefault;
-  const endDateText = options.end_date || options.endDate || endDefault;
-  const startDate = startOfDay(parseDateInput(startDateText, startDefault));
-  const endDate = endOfDay(parseDateInput(endDateText, endDefault));
-  const reportType = options.report_type || options.reportType || "accrual";
+  const period = resolveProfitLossPeriod(options, now);
+  const { startDate, endDate } = period;
   const compareEnabled = normalizeBooleanFlag(options.compare_enabled ?? options.compareEnabled, false);
-  const comparePeriod = options.compare_period || options.comparePeriod || "custom";
+const comparePeriod = options.compare_period || options.comparePeriod || "custom";
   const compareStartDate = options.compare_start_date || options.compareStartDate || "";
   const compareEndDate = options.compare_end_date || options.compareEndDate || "";
   const viewMode = options.view_mode || options.viewMode || "summary";
 
+  let comparisonDates = null;
+  let comparisonRange = null;
+  if (compareEnabled) {
+    if (comparePeriod === "custom") {
+      if (!compareStartDate || !compareEndDate) {
+        throw new RangeError("Comparison start and end dates are both required.");
+      }
+      comparisonRange = resolveProfitLossPeriod({
+        start_date: compareStartDate,
+        end_date: compareEndDate,
+      }, now);
+    } else {
+      const dates = getComparisonDates(startDate, endDate, comparePeriod);
+      comparisonRange = resolveProfitLossPeriod({
+        start_date: dates.start,
+        end_date: dates.end,
+      }, now);
+    }
+    comparisonDates = {
+      start: comparisonRange.startDateText,
+      end: comparisonRange.endDateText,
+    };
+  }
+
   const availableYears = await getAvailableYears();
   const coaContext = await loadCoaContext();
-  const transactionsContext = await loadTransactionsContext(endDate);
+  const transactionsContext = await loadTransactionsContext(maxReportDate(endDate, comparisonRange?.endDate));
   const reportData = buildProfitLossData(startDate, endDate, coaContext, transactionsContext);
 
-  let comparisonDates = null;
   let comparisonData = null;
-  if (compareEnabled) {
-    if (comparePeriod === "custom" && compareStartDate && compareEndDate) {
-      comparisonDates = {
-        start: compareStartDate,
-        end: compareEndDate,
-      };
-    } else {
-      comparisonDates = getComparisonDates(startDate, endDate, comparePeriod);
-    }
-
-    const compareStart = startOfDay(parseDateInput(comparisonDates.start, comparisonDates.start));
-    const compareEnd = endOfDay(parseDateInput(comparisonDates.end, comparisonDates.end));
-    comparisonData = buildProfitLossData(compareStart, compareEnd, coaContext, transactionsContext);
+  if (comparisonRange) {
+    comparisonData = buildProfitLossData(
+      comparisonRange.startDate,
+      comparisonRange.endDate,
+      coaContext,
+      transactionsContext,
+    );
   }
 
   return serializeProfitLossPayload({
-    year: Number.parseInt(options.year, 10) || startDate.getFullYear(),
-    startDate: formatYmd(startDate),
-    endDate: formatYmd(endDate),
-    reportType,
+    year: period.year,
+    startDate: period.startDateText,
+    endDate: period.endDateText,
     compareEnabled,
     comparePeriod,
     compareStartDate,
@@ -1585,15 +1793,13 @@ async function buildProfitLossPayload(options = {}) {
 async function buildAccountTransactionsPayload(options = {}) {
   const now = new Date();
   const yearDefault = now.getFullYear();
-  const startDefault = `${yearDefault}-01-01`;
-  const endDefault = `${yearDefault}-12-31`;
-
-  const year = Number.parseInt(options.year, 10) || yearDefault;
-  const startDate = startOfDay(parseDateInput(options.start_date || options.startDate, startDefault));
-  const endDate = endOfDay(parseDateInput(options.end_date || options.endDate, endDefault));
+  const period = resolveProfitLossPeriod({
+    year: options.year ?? yearDefault,
+    ...options,
+  }, now);
+  const { startDate, endDate } = period;
   const accountFilter = options.account_filter || options.accountFilter || "all";
   const contactFilter = options.contact_filter || options.contactFilter || "all";
-  const reportType = options.report_type || options.reportType || "accrual";
   const datePreset = options.date_preset || options.datePreset || "custom";
 
   const coaContext = await loadCoaContext();
@@ -1618,12 +1824,11 @@ async function buildAccountTransactionsPayload(options = {}) {
 
   return {
     title: "Account Transactions",
-    year,
-    startDate: formatYmd(startDate),
-    endDate: formatYmd(endDate),
+    year: period.year,
+    startDate: period.startDateText,
+    endDate: period.endDateText,
     accountFilter,
     contactFilter,
-    reportType,
     datePreset,
     reportData,
     accountsHierarchy: buildAccountsHierarchy(coaContext),
@@ -1635,55 +1840,78 @@ async function buildAccountTransactionsPayload(options = {}) {
 
 async function buildBalanceSheetPayload(options = {}) {
   const now = new Date();
-  const asOfDateText = options.as_of_date || options.asOfDate || formatYmd(now);
-  const asOfDate = endOfDay(parseDateInput(asOfDateText, formatYmd(now)));
-  const reportType = options.report_type || options.reportType || "accrual";
+  const period = resolveBalanceSheetAsOfDate(options, now);
+  const { asOfDate } = period;
   const viewMode = options.view_mode || options.viewMode || "summary";
-  const year = Number.parseInt(options.year, 10) || asOfDate.getFullYear();
 
   const coaContext = await loadCoaContext();
   const transactionsContext = await loadTransactionsContext(asOfDate);
-  const reportData = buildBalanceSheetData(asOfDate, coaContext, transactionsContext);
+  const firstTransactionDate = transactionsContext.transactions.reduce((earliest, transaction) => {
+    const transactionDate = new Date(transaction.transactionDate);
+    if (Number.isNaN(transactionDate.getTime())) return earliest;
+    return !earliest || transactionDate < earliest ? transactionDate : earliest;
+  }, null);
+  const reportData = buildBalanceSheetData(asOfDate, coaContext, transactionsContext, firstTransactionDate);
 
   return {
     title: "Balance Sheet",
-    year,
-    asOfDate: formatYmd(asOfDate),
-    reportType,
+    year: period.year,
+    asOfDate: period.asOfDateText,
     availableYears: await getAvailableYears(),
     reportData,
     viewMode,
   };
 }
 
-function buildProfitLossCsvRows(payload) {
+export function buildProfitLossCsvRows(payload) {
   const rows = [];
   rows.push(["Profit & Loss Statement"]);
   rows.push([`Period: ${payload.startDate} to ${payload.endDate}`]);
-  rows.push([""]);
-  rows.push(["Account", "Amount"]);
-  rows.push([""]);
-  rows.push(["INCOME"]);
-  for (const account of payload.reportData.income.accounts) {
-    rows.push([account.account_name, account.total.toFixed(2)]);
+  if (payload.comparisonDates) {
+    rows.push([`Compare: ${payload.comparisonDates.start} to ${payload.comparisonDates.end}`]);
   }
-  rows.push(["Total Income", payload.reportData.income.total.toFixed(2)]);
   rows.push([""]);
-  rows.push(["COST OF GOODS SOLD"]);
-  for (const account of payload.reportData.cogs.accounts) {
-    rows.push([account.account_name, account.total.toFixed(2)]);
-  }
-  rows.push(["Total Cost of Goods Sold", payload.reportData.cogs.total.toFixed(2)]);
+  rows.push(["Account", "Current Amount", ...(payload.comparisonData ? ["Comparison Amount", "Change %"] : [])]);
   rows.push([""]);
-  rows.push(["Gross Profit", payload.reportData.gross_profit.toFixed(2)]);
+
+  const appendAmount = (name, amount, compareAmount) => {
+    const row = [name, roundReportMoney(amount).toFixed(2)];
+    if (payload.comparisonData) {
+      const hasCompare = compareAmount !== undefined;
+      const change = hasCompare
+        ? (Math.abs(Number(compareAmount)) < 0.000001
+          ? (Math.abs(Number(amount)) < 0.000001 ? "0.00%" : "Baru")
+          : `${(((Number(amount) - Number(compareAmount)) / Math.abs(Number(compareAmount))) * 100).toFixed(2)}%`)
+        : "";
+      row.push(hasCompare ? roundReportMoney(compareAmount).toFixed(2) : "", change);
+    }
+    rows.push(row);
+  };
+
+  const appendSection = (label, key, current) => {
+    const prior = payload.comparisonData?.[key];
+    const priorByCategory = new Map((prior?.accounts || []).map((account) => [
+      `${account.category_type || "account"}:${account.category_id || account.id}`,
+      account.total,
+    ]));
+    rows.push([label]);
+    for (const account of current.accounts) {
+      const key = `${account.category_type || "account"}:${account.category_id || account.id}`;
+      const comparisonAmount = payload.comparisonData
+        ? (priorByCategory.get(key) ?? 0)
+        : undefined;
+      appendAmount(account.account_name, account.total, comparisonAmount);
+    }
+    appendAmount(`Total ${label}`, current.total, payload.comparisonData ? (prior?.total ?? 0) : undefined);
+    rows.push([""]);
+  };
+
+  appendSection("Income", "income", payload.reportData.income);
+  appendSection("Cost of Goods Sold", "cogs", payload.reportData.cogs);
+  appendAmount("Gross Profit", payload.reportData.gross_profit, payload.comparisonData?.gross_profit);
   rows.push([""]);
-  rows.push(["OPERATING EXPENSES"]);
-  for (const account of payload.reportData.operating_expenses.accounts) {
-    rows.push([account.account_name, account.total.toFixed(2)]);
-  }
-  rows.push(["Total Operating Expenses", payload.reportData.operating_expenses.total.toFixed(2)]);
-  rows.push([""]);
-  rows.push(["Net Profit", payload.reportData.net_profit.toFixed(2)]);
+  appendSection("Operating Expenses", "operating_expenses", payload.reportData.operating_expenses);
+  appendAmount("Net Profit", payload.reportData.net_profit, payload.comparisonData?.net_profit);
   return rows;
 }
 
@@ -1786,7 +2014,7 @@ export const getProfitLoss = async (req, res) => {
     const payload = await buildProfitLossPayload(req.query || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1795,7 +2023,7 @@ export const filterProfitLoss = async (req, res) => {
     const payload = await buildProfitLossPayload(req.body || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1805,7 +2033,7 @@ export const exportProfitLossCsv = async (req, res) => {
     const filename = `profit_loss_${formatYmd(new Date())}.csv`;
     sendCsv(res, filename, buildProfitLossCsvRows(payload));
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1814,7 +2042,7 @@ export const getAccountTransactionsReport = async (req, res) => {
     const payload = await buildAccountTransactionsPayload(req.query || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1823,7 +2051,7 @@ export const filterAccountTransactionsReport = async (req, res) => {
     const payload = await buildAccountTransactionsPayload(req.body || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1833,7 +2061,7 @@ export const exportAccountTransactionsCsv = async (req, res) => {
     const filename = `account_transactions_${formatYmd(new Date())}.csv`;
     sendCsv(res, filename, buildAccountTransactionsCsvRows(payload));
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1851,7 +2079,7 @@ export const getBalanceSheet = async (req, res) => {
     const payload = await buildBalanceSheetPayload(req.query || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1860,7 +2088,7 @@ export const filterBalanceSheet = async (req, res) => {
     const payload = await buildBalanceSheetPayload(req.body || {});
     res.status(200).json({ success: true, data: payload });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1870,7 +2098,7 @@ export const exportBalanceSheetCsv = async (req, res) => {
     const filename = `balance_sheet_${formatYmd(new Date())}.csv`;
     sendCsv(res, filename, buildBalanceSheetCsvRows(payload));
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    respondReportError(res, error);
   }
 };
 
@@ -1883,41 +2111,86 @@ export const checkBalanceSheetSplits = async (req, res) => {
     const transactionIds = splitTransactions.map((txn) => txn._id);
     const splits = transactionIds.length
       ? await TransactionSplit.find({ transactionId: { $in: transactionIds } })
-        .select("transactionId amount")
+        .select("transactionId amount categoryId categoryType")
         .lean()
       : [];
 
     const splitTotalsMap = new Map();
+    const splitsByTransactionId = new Map();
     for (const split of splits) {
       const txnId = toIdString(split.transactionId);
+      if (!splitsByTransactionId.has(txnId)) splitsByTransactionId.set(txnId, []);
+      splitsByTransactionId.get(txnId).push(split);
       splitTotalsMap.set(txnId, (splitTotalsMap.get(txnId) || 0) + normalizeMoney(split.amount));
     }
 
     const accountIds = [...new Set(splitTransactions.map((txn) => toIdString(txn.accountId)).filter(Boolean))];
     const accountRows = accountIds.length
-      ? await CoaAccount.find({ _id: { $in: accountIds } }).select("_id accountName").lean()
+      ? await CoaAccount.find({ _id: { $in: accountIds } }).select("_id accountName isActive").lean()
       : [];
     const accountNameMap = new Map(accountRows.map((row) => [toIdString(row._id), row.accountName || ""]));
+    const splitCategoryAccountIds = [...new Set(
+      splits
+        .filter((split) => split.categoryType === "account")
+        .map((split) => toIdString(split.categoryId))
+        .filter(Boolean),
+    )];
+    const splitCategoryAccounts = splitCategoryAccountIds.length
+      ? await CoaAccount.find({ _id: { $in: splitCategoryAccountIds } })
+        .select("_id accountName isActive")
+        .lean()
+      : [];
+    const splitCategoryAccountMap = new Map(
+      splitCategoryAccounts.map((account) => [toIdString(account._id), account]),
+    );
 
     const issues = [];
     for (const txn of splitTransactions) {
       const txnAmount = normalizeMoney(txn.amount);
       const splitTotal = splitTotalsMap.get(toIdString(txn._id)) || 0;
-      const remaining = txnAmount - splitTotal;
-      if (Math.abs(remaining) <= 0.01) continue;
-      issues.push({
+      const remaining = roundReportMoney(txnAmount - splitTotal);
+      const baseIssue = {
         id: toIdString(txn._id),
         transaction_date: formatYmd(txn.transactionDate),
         description: txn.description || "",
         transaction_type: txn.transactionType,
         transaction_amount: txnAmount,
-        total_split_amount: splitTotal,
-        remaining_unallocated: remaining,
+        total_split_amount: roundReportMoney(splitTotal),
         account_name: accountNameMap.get(toIdString(txn.accountId)) || "",
-      });
+      };
+
+      if (hasSplitAmountMismatch(txnAmount, splitTotal)) {
+        issues.push({
+          ...baseIssue,
+          issue_type: "amount_mismatch",
+          issue_reason: "Total split berbeda dari jumlah transaksi.",
+          category_name: "",
+          remaining_unallocated: remaining,
+        });
+      }
+
+      for (const split of splitsByTransactionId.get(toIdString(txn._id)) || []) {
+        if ((split.categoryType || "account") !== "account") continue;
+        const categoryAccount = splitCategoryAccountMap.get(toIdString(split.categoryId));
+        if (categoryAccount && categoryAccount.isActive !== false) continue;
+        issues.push({
+          ...baseIssue,
+          issue_type: categoryAccount ? "inactive_category" : "missing_category",
+          issue_reason: categoryAccount
+            ? "Split masih mengarah ke akun COA nonaktif."
+            : "Akun COA split tidak ditemukan.",
+          category_name: categoryAccount?.accountName || toIdString(split.categoryId),
+          remaining_unallocated: 0,
+          split_amount: roundReportMoney(split.amount),
+        });
+      }
     }
 
-    issues.sort((a, b) => Math.abs(b.remaining_unallocated) - Math.abs(a.remaining_unallocated));
+    issues.sort((a, b) => {
+      const delta = Math.abs(b.remaining_unallocated) - Math.abs(a.remaining_unallocated);
+      if (delta !== 0) return delta;
+      return a.transaction_date.localeCompare(b.transaction_date);
+    });
 
     res.status(200).json({
       success: true,
