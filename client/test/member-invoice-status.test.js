@@ -22,3 +22,12 @@ test("invoice status filter finds any matching invoice and supports members with
   assert.equal(matchesMemberInvoiceStatus({}, "none"), true);
   assert.equal(matchesMemberInvoiceStatus({}, "draft"), false);
 });
+
+test("invoice status filter matches any of multiple selected statuses", () => {
+  assert.equal(matchesMemberInvoiceStatus({ draft: 1 }, ["draft", "paid"]), true);
+  assert.equal(matchesMemberInvoiceStatus({ paid: 1 }, ["draft", "paid"]), true);
+  assert.equal(matchesMemberInvoiceStatus({ sent: 1 }, ["draft", "paid"]), false);
+  assert.equal(matchesMemberInvoiceStatus({}, ["none", "paid"]), true);
+  assert.equal(matchesMemberInvoiceStatus({ draft: 1 }, ["none", "paid"]), false);
+  assert.equal(matchesMemberInvoiceStatus({ draft: 1 }, ["all"]), true);
+});

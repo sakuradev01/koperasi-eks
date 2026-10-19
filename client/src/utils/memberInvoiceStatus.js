@@ -7,8 +7,16 @@ export function getMemberInvoiceStatusEntries(statusCounts = {}) {
 }
 
 export function matchesMemberInvoiceStatus(statusCounts = {}, requestedStatus = "all") {
-  if (!requestedStatus || requestedStatus === "all") return true;
   const entries = getMemberInvoiceStatusEntries(statusCounts);
-  if (requestedStatus === "none") return entries.length === 0;
-  return entries.some((entry) => entry.status === requestedStatus);
+  const selectedStatuses = (Array.isArray(requestedStatus) ? requestedStatus : [requestedStatus])
+    .map((status) => String(status || "").trim().toLowerCase())
+    .filter((status) => status && status !== "all");
+
+  if (selectedStatuses.length === 0) return true;
+
+  return selectedStatuses.some((status) => {
+    if (status === "none") return entries.length === 0;
+    return MEMBER_INVOICE_STATUS_ORDER.includes(status)
+      && entries.some((entry) => entry.status === status);
+  });
 }

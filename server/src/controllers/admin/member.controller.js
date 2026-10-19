@@ -37,30 +37,80 @@ const getInvoiceStatusCounts = async (memberIds) => {
   return buildInvoiceStatusCountsByMember(invoices);
 };
 
-const addMembershipStatusFilter = (filter, requestedStatus) => {
-  const status = normalizeMembershipClassification(requestedStatus);
-  if (!status) return;
+const normalizeQueryValues = (value) => [
+  ...new Set(
+    (Array.isArray(value) ? value : [value])
+      .flatMap((item) => String(item ?? "").split(","))
+      .map((item) => item.trim())
+      .filter((item) => item && item.toLowerCase() !== "all"),
+  ),
+];
 
-  const membershipClause = status === "legacy"
-    ? {
+const appendFilterClause = (filter, clause) => {
+  if (Object.keys(filter).length === 0) {
+    Object.assign(filter, clause);
+    return;
+  }
+
+  const previousFilter = { ...filter };
+  Object.keys(filter).forEach((key) => delete filter[key]);
+  filter.$and = [
+    ...(Array.isArray(previousFilter.$and) ? previousFilter.$and : [previousFilter]),
+    clause,
+  ];
+};
+
+const addVerificationStatusFilter = (filter, requestedStatuses) => {
+  const clausesByStatus = {
+    verified: { isVerified: true },
+    unverified: {
+      $or: [
+        { registrationStatus: "pending" },
+        { registrationStatus: { $exists: false }, isVerified: false },
+      ],
+    },
+    rejected: { registrationStatus: "rejected" },
+    "address-pending": { addressUpdateStatus: "pending" },
+    "identity-pending": { identityVerifyStatus: "pending" },
+  };
+  const clauses = normalizeQueryValues(requestedStatuses)
+    .map((status) => clausesByStatus[status])
+    .filter(Boolean);
+
+  if (clauses.length === 1) appendFilterClause(filter, clauses[0]);
+  else if (clauses.length > 1) appendFilterClause(filter, { $or: clauses });
+};
+
+const addCompletionStatusFilter = (filter, requestedStatuses) => {
+  const statuses = normalizeQueryValues(requestedStatuses)
+    .filter((status) => ["completed", "not_completed"].includes(status));
+  if (statuses.length === 1) {
+    appendFilterClause(filter, { isCompleted: statuses[0] === "completed" });
+  }
+};
+
+const addProductFilter = (filter, requestedProductIds) => {
+  const productIds = normalizeQueryValues(requestedProductIds);
+  if (productIds.length === 1) filter.productId = productIds[0];
+  else if (productIds.length > 1) filter.productId = { $in: productIds };
+};
+
+const addMembershipStatusFilter = (filter, requestedStatus) => {
+  const membershipClauses = normalizeQueryValues(requestedStatus)
+    .map(normalizeMembershipClassification)
+    .filter(Boolean)
+    .map((status) => (status === "legacy"
+      ? {
         $or: [
           { membershipStatus: { $exists: false } },
           { membershipStatus: null },
           { membershipStatus: "" },
         ],
       }
-    : { membershipStatus: status };
+      : { membershipStatus: status }));
 
-  if (filter.$or) {
-    filter.$and = [...(filter.$and || []), { $or: filter.$or }, membershipClause];
-    delete filter.$or;
-  } else if (filter.$and) {
-    filter.$and.push(membershipClause);
-  } else if (membershipClause.$or) {
-    filter.$or = membershipClause.$or;
-  } else {
-    filter.membershipStatus = status;
-  }
+  if (membershipClauses.length === 1) appendFilterClause(filter, membershipClauses[0]);
+  else if (membershipClauses.length > 1) appendFilterClause(filter, { $or: membershipClauses });
 };
 
 // Get all members — optimized: exclude heavy base64 images from list, single aggregate for savings
@@ -72,26 +122,35 @@ const getAllMembers = asyncHandler(async (req, res) => {
     addressUpdateStatus,
     identityVerifyStatus,
     isCompleted,
+    completionStatus,
     productId,
     membershipStatus,
     invoiceStatus,
+    verificationStatus,
   } = req.query;
   let filter = {};
-  if (verified === "true") filter.isVerified = true;
-  else if (verified === "false") filter.isVerified = false;
-  if (registrationStatus === "pending") {
-    filter.$or = [
-      { registrationStatus: "pending" },
-      { registrationStatus: { $exists: false }, isVerified: false },
-    ];
-  } else if (["approved", "rejected"].includes(registrationStatus)) {
-    filter.registrationStatus = registrationStatus;
+  if (verificationStatus !== undefined) {
+    addVerificationStatusFilter(filter, verificationStatus);
+  } else {
+    if (verified === "true") filter.isVerified = true;
+    else if (verified === "false") filter.isVerified = false;
+    if (registrationStatus === "pending") {
+      appendFilterClause(filter, {
+        $or: [
+          { registrationStatus: "pending" },
+          { registrationStatus: { $exists: false }, isVerified: false },
+        ],
+      });
+    } else if (["approved", "rejected"].includes(registrationStatus)) {
+      filter.registrationStatus = registrationStatus;
+    }
   }
   if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
   if (identityVerifyStatus) filter.identityVerifyStatus = identityVerifyStatus;
-  if (isCompleted === "true") filter.isCompleted = true;
+  if (completionStatus !== undefined) addCompletionStatusFilter(filter, completionStatus);
+  else if (isCompleted === "true") filter.isCompleted = true;
   else if (isCompleted === "false") filter.isCompleted = false;
-  if (productId) filter.productId = productId;
+  addProductFilter(filter, productId);
   addMembershipStatusFilter(filter, membershipStatus);
 
   const members = await Member.find(filter)
@@ -1040,31 +1099,38 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     verified,
     registrationStatus,
     addressUpdateStatus,
+    identityVerifyStatus,
     isCompleted,
+    completionStatus,
     productId,
     search,
     membershipStatus,
     invoiceStatus,
+    verificationStatus,
   } = req.query;
   let filter = {};
-  if (verified === "true") filter.isVerified = true;
-  else if (verified === "false") filter.isVerified = false;
-  if (registrationStatus === "pending") {
-    filter.$and = [
-      {
+  if (verificationStatus !== undefined) {
+    addVerificationStatusFilter(filter, verificationStatus);
+  } else {
+    if (verified === "true") filter.isVerified = true;
+    else if (verified === "false") filter.isVerified = false;
+    if (registrationStatus === "pending") {
+      appendFilterClause(filter, {
         $or: [
           { registrationStatus: "pending" },
           { registrationStatus: { $exists: false }, isVerified: false },
         ],
-      },
-    ];
-  } else if (["approved", "rejected"].includes(registrationStatus)) {
-    filter.registrationStatus = registrationStatus;
+      });
+    } else if (["approved", "rejected"].includes(registrationStatus)) {
+      filter.registrationStatus = registrationStatus;
+    }
   }
   if (addressUpdateStatus) filter.addressUpdateStatus = addressUpdateStatus;
-  if (isCompleted === "true") filter.isCompleted = true;
+  if (identityVerifyStatus) filter.identityVerifyStatus = identityVerifyStatus;
+  if (completionStatus !== undefined) addCompletionStatusFilter(filter, completionStatus);
+  else if (isCompleted === "true") filter.isCompleted = true;
   else if (isCompleted === "false") filter.isCompleted = false;
-  if (productId) filter.productId = productId;
+  addProductFilter(filter, productId);
   if (search) {
     const searchFilter = {
       $or: [
@@ -1074,8 +1140,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
         { nik: { $regex: search, $options: "i" } },
       ],
     };
-    if (filter.$and) filter.$and.push(searchFilter);
-    else filter.$or = searchFilter.$or;
+    appendFilterClause(filter, searchFilter);
   }
   addMembershipStatusFilter(filter, membershipStatus);
 

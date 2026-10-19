@@ -59,12 +59,18 @@ export function buildInvoiceStatusCountsByMember(invoices = [], now = new Date()
 }
 
 export function matchesInvoiceStatusFilter(statusCounts = {}, requestedStatus = "all") {
-  const status = String(requestedStatus || "all").trim().toLowerCase();
-  if (!status || status === "all") return true;
+  const statuses = (Array.isArray(requestedStatus) ? requestedStatus : [requestedStatus])
+    .flatMap((value) => String(value || "").split(","))
+    .map((status) => status.trim().toLowerCase())
+    .filter((status) => status && status !== "all");
+  if (statuses.length === 0) return true;
+
   const hasInvoices = Object.values(statusCounts).some((count) => Number(count) > 0);
-  if (status === "none") return !hasInvoices;
-  if (!INVOICE_STATUSES.includes(status)) return true;
-  return Number(statusCounts[status] || 0) > 0;
+  return statuses.some((status) => {
+    if (status === "none") return !hasInvoices;
+    if (!INVOICE_STATUSES.includes(status)) return false;
+    return Number(statusCounts[status] || 0) > 0;
+  });
 }
 
 export function formatInvoiceStatusCounts(statusCounts = {}) {

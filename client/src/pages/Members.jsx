@@ -4,6 +4,7 @@ import api from "../api/index.jsx";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import MemberDocumentImage from "../components/MemberDocumentImage.jsx";
+import MultiSelectFilter from "../components/MultiSelectFilter.jsx";
 import {
   getMemberInvoiceStatusEntries,
   matchesMemberInvoiceStatus,
@@ -31,6 +32,31 @@ const INVOICE_STATUS_META = {
   paid: { label: "Paid", badgeClass: "bg-emerald-100 text-emerald-800" },
   overdue: { label: "Overdue", badgeClass: "bg-red-100 text-red-800" },
 };
+
+const SAVINGS_STATUS_OPTIONS = [
+  { value: "completed", label: "✅ Lunas" },
+  { value: "not_completed", label: "⏳ Belum Lunas" },
+];
+
+const INVOICE_STATUS_OPTIONS = [
+  { value: "none", label: "Belum Ada Invoice" },
+  ...MEMBER_INVOICE_STATUS_ORDER.map((status) => ({
+    value: status,
+    label: INVOICE_STATUS_META[status].label,
+  })),
+];
+
+const VERIFICATION_STATUS_OPTIONS = [
+  { value: "verified", label: "✅ Terverifikasi" },
+  { value: "unverified", label: "🕐 Belum Verifikasi" },
+  { value: "rejected", label: "❌ Ditolak" },
+  { value: "address-pending", label: "📍 Alamat Pending" },
+  { value: "identity-pending", label: "🤳 Wajah Pending" },
+];
+
+const MEMBERSHIP_STATUS_OPTIONS = Object.entries(MEMBERSHIP_STATUS_META).map(
+  ([value, meta]) => ({ value, label: meta.label }),
+);
 
 const getMembershipStatus = (member) => {
   const status = String(
@@ -83,11 +109,11 @@ const Members = () => {
   
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
-  const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, rejected, address-pending, identity-pending
-  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState("all");
-  const [filterMembershipStatus, setFilterMembershipStatus] = useState("all");
-  const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
+  const [filterStatus, setFilterStatus] = useState([]);
+  const [filterVerification, setFilterVerification] = useState([]);
+  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState([]);
+  const [filterMembershipStatus, setFilterMembershipStatus] = useState([]);
+  const [filterProduct, setFilterProduct] = useState([]);
   const [exporting, setExporting] = useState(false);
   const [verifyMember, setVerifyMember] = useState(null);
   const [verifyConfirmed, setVerifyConfirmed] = useState(false);
@@ -130,13 +156,13 @@ const Members = () => {
     // Read URL query param for filter
     const filterParam = searchParams.get("filter");
     if (filterParam === "unverified") {
-      setFilterVerification("unverified");
+      setFilterVerification(["unverified"]);
     } else if (filterParam === "address-pending") {
-      setFilterVerification("address-pending");
+      setFilterVerification(["address-pending"]);
     } else if (filterParam === "identity-pending") {
-      setFilterVerification("identity-pending");
+      setFilterVerification(["identity-pending"]);
     } else if (filterParam === "rejected") {
-      setFilterVerification("rejected");
+      setFilterVerification(["rejected"]);
     }
     fetchMembers();
     fetchProducts();
@@ -587,16 +613,14 @@ const Members = () => {
     setExporting(true);
     try {
       const params = new URLSearchParams();
-      if (filterStatus === "completed") params.set("isCompleted", "true");
-      else if (filterStatus === "not_completed") params.set("isCompleted", "false");
-      if (filterVerification === "verified") params.set("verified", "true");
-      else if (filterVerification === "unverified") params.set("registrationStatus", "pending");
-      else if (filterVerification === "rejected") params.set("registrationStatus", "rejected");
-      else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
-      else if (filterVerification === "identity-pending") params.set("identityVerifyStatus", "pending");
-      if (filterInvoiceStatus !== "all") params.set("invoiceStatus", filterInvoiceStatus);
-      if (filterMembershipStatus !== "all") params.set("membershipStatus", filterMembershipStatus);
-      if (filterProduct) params.set("productId", filterProduct);
+      const setSelected = (key, values) => {
+        if (values.length > 0) params.set(key, values.join(","));
+      };
+      setSelected("completionStatus", filterStatus);
+      setSelected("verificationStatus", filterVerification);
+      setSelected("invoiceStatus", filterInvoiceStatus);
+      setSelected("membershipStatus", filterMembershipStatus);
+      setSelected("productId", filterProduct);
       if (searchTerm) params.set("search", searchTerm);
 
       // axios blob request via same instance (auth handled by interceptor)
@@ -634,45 +658,39 @@ const Members = () => {
   // Search and filter logic with useMemo for performance
   const filteredMembers = useMemo(() => {
     let result = members;
-    
-    // Filter by status
-    if (filterStatus === "completed") {
-      result = result.filter(member => member.isCompleted === true);
-    } else if (filterStatus === "not_completed") {
-      result = result.filter(member => !member.isCompleted);
+
+    if (filterStatus.length > 0) {
+      result = result.filter((member) => filterStatus.includes(
+        member.isCompleted ? "completed" : "not_completed",
+      ));
     }
 
-    if (filterInvoiceStatus === "none") {
-      result = result.filter((member) => matchesMemberInvoiceStatus(member.invoiceStatusCounts, "none"));
-    } else if (filterInvoiceStatus !== "all") {
+    if (filterInvoiceStatus.length > 0) {
       result = result.filter((member) => matchesMemberInvoiceStatus(
         member.invoiceStatusCounts,
         filterInvoiceStatus,
       ));
     }
 
-    // Filter by verification status
-    if (filterVerification === "verified") {
-      result = result.filter(member => member.isVerified === true);
-    } else if (filterVerification === "unverified") {
-      result = result.filter(member => getRegistrationStatus(member) === "pending");
-    } else if (filterVerification === "rejected") {
-      result = result.filter(member => getRegistrationStatus(member) === "rejected");
-    } else if (filterVerification === "address-pending") {
-      result = result.filter(member => member.addressUpdateStatus === "pending");
-    } else if (filterVerification === "identity-pending") {
-      result = result.filter(member => member.identityVerifyStatus === "pending");
+    if (filterVerification.length > 0) {
+      result = result.filter((member) => filterVerification.some((status) => {
+        if (status === "verified") return member.isVerified === true;
+        if (status === "unverified") return getRegistrationStatus(member) === "pending";
+        if (status === "rejected") return getRegistrationStatus(member) === "rejected";
+        if (status === "address-pending") return member.addressUpdateStatus === "pending";
+        if (status === "identity-pending") return member.identityVerifyStatus === "pending";
+        return false;
+      }));
     }
 
-    if (filterMembershipStatus !== "all") {
-      result = result.filter(member => getMembershipStatus(member) === filterMembershipStatus);
+    if (filterMembershipStatus.length > 0) {
+      result = result.filter((member) => filterMembershipStatus.includes(getMembershipStatus(member)));
     }
 
-    // Filter by product
-    if (filterProduct) {
-      result = result.filter(member => {
-        const productId = member.product?._id || member.productId || "";
-        return String(productId) === String(filterProduct);
+    if (filterProduct.length > 0) {
+      result = result.filter((member) => {
+        const productId = String(member.product?._id || member.productId || "");
+        return filterProduct.includes(productId);
       });
     }
     
@@ -824,147 +842,73 @@ const Members = () => {
             </div>
           </div>
           
-          {/* Filter Status Lunas */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Status Tabungan:</label>
-            <select
-              value={filterStatus}
-              onChange={(e) => {
-                setFilterStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
-            >
-              <option value="all">📋 Semua</option>
-              <option value="completed">✅ Lunas</option>
-              <option value="not_completed">⏳ Belum Lunas</option>
-            </select>
-          </div>
-
-          {/* Filter Status Invoice */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Status Invoice:</label>
-            <select
-              value={filterInvoiceStatus}
-              onChange={(e) => {
-                setFilterInvoiceStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
-            >
-              <option value="all">📋 Semua</option>
-              <option value="none">Belum Ada Invoice</option>
-              {MEMBER_INVOICE_STATUS_ORDER.map((status) => (
-                <option key={status} value={status}>{INVOICE_STATUS_META[status].label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Verifikasi */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Verifikasi:</label>
-            <select
-              value={filterVerification}
-              onChange={(e) => {
-                setFilterVerification(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
-            >
-              <option value="all">📋 Semua</option>
-              <option value="verified">✅ Terverifikasi</option>
-              <option value="unverified">🕐 Belum Verifikasi</option>
-              <option value="rejected">❌ Ditolak</option>
-              <option value="address-pending">📍 Alamat Pending</option>
-              <option value="identity-pending">🤳 Wajah Pending</option>
-            </select>
-          </div>
-
-          {/* Filter Status Keanggotaan */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Keanggotaan:</label>
-            <select
-              value={filterMembershipStatus}
-              onChange={(e) => {
-                setFilterMembershipStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
-            >
-              <option value="all">📋 Semua</option>
-              <option value="legacy">⚪ Lama / Belum Diatur</option>
-              <option value="draft">🟡 Draft</option>
-              <option value="active">🟢 Aktif</option>
-              <option value="inactive">⚫ Nonaktif</option>
-            </select>
-          </div>
-
-          {/* Filter Produk */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Produk:</label>
-            <select
-              value={filterProduct}
-              onChange={(e) => {
-                setFilterProduct(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
-            >
-              <option value="">📋 Semua</option>
-              {products.map((product) => (
-                <option key={product._id} value={product._id}>
-                  🌸 {product.title}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MultiSelectFilter
+            label="Status Tabungan"
+            options={SAVINGS_STATUS_OPTIONS}
+            selectedValues={filterStatus}
+            onChange={(values) => { setFilterStatus(values); setCurrentPage(1); }}
+          />
+          <MultiSelectFilter
+            label="Status Invoice"
+            options={INVOICE_STATUS_OPTIONS}
+            selectedValues={filterInvoiceStatus}
+            onChange={(values) => { setFilterInvoiceStatus(values); setCurrentPage(1); }}
+          />
+          <MultiSelectFilter
+            label="Verifikasi"
+            options={VERIFICATION_STATUS_OPTIONS}
+            selectedValues={filterVerification}
+            onChange={(values) => { setFilterVerification(values); setCurrentPage(1); }}
+          />
+          <MultiSelectFilter
+            label="Keanggotaan"
+            options={MEMBERSHIP_STATUS_OPTIONS}
+            selectedValues={filterMembershipStatus}
+            onChange={(values) => { setFilterMembershipStatus(values); setCurrentPage(1); }}
+          />
+          <MultiSelectFilter
+            label="Produk"
+            options={products.map((product) => ({ value: String(product._id), label: `🌸 ${product.title}` }))}
+            selectedValues={filterProduct}
+            onChange={(values) => { setFilterProduct(values); setCurrentPage(1); }}
+          />
           
           {/* Search Results Info */}
           <div className="text-sm text-gray-600">
-            {searchTerm || filterStatus !== "all" || filterVerification !== "all" || filterMembershipStatus !== "all" || filterProduct ? (
+            {searchTerm || filterStatus.length > 0 || filterInvoiceStatus.length > 0 || filterVerification.length > 0 || filterMembershipStatus.length > 0 || filterProduct.length > 0 ? (
               <span className="flex items-center flex-wrap gap-1">
                 <span className="font-medium text-pink-600">{filteredMembers.length}</span>
                 <span>dari {members.length} anggota</span>
                 {searchTerm && (
                   <span className="px-2 py-1 bg-pink-100 text-pink-800 rounded-full text-xs">
-                    "{searchTerm}"
+                  &quot;{searchTerm}&quot;
                   </span>
                 )}
-                {filterStatus !== "all" && (
-                  <span className={`px-2 py-1 rounded-full text-xs ${filterStatus === "completed" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
-                    {filterStatus === "completed" ? "✅ Lunas" : "⏳ Belum Lunas"}
+                {filterStatus.map((status) => (
+                  <span key={status} className={`px-2 py-1 rounded-full text-xs ${status === "completed" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                    {SAVINGS_STATUS_OPTIONS.find((option) => option.value === status)?.label}
                   </span>
-                )}
-                {filterInvoiceStatus !== "all" && (
-                  <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
-                    {filterInvoiceStatus === "none"
-                      ? "Belum Ada Invoice"
-                      : `Invoice: ${INVOICE_STATUS_META[filterInvoiceStatus]?.label || filterInvoiceStatus}`}
+                ))}
+                {filterInvoiceStatus.map((status) => (
+                  <span key={status} className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                    Invoice: {INVOICE_STATUS_OPTIONS.find((option) => option.value === status)?.label || status}
                   </span>
-                )}
-                {filterVerification !== "all" && (
-                  <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : filterVerification === "rejected" ? "bg-red-100 text-red-800" : filterVerification === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
-                    {filterVerification === "verified"
-                      ? "✅ Terverifikasi"
-                      : filterVerification === "rejected"
-                        ? "❌ Ditolak"
-                      : filterVerification === "address-pending"
-                        ? "📍 Alamat Pending"
-                        : filterVerification === "identity-pending"
-                          ? "🤳 Wajah Pending"
-                        : "🕐 Belum Verifikasi"}
+                ))}
+                {filterVerification.map((status) => (
+                  <span key={status} className={`px-2 py-1 rounded-full text-xs ${status === "verified" ? "bg-green-100 text-green-800" : status === "rejected" ? "bg-red-100 text-red-800" : status === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
+                    {VERIFICATION_STATUS_OPTIONS.find((option) => option.value === status)?.label}
                   </span>
-                )}
-                {filterMembershipStatus !== "all" && (
-                  <span className={`px-2 py-1 rounded-full text-xs ${MEMBERSHIP_STATUS_META[filterMembershipStatus].badgeClass}`}>
-                    {MEMBERSHIP_STATUS_META[filterMembershipStatus].label}
+                ))}
+                {filterMembershipStatus.map((status) => (
+                  <span key={status} className={`px-2 py-1 rounded-full text-xs ${MEMBERSHIP_STATUS_META[status].badgeClass}`}>
+                    {MEMBERSHIP_STATUS_META[status].label}
                   </span>
-                )}
-                {filterProduct ? (
-                  <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-800">
-                    🌸 {products.find(p => String(p._id) === String(filterProduct))?.title || filterProduct}
+                ))}
+                {filterProduct.map((productId) => (
+                  <span key={productId} className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-800">
+                    🌸 {products.find((product) => String(product._id) === productId)?.title || productId}
                   </span>
-                ) : null}
+                ))}
               </span>
             ) : (
               <span>Total: <span className="font-medium">{members.length}</span> anggota</span>

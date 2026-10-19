@@ -40,9 +40,12 @@ function mockMethod(t, model, name, implementation) {
   t.after(() => { model[name] = original; });
 }
 
-function mockMemberData(t) {
+function mockMemberData(t, onMemberFilter = () => {}) {
   const invoiceFilters = [];
-  mockMethod(t, Member, "find", () => query(members));
+  mockMethod(t, Member, "find", (filter) => {
+    onMemberFilter(filter);
+    return query(members);
+  });
   mockMethod(t, Invoice, "find", (filter) => {
     invoiceFilters.push(filter);
     return query(invoices);
@@ -86,6 +89,16 @@ test("member list can filter by effective invoice status or no invoice", async (
   assert.deepEqual(membersWithoutInvoices.body.data.map((member) => member.uuid), ["JPSB-B"]);
 });
 
+test("member list matches any selected invoice status", async (t) => {
+  mockMemberData(t);
+
+  const result = await callHandler(getAllMembers, {
+    query: { invoiceStatus: ["draft", "paid"] },
+  });
+
+  assert.deepEqual(result.body.data.map((member) => member.uuid), ["JPSB-A"]);
+});
+
 test("member export applies the invoice filter and includes invoice statuses", async (t) => {
   const invoiceFilters = mockMemberData(t);
 
@@ -97,4 +110,48 @@ test("member export applies the invoice filter and includes invoice statuses", a
   assert.match(result.body, /JPSB-A/);
   assert.doesNotMatch(result.body, /JPSB-B/);
   assert.match(result.body, /Draft, Paid/);
+});
+
+test("member export includes members matching any selected invoice status", async (t) => {
+  mockMemberData(t);
+
+  const result = await callHandler(exportMembersExcel, {
+    query: { invoiceStatus: ["none", "paid"] },
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.match(result.body, /JPSB-A/);
+  assert.match(result.body, /JPSB-B/);
+});
+
+test("member export combines multi-select filters with OR within each filter", async (t) => {
+  let memberFilter;
+  mockMemberData(t, (filter) => { memberFilter = filter; });
+
+  await callHandler(exportMembersExcel, {
+    query: {
+      verificationStatus: ["verified", "rejected"],
+      completionStatus: ["completed", "not_completed"],
+      productId: ["product-a", "product-b"],
+      membershipStatus: ["draft", "active"],
+    },
+  });
+
+  assert.deepEqual(memberFilter, {
+    $and: [
+      {
+        $or: [
+          { isVerified: true },
+          { registrationStatus: "rejected" },
+        ],
+        productId: { $in: ["product-a", "product-b"] },
+      },
+      {
+        $or: [
+          { membershipStatus: "draft" },
+          { membershipStatus: "active" },
+        ],
+      },
+    ],
+  });
 });
