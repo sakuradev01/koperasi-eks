@@ -3,10 +3,8 @@
  *
  * The admin UI, upgrade flow, and student-facing APIs must all agree on these
  * rules. Only Approved and Partial Setoran rows contribute to paid amount.
- * Overpayment at or above the threshold is carried to the next period.
+ * Every positive overpayment is carried to the next period.
  */
-
-export const OVERPAY_THRESHOLD = 30_000;
 export const PAID_SAVINGS_STATUSES = Object.freeze(["Approved", "Partial"]);
 
 const toFiniteNumber = (value, fallback = 0) => {
@@ -88,7 +86,7 @@ export function calculateSavingsSchedule({
     const overpayment = Math.max(0, paid - effectiveTarget);
 
     carriedOverpay -= creditApplied;
-    if (overpayment >= OVERPAY_THRESHOLD) {
+    if (overpayment > 0) {
       carriedOverpay += overpayment;
     }
 

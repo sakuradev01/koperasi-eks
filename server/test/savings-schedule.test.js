@@ -25,7 +25,7 @@ test("sums approved and partial payments in one period", () => {
   assert.equal(result.periods[0].remaining, 0);
 });
 
-test("carries only overpayments at or above Rp30.000 to the next period", () => {
+test("carries every overpayment to the next period", () => {
   const result = calculateSavingsSchedule({
     termDuration: 3,
     baseDeposit: 2_500_000,
@@ -41,7 +41,7 @@ test("carries only overpayments at or above Rp30.000 to the next period", () => 
   assert.equal(result.periods[1].isFullyPaid, true);
 });
 
-test("does not create credit for small rounding differences", () => {
+test("applies small rounding differences as next-period credit", () => {
   const result = calculateSavingsSchedule({
     termDuration: 2,
     baseDeposit: 2_500_000,
@@ -52,9 +52,27 @@ test("does not create credit for small rounding differences", () => {
   });
 
   assert.equal(result.periods[0].overpayment, 20_000);
-  assert.equal(result.periods[1].creditApplied, 0);
-  assert.equal(result.periods[1].remaining, 20_000);
-  assert.equal(result.periods[1].isFullyPaid, false);
+  assert.equal(result.periods[1].creditApplied, 20_000);
+  assert.equal(result.periods[1].effectiveTarget, 2_480_000);
+  assert.equal(result.periods[1].remaining, 0);
+  assert.equal(result.periods[1].isFullyPaid, true);
+});
+
+test("applies a one-rupiah overpayment and keeps it in the schedule", () => {
+  const result = calculateSavingsSchedule({
+    termDuration: 3,
+    baseDeposit: 2_500_000,
+    savings: [
+      saving(1, 2_500_001),
+      saving(2, 2_500_001),
+    ],
+  });
+
+  assert.equal(result.periods[0].overpayment, 1);
+  assert.equal(result.periods[1].creditApplied, 1);
+  assert.equal(result.periods[1].overpayment, 2);
+  assert.equal(result.periods[2].creditApplied, 2);
+  assert.equal(result.periods[2].effectiveTarget, 2_499_998);
 });
 
 test("marks a later period fully paid when carried credit closes it", () => {
