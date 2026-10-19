@@ -4,6 +4,11 @@ import api from "../api/index.jsx";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import MemberDocumentImage from "../components/MemberDocumentImage.jsx";
+import {
+  getMemberInvoiceStatusEntries,
+  matchesMemberInvoiceStatus,
+  MEMBER_INVOICE_STATUS_ORDER,
+} from "../utils/memberInvoiceStatus.js";
 import { toast } from "react-toastify";
 
 const getRegistrationStatus = (member) => {
@@ -17,6 +22,14 @@ const MEMBERSHIP_STATUS_META = {
   draft: { label: "Draft — tabungan belum dibuka", badgeClass: "bg-amber-100 text-amber-800" },
   active: { label: "Aktif", badgeClass: "bg-emerald-100 text-emerald-800" },
   inactive: { label: "Nonaktif — tabungan ditutup", badgeClass: "bg-slate-200 text-slate-700" },
+};
+
+const INVOICE_STATUS_META = {
+  draft: { label: "Draft", badgeClass: "bg-slate-100 text-slate-700" },
+  sent: { label: "Sent", badgeClass: "bg-blue-100 text-blue-800" },
+  partial: { label: "Partial", badgeClass: "bg-amber-100 text-amber-800" },
+  paid: { label: "Paid", badgeClass: "bg-emerald-100 text-emerald-800" },
+  overdue: { label: "Overdue", badgeClass: "bg-red-100 text-red-800" },
 };
 
 const getMembershipStatus = (member) => {
@@ -72,6 +85,7 @@ const Members = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all"); // all, completed, not_completed
   const [filterVerification, setFilterVerification] = useState("all"); // all, verified, unverified, rejected, address-pending, identity-pending
+  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState("all");
   const [filterMembershipStatus, setFilterMembershipStatus] = useState("all");
   const [filterProduct, setFilterProduct] = useState(""); // product ID, empty = all
   const [exporting, setExporting] = useState(false);
@@ -580,6 +594,7 @@ const Members = () => {
       else if (filterVerification === "rejected") params.set("registrationStatus", "rejected");
       else if (filterVerification === "address-pending") params.set("addressUpdateStatus", "pending");
       else if (filterVerification === "identity-pending") params.set("identityVerifyStatus", "pending");
+      if (filterInvoiceStatus !== "all") params.set("invoiceStatus", filterInvoiceStatus);
       if (filterMembershipStatus !== "all") params.set("membershipStatus", filterMembershipStatus);
       if (filterProduct) params.set("productId", filterProduct);
       if (searchTerm) params.set("search", searchTerm);
@@ -627,6 +642,15 @@ const Members = () => {
       result = result.filter(member => !member.isCompleted);
     }
 
+    if (filterInvoiceStatus === "none") {
+      result = result.filter((member) => matchesMemberInvoiceStatus(member.invoiceStatusCounts, "none"));
+    } else if (filterInvoiceStatus !== "all") {
+      result = result.filter((member) => matchesMemberInvoiceStatus(
+        member.invoiceStatusCounts,
+        filterInvoiceStatus,
+      ));
+    }
+
     // Filter by verification status
     if (filterVerification === "verified") {
       result = result.filter(member => member.isVerified === true);
@@ -663,7 +687,7 @@ const Members = () => {
     }
     
     return result;
-  }, [members, searchTerm, filterStatus, filterVerification, filterMembershipStatus, filterProduct]);
+  }, [members, searchTerm, filterStatus, filterInvoiceStatus, filterVerification, filterMembershipStatus, filterProduct]);
 
   // Pagination logic with useMemo for performance
   const paginationData = useMemo(() => {
@@ -802,7 +826,7 @@ const Members = () => {
           
           {/* Filter Status Lunas */}
           <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Status:</label>
+            <label className="text-sm text-gray-600 whitespace-nowrap">Status Tabungan:</label>
             <select
               value={filterStatus}
               onChange={(e) => {
@@ -814,6 +838,25 @@ const Members = () => {
               <option value="all">📋 Semua</option>
               <option value="completed">✅ Lunas</option>
               <option value="not_completed">⏳ Belum Lunas</option>
+            </select>
+          </div>
+
+          {/* Filter Status Invoice */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 whitespace-nowrap">Status Invoice:</label>
+            <select
+              value={filterInvoiceStatus}
+              onChange={(e) => {
+                setFilterInvoiceStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 text-sm"
+            >
+              <option value="all">📋 Semua</option>
+              <option value="none">Belum Ada Invoice</option>
+              {MEMBER_INVOICE_STATUS_ORDER.map((status) => (
+                <option key={status} value={status}>{INVOICE_STATUS_META[status].label}</option>
+              ))}
             </select>
           </div>
 
@@ -892,6 +935,13 @@ const Members = () => {
                     {filterStatus === "completed" ? "✅ Lunas" : "⏳ Belum Lunas"}
                   </span>
                 )}
+                {filterInvoiceStatus !== "all" && (
+                  <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                    {filterInvoiceStatus === "none"
+                      ? "Belum Ada Invoice"
+                      : `Invoice: ${INVOICE_STATUS_META[filterInvoiceStatus]?.label || filterInvoiceStatus}`}
+                  </span>
+                )}
                 {filterVerification !== "all" && (
                   <span className={`px-2 py-1 rounded-full text-xs ${filterVerification === "verified" ? "bg-green-100 text-green-800" : filterVerification === "rejected" ? "bg-red-100 text-red-800" : filterVerification === "identity-pending" ? "bg-violet-100 text-violet-800" : "bg-orange-100 text-orange-800"}`}>
                     {filterVerification === "verified"
@@ -956,7 +1006,10 @@ const Members = () => {
                 Total
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
-                Status
+                Status Tabungan
+              </th>
+              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
+                Status Invoice
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                 Keanggotaan
@@ -972,7 +1025,7 @@ const Members = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {currentMembers.length === 0 ? (
               <tr>
-                <td colSpan="13" className="px-6 py-12 text-center">
+                <td colSpan="14" className="px-6 py-12 text-center">
                   <div className="flex flex-col items-center">
                     <div className="text-6xl mb-4">🔍</div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -1054,6 +1107,23 @@ const Members = () => {
                       ⏳ Belum
                     </span>
                   )}
+                </td>
+                <td className="px-3 sm:px-6 py-3 sm:py-4 min-w-40 text-xs sm:text-sm">
+                  <div className="flex flex-wrap gap-1">
+                    {getMemberInvoiceStatusEntries(member.invoiceStatusCounts).length > 0
+                      ? getMemberInvoiceStatusEntries(member.invoiceStatusCounts)
+                        .map(({ status, count }) => (
+                          <span
+                            key={status}
+                            className={`px-2 py-1 rounded-full text-xs font-semibold ${INVOICE_STATUS_META[status].badgeClass}`}
+                            title={`${count} invoice ${INVOICE_STATUS_META[status].label}`}
+                          >
+                            {INVOICE_STATUS_META[status].label}
+                            {count > 1 ? ` (${count})` : ""}
+                          </span>
+                        ))
+                      : <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Belum Ada Invoice</span>}
+                  </div>
                 </td>
                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
                   <span className={`px-2 py-1 rounded-full text-xs font-semibold ${MEMBERSHIP_STATUS_META[getMembershipStatus(member)].badgeClass}`}>

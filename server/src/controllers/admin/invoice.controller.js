@@ -19,6 +19,7 @@ import { ApiResponse } from "../../utils/ApiResponse.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { updateAccountBalance } from "../../services/accountBalance.service.js";
+import { getEffectiveInvoiceStatus } from "../../utils/invoiceStatus.js";
 
 const AVAILABLE_CURRENCIES = ["IDR", "JPY", "USD", "AUD", "EUR", "GBP"];
 const AVAILABLE_PAYMENT_METHODS = [
@@ -345,29 +346,6 @@ function normalizePayments(rawPayments) {
       return normalizedPayment;
     })
     .filter(Boolean)
-}
-
-function computeInvoiceStatus(statusInput, dueDate, total, totalPaid) {
-  if ((statusInput || "draft") === "draft" && totalPaid <= 0) {
-    return "draft";
-  }
-
-  if (clampMoney(totalPaid) >= clampMoney(total)) {
-    return "paid";
-  }
-
-  const today = startOfDay(new Date());
-  const safeDueDate = startOfDay(dueDate);
-
-  if (safeDueDate < today) {
-    return "overdue";
-  }
-
-  if (totalPaid > 0) {
-    return "partial";
-  }
-
-  return "sent";
 }
 
 function dateDiffInDays(left, right) {
@@ -746,7 +724,7 @@ async function buildInvoicePayload(payload, options = {}) {
     throw new ApiError(400, "Currency invoice tidak didukung");
   }
 
-  const status = computeInvoiceStatus(
+  const status = getEffectiveInvoiceStatus(
     requestedStatus,
     dueDate,
     total,
@@ -1372,7 +1350,7 @@ export const getAllInvoices = asyncHandler(async (req, res) => {
     const serialized = serializeInvoice(invoice);
     return {
       ...serialized,
-      status: computeInvoiceStatus(
+      status: getEffectiveInvoiceStatus(
         serialized.status,
         serialized.dueDate,
         serialized.total,
@@ -1583,7 +1561,7 @@ export const exportAllInvoices = asyncHandler(async (req, res) => {
     const serialized = serializeInvoice(invoice);
     return {
       ...serialized,
-      status: computeInvoiceStatus(
+      status: getEffectiveInvoiceStatus(
         serialized.status,
         serialized.dueDate,
         serialized.total,

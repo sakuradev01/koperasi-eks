@@ -5,6 +5,7 @@ import { Loan } from "../../models/loan.model.js";
 import { LoanPayment } from "../../models/loanPayment.model.js";
 import { ProductUpgrade } from "../../models/productUpgrade.model.js";
 import { MemberRegistrationRejection } from "../../models/memberRegistrationRejection.model.js";
+import { Invoice } from "../../models/invoice.model.js";
 import mongoose from "mongoose";
 import fs from "fs/promises";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
@@ -21,6 +22,20 @@ import {
   normalizeMembershipClassification,
   normalizeMembershipStatus,
 } from "../../utils/membershipStatus.js";
+import {
+  buildInvoiceStatusCountsByMember,
+  formatInvoiceStatusCounts,
+  matchesInvoiceStatusFilter,
+} from "../../utils/invoiceStatus.js";
+
+const getInvoiceStatusCounts = async (memberIds) => {
+  if (!memberIds.length) return new Map();
+
+  const invoices = await Invoice.find({ memberId: { $in: memberIds } })
+    .select("memberId status dueDate total totalPaid")
+    .lean();
+  return buildInvoiceStatusCountsByMember(invoices);
+};
 
 const addMembershipStatusFilter = (filter, requestedStatus) => {
   const status = normalizeMembershipClassification(requestedStatus);
@@ -59,6 +74,7 @@ const getAllMembers = asyncHandler(async (req, res) => {
     isCompleted,
     productId,
     membershipStatus,
+    invoiceStatus,
   } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
@@ -92,8 +108,14 @@ const getAllMembers = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .lean();
 
+  const invoiceStatusCountsByMember = await getInvoiceStatusCounts(members.map((member) => member._id));
+  const filteredMembers = members.filter((member) => matchesInvoiceStatusFilter(
+    invoiceStatusCountsByMember.get(String(member._id)) || {},
+    invoiceStatus,
+  ));
+
   // Batched savings total — single aggregate, no N+1
-  const memberIds = members.map((m) => m._id);
+  const memberIds = filteredMembers.map((m) => m._id);
   const savingsAgg = memberIds.length
     ? await Savings.aggregate([
         { $match: { memberId: { $in: memberIds }, type: "Setoran", status: "Approved" } },
@@ -102,12 +124,13 @@ const getAllMembers = asyncHandler(async (req, res) => {
     : [];
   const savingsMap = new Map(savingsAgg.map((s) => [String(s._id), s.total]));
 
-  const membersWithSavings = members.map((m) => ({
+  const membersWithSavings = filteredMembers.map((m) => ({
     ...m,
     registrationStatus: getEffectiveRegistrationStatus(m),
     membershipStatus: getEffectiveMembershipStatus(m),
     membershipStatusRaw: normalizeMembershipStatus(m.membershipStatus) || null,
     membershipStatusClassification: getMembershipClassification(m),
+    invoiceStatusCounts: invoiceStatusCountsByMember.get(String(m._id)) || {},
     totalSavings: savingsMap.get(String(m._id)) || 0,
   }));
 
@@ -1021,6 +1044,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     productId,
     search,
     membershipStatus,
+    invoiceStatus,
   } = req.query;
   let filter = {};
   if (verified === "true") filter.isVerified = true;
@@ -1066,7 +1090,12 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .lean();
 
-  const memberIds = members.map((m) => m._id);
+  const invoiceStatusCountsByMember = await getInvoiceStatusCounts(members.map((member) => member._id));
+  const exportMembers = members.filter((member) => matchesInvoiceStatusFilter(
+    invoiceStatusCountsByMember.get(String(member._id)) || {},
+    invoiceStatus,
+  ));
+  const memberIds = exportMembers.map((m) => m._id);
   const savingsAgg = memberIds.length
     ? await Savings.aggregate([
         {
@@ -1129,7 +1158,8 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     "Status Keanggotaan",
     "Status Alamat",
     "Alasan Tolak Alamat",
-    "Status Lunas",
+    "Status Tabungan",
+    "Status Invoice",
     "Tanggal Daftar",
     "Mulai Tabungan",
     "Tanggal Verifikasi",
@@ -1138,8 +1168,11 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     "Tgl Update Alamat Verifikasi",
   ];
 
-  const rows = members.map((m, idx) => {
+  const rows = exportMembers.map((m, idx) => {
     const total = savingsMap.get(String(m._id)) || 0;
+    const invoiceStatusText = formatInvoiceStatusCounts(
+      invoiceStatusCountsByMember.get(String(m._id)) || {},
+    );
     return [
       idx + 1,
       m.uuid,
@@ -1165,6 +1198,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
       m.addressUpdateStatus,
       m.addressUpdateRejectionReason || "",
       m.isCompleted ? "Lunas" : "Belum Lunas",
+      invoiceStatusText,
       fmt(m.createdAt),
       fmt(m.savingsStartDate),
       fmt(m.verifiedAt),
