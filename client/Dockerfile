@@ -12,10 +12,11 @@ ENV VITE_SERVER_URL=$VITE_SERVER_URL
 RUN echo "nameserver 1.1.1.1" | tee /etc/resolv.conf > /dev/null
 RUN npm config set registry https://registry.npmmirror.com
 
-COPY package*.json ./
+COPY client/package*.json ./
 RUN npm install
 
-COPY . .
+COPY client/. .
+COPY shared /shared
 RUN npx vite build
 
 # --- Stage 2: Serve static via Nginx ---

@@ -11,6 +11,7 @@ import { toast } from "react-toastify";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { renderMutasiAccountHeader } from "../utils/mutasiPdfLayout.js";
+import { buildMemberSavingsPeriodRows } from "../utils/memberSavingsSchedule.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -1362,162 +1363,7 @@ const MemberDetail = () => {
 
   const saldoSimpanan = totalSetoran - totalPenarikan;
 
-  // Generate period status table
-  const generatePeriodStatus = () => {
-    if (!member?.product) return [];
-    
-    // Get total periods from product's termDuration (correct field name)
-    let totalPeriods = member.product.termDuration;
-    
-    // If no termDuration defined in product, try to determine from existing savings data
-    if (!totalPeriods && savings.length > 0) {
-      const maxPeriod = Math.max(...savings.map(s => s.installmentPeriod || 1));
-      totalPeriods = Math.max(maxPeriod, 12); // At least 12 periods
-    }
-    
-    // Default to 36 if still no periods determined
-    totalPeriods = totalPeriods || 36;
-    const periodStatus = [];
-    
-    // Get upgrade info if exists
-    const upgradeInfo = member.upgradeInfo || member.currentUpgradeId;
-    const hasUpgraded = member.hasUpgraded;
-    
-    // Get savings start date (use savingsStartDate if set, otherwise use member createdAt)
-    const startDate = member.savingsStartDate 
-      ? new Date(member.savingsStartDate) 
-      : new Date(member.createdAt);
-    
-    // Debug log upgrade info
-    console.log('=== UPGRADE DEBUG ===');
-    console.log('hasUpgraded:', hasUpgraded);
-    console.log('upgradeInfo:', upgradeInfo);
-    console.log('member.currentUpgradeId:', member.currentUpgradeId);
-    console.log('member.upgradeInfo:', member.upgradeInfo);
-    console.log('currentProductDeposit:', member.product.depositAmount);
-    console.log('savingsStartDate:', startDate);
-    if (upgradeInfo) {
-      console.log('completedPeriodsAtUpgrade:', upgradeInfo.completedPeriodsAtUpgrade);
-      console.log('oldMonthlyDeposit:', upgradeInfo.oldMonthlyDeposit);
-      console.log('newMonthlyDeposit:', upgradeInfo.newMonthlyDeposit);
-      console.log('newPaymentWithCompensation:', upgradeInfo.newPaymentWithCompensation);
-    }
-    
-    // ==== KREDIT KELEBIHAN BAYAR (threshold Rp 30.000) ====
-    // Kelebihan bayar periode sebelumnya (>= Rp 30.000) menjadi kredit yang
-    // mengurangi tagihan periode berikutnya, sehingga siswa cukup membayar
-    // sisa tagihan dan tetap dihitung LUNAS. Di bawah threshold diabaikan.
-    let carriedOverpay = 0;
-
-    for (let period = 1; period <= totalPeriods; period++) {
-      // Find all transactions for this period
-      const periodTransactions = savings.filter(s => s.installmentPeriod === period);
-      
-      let status = 'belum_bayar';
-      let totalPaid = 0;
-      
-      // Approved dan Partial sama-sama merupakan pembayaran yang sudah
-      // diterima untuk progres periode. Pending/Rejected tidak dihitung.
-      const paidTransactions = periodTransactions.filter(t =>
-        ['Approved', 'Partial'].includes(t.status)
-      );
-      totalPaid = paidTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-      
-      // Calculate required amount based on upgrade status
-      let requiredAmount = member.product.depositAmount || 0;
-      
-      // If member has upgraded, adjust required amount based on period
-      if (hasUpgraded && upgradeInfo) {
-        const completedAtUpgrade = upgradeInfo.completedPeriodsAtUpgrade ?? 0;
-        const oldDeposit = upgradeInfo.oldMonthlyDeposit ?? 0;
-        const newPayment = upgradeInfo.newPaymentWithCompensation ?? 0;
-        
-        // Debug for first few periods
-        if (period <= 5) {
-          console.log(`Period ${period}: completedAtUpgrade=${completedAtUpgrade}, oldDeposit=${oldDeposit}, newPayment=${newPayment}`);
-        }
-        
-        // IMPORTANT: Check if period is within completed periods at upgrade
-        // completedAtUpgrade could be 0 if no periods were completed before upgrade
-        if (completedAtUpgrade > 0 && period <= completedAtUpgrade && oldDeposit > 0) {
-          // Periods completed BEFORE upgrade use OLD amount
-          requiredAmount = oldDeposit;
-        } else if (newPayment > 0) {
-          // Periods AFTER upgrade (or all periods if completedAtUpgrade is 0) use new amount + compensation
-          requiredAmount = newPayment;
-        }
-        
-        if (period <= 5) {
-          console.log(`Period ${period}: requiredAmount set to ${requiredAmount}`);
-        }
-      }
-      
-      // Calculate the month for this period
-      // Period 1 = startDate month, Period 2 = startDate + 1 month, etc.
-      const periodDate = new Date(startDate.getFullYear(), startDate.getMonth() + (period - 1), 1);
-      const monthName = periodDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-      
-      // Terapkan kredit kelebihan bayar periode sebelumnya ke tagihan periode ini
-      const creditApplied = Math.min(carriedOverpay, requiredAmount);
-      requiredAmount -= creditApplied;
-      carriedOverpay -= creditApplied;
-
-      const overpayRaw = Math.max(0, totalPaid - requiredAmount);
-      if (overpayRaw >= 30000) {
-        carriedOverpay += overpayRaw;
-      }
-
-      // Periode yang tertutup penuh kredit kelebihan bayar dianggap lunas
-      if (requiredAmount === 0 && creditApplied > 0 && status === 'belum_bayar') {
-        status = 'paid';
-      }
-
-      // SMART STATUS DETECTION for upgraded members
-      // If period was completed before upgrade, check against OLD target
-      let transactions = [];
-      
-      if (periodTransactions.length > 0) {
-        // Sort by date, newest first
-        const sortedTransactions = periodTransactions.sort((a, b) => new Date(b.savingsDate) - new Date(a.savingsDate));
-        
-        transactions = sortedTransactions.map(tx => ({
-          ...tx,
-          rejectionReason: tx.rejectionReason || null
-        }));
-        
-        // Check latest transaction status
-        const latestTransaction = sortedTransactions[0];
-        
-        if (latestTransaction.status === 'Rejected') {
-          status = 'rejected';
-        } else if (latestTransaction.status === 'Pending') {
-          status = 'pending';
-        } else if (totalPaid >= requiredAmount) {
-          status = 'paid';
-        } else if (totalPaid > 0) {
-          status = 'partial';
-        }
-      }
-      
-      periodStatus.push({
-        period,
-        monthName, // Added month name
-        status,
-        totalPaid,
-        requiredAmount,
-        remainingAmount: Math.max(0, requiredAmount - totalPaid),
-        transactions,
-        percentage: requiredAmount > 0
-          ? Math.min(100, (totalPaid / requiredAmount) * 100)
-          : (creditApplied > 0 ? 100 : 0),
-        overpaymentAmount: Math.max(0, totalPaid - requiredAmount)
-      });
-    }
-    
-    return periodStatus;
-  };
-
-  const periodStatusData = generatePeriodStatus();
+  const periodStatusData = buildMemberSavingsPeriodRows({ member, savings });
   // Total target efektif (sudah dikurangi kredit kelebihan bayar antar periode)
   const totalEffectiveTarget = periodStatusData.reduce((sum, p) => sum + (p.requiredAmount || 0), 0);
 
@@ -2508,7 +2354,12 @@ const MemberDetail = () => {
                                 </span>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                {formatCurrency(period.requiredAmount)}
+                                <div>{formatCurrency(period.requiredAmount)}</div>
+                                {period.creditApplied > 0 && (
+                                  <div className="text-xs text-emerald-600">
+                                    Dikurangi kredit {formatCurrency(period.creditApplied)}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                 <span className={period.remainingAmount > 0 ? 'font-semibold text-red-600' : 'text-gray-400'}>
