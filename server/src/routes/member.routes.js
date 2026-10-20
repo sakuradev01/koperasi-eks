@@ -9,10 +9,13 @@ import {
 } from "../controllers/member/auth.controller.js";
 import { 
   getMemberSavings, 
-  createMemberSaving, 
+  createMemberSavingHandler,
   getMemberSavingById,
   getMemberSavingsSummary 
 } from "../controllers/member/savings.controller.js";
+import {
+  createMongooseMemberSavingsSubmission,
+} from "../modules/savings/infrastructure/mongooseMemberSavingsSubmission.js";
 import { verifyMemberToken } from "../middlewares/memberAuth.middleware.js";
 import { getAuthenticatedMemberInvoices } from "../controllers/admin/invoice.controller.js";
 import multer from "multer";
@@ -20,6 +23,9 @@ import loanRoutes from "./member/loan.routes.js";
 import danaDaruratRoutes from "./member/danaDarurat.routes.js";
 
 const router = express.Router();
+const createMemberSaving = createMemberSavingHandler(
+  createMongooseMemberSavingsSubmission(),
+);
 
 import path from "path";
 import { ensureUploadsSubdirs } from "../utils/uploadsDir.js";

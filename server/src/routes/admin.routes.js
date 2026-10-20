@@ -39,17 +39,27 @@ import {
 import { 
   getAllSavings, 
   getSavingsById, 
-  createSavings, 
-  updateSavings, 
-  deleteSavings,
+  createSavingsHandler,
+  updateSavingsHandler,
+  deleteSavingsHandler,
   getLastInstallmentPeriod 
 } from "../controllers/admin/savings.controller.js";
+import {
+  createMongooseAdminSavingsCreator,
+} from "../modules/savings/infrastructure/mongooseAdminSavingsCreator.js";
+import {
+  createMongooseAdminSavingsDeletion,
+} from "../modules/savings/infrastructure/mongooseAdminSavingsDeletion.js";
+import {
+  createMongooseAdminSavingsUpdate,
+} from "../modules/savings/infrastructure/mongooseAdminSavingsUpdate.js";
 import { 
-  approveSavings, 
-  rejectSavings, 
-  markAsPartial,
+  createSavingsApprovalHandlers,
   getSavingsPeriodSummary 
 } from "../controllers/admin/savingsApproval.controller.js";
+import {
+  createMongooseSavingsReviewWorkflow,
+} from "../modules/savings/infrastructure/mongooseSavingsReviewWorkflow.js";
 import {
   getDonationOverview,
   getDonationCampaigns,
@@ -110,6 +120,14 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 const router = express.Router();
+const createSavings = createSavingsHandler(createMongooseAdminSavingsCreator());
+const updateSavings = updateSavingsHandler(createMongooseAdminSavingsUpdate());
+const deleteSavings = deleteSavingsHandler(createMongooseAdminSavingsDeletion());
+const {
+  approveSavings,
+  rejectSavings,
+  markAsPartial,
+} = createSavingsApprovalHandlers(createMongooseSavingsReviewWorkflow());
 
 // Authentication routes
 router.post("/auth/login", loginUser);

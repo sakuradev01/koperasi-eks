@@ -5,18 +5,11 @@ import mongoose from "mongoose";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ApiError } from "../../utils/ApiError.js";
-import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import {
   createSavingsSchema,
   updateSavingsSchema,
   querySavingsSchema,
 } from "../../validations/savings.validation.js";
-import {
-  resolveSavingsCoaInput,
-  syncSavingsAccountingTransaction,
-  reverseSavingsAccountingTransaction,
-  normalizeObjectId,
-} from "../../services/savingsAccounting.service.js";
 import {
   calculateSavingsSchedule,
   getFirstIncompletePeriod,
@@ -96,367 +89,135 @@ const getSavingsById = asyncHandler(async (req, res) => {
 });
 
 // Create new savings
-const createSavings = asyncHandler(async (req, res) => {
-  // Parse body data (handle both JSON and FormData)
-  let bodyData = { ...req.body };
-  
-  console.log("Raw request body:", req.body);
-  console.log("Request file:", req.file);
-  console.log("Content-Type:", req.get('Content-Type'));
-  
-  // Convert string numbers to actual numbers (FormData sends everything as strings)
-  Object.keys(bodyData).forEach(key => {
-    if (key === 'amount' || key === 'installmentPeriod') {
-      if (bodyData[key] && typeof bodyData[key] === 'string') {
-        const num = Number(bodyData[key]);
-        if (!isNaN(num)) {
-          bodyData[key] = num;
+const createSavingsHandler = (savingsCreator) =>
+  asyncHandler(async (req, res) => {
+    let bodyData = { ...req.body };
+
+    console.log("Raw request body:", req.body);
+    console.log("Request file:", req.file);
+    console.log("Content-Type:", req.get("Content-Type"));
+
+    Object.keys(bodyData).forEach((key) => {
+      if (
+        (key === "amount" || key === "installmentPeriod")
+        && bodyData[key]
+        && typeof bodyData[key] === "string"
+      ) {
+        const number = Number(bodyData[key]);
+        if (!Number.isNaN(number)) {
+          bodyData[key] = number;
         }
       }
+    });
+
+    console.log("Processed body data:", bodyData);
+    console.log("installmentPeriod:", bodyData.installmentPeriod, typeof bodyData.installmentPeriod);
+
+    const { error, value } = createSavingsSchema.validate(bodyData);
+    if (error) {
+      console.log("Validation error:", error.details[0].message);
+      console.log("Failed validation for:", error.details[0].path);
+      console.log("Validation details:", error.details);
+      throw new ApiError(400, error.details[0].message);
     }
+
+    const savings = await savingsCreator.execute(
+      value,
+      req.file ? req.file.filename : null,
+    );
+    return res
+      .status(201)
+      .json(new ApiResponse(201, savings, "Data simpanan berhasil dibuat"));
   });
-
-  console.log("Processed body data:", bodyData);
-  console.log("installmentPeriod:", bodyData.installmentPeriod, typeof bodyData.installmentPeriod);
-
-  const { error, value } = createSavingsSchema.validate(bodyData);
-  if (error) {
-    console.log("Validation error:", error.details[0].message);
-    console.log("Failed validation for:", error.details[0].path);
-    console.log("Validation details:", error.details);
-    throw new ApiError(400, error.details[0].message);
-  }
-
-  const {
-    installmentPeriod,
-    memberId,
-    productId,
-    amount,
-    savingsDate,
-    paymentDate,
-    type,
-    description,
-    status,
-    paymentType,
-    notes,
-    accountId,
-    categoryId,
-    categoryType,
-    isSplit,
-  } = value;
-
-  // Validate member exists
-  const member = await Member.findById(memberId);
-  if (!member) {
-    throw new ApiError(404, "Anggota tidak ditemukan");
-  }
-
-  // Validate product exists
-  const product = await Product.findById(productId);
-  if (!product) {
-    throw new ApiError(404, "Produk tidak ditemukan");
-  }
-
-  // Allow flexible amounts for partial payments
-  // Validation removed to support partial payment system
-  // if (amount < product.depositAmount) {
-  //   throw new ApiError(400, `Jumlah simpanan minimal ${product.depositAmount}`);
-  // }
-
-  // Allow multiple submissions per period for partial/rejected payments
-  // Check for existing approved savings for same period
-  const existingApprovedSavings = await Savings.findOne({
-    memberId,
-    productId,
-    installmentPeriod,
-    status: "Approved"
-  });
-
-  // Calculate partial sequence for this period
-  const existingSavingsCount = await Savings.countDocuments({
-    memberId,
-    productId,
-    installmentPeriod,
-  });
-
-  const partialSequence = existingSavingsCount + 1;
-
-  // Determine payment type based on amount vs product deposit
-  const calculatedPaymentType = amount < product.depositAmount ? "Partial" : "Full";
-  
-  console.log("Product deposit amount:", product.depositAmount);
-  console.log("Payment amount:", amount);
-  console.log("Calculated payment type:", calculatedPaymentType);
-
-  const savings = new Savings({
-    installmentPeriod,
-    memberId,
-    productId,
-    amount,
-    savingsDate: savingsDate || new Date(),
-    paymentDate: paymentDate || null,
-    type: type || "Setoran",
-    description: description || `Pembayaran Simpanan Periode - ${installmentPeriod} ${partialSequence > 1 ? `(#${partialSequence})` : ''}`,
-    status: status || "Pending",
-    paymentType: calculatedPaymentType, // Always use calculated payment type
-    partialSequence: partialSequence,
-    notes: notes || "",
-    proofFile: req.file ? req.file.filename : null, // Only store filename, not full path
-    accountId: accountId || null,
-    categoryId: categoryId || null,
-    categoryType: categoryType || null,
-    isSplit: Boolean(isSplit),
-  });
-
-  await savings.save();
-
-  res
-    .status(201)
-    .json(new ApiResponse(201, savings, "Data simpanan berhasil dibuat"));
-});
 
 // Update savings
-const updateSavings = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+const updateSavingsHandler = (updateWorkflow) =>
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existingSaving = await Savings.findById(id);
+    if (!existingSaving) {
+      throw new ApiError(404, "Data simpanan tidak ditemukan");
+    }
 
-  const existingSaving = await Savings.findById(id);
-  if (!existingSaving) {
-    throw new ApiError(404, "Data simpanan tidak ditemukan");
-  }
-
-  let bodyData = { ...req.body };
-
-  if (isSavingsCoaOnlyEditor(req.user)) {
-    if (req.file) {
-      try {
-        const fs = await import("node:fs");
-        if (req.file.path && fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
+    let bodyData = { ...req.body };
+    if (isSavingsCoaOnlyEditor(req.user)) {
+      if (req.file) {
+        try {
+          const fs = await import("node:fs");
+          if (req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch {
+          // The authorization failure must still be returned if cleanup fails.
         }
-      } catch {
-        // The authorization failure must still be returned even if cleanup
-        // cannot remove a maliciously uploaded file.
-      }
-      throw new ApiError(
-        403,
-        "Akses Simpanan ini hanya boleh mengubah Record Account dan Category",
-      );
-    }
-
-    const restrictedPayload = validateSavingsCoaOnlyPayload(bodyData, {
-      isSplit: Boolean(existingSaving.isSplit),
-    });
-    if (!restrictedPayload.valid) {
-      const statusCode = restrictedPayload.disallowedFields?.length ? 403 : 400;
-      throw new ApiError(
-        statusCode,
-        restrictedPayload.errors[0] ||
+        throw new ApiError(
+          403,
           "Akses Simpanan ini hanya boleh mengubah Record Account dan Category",
-        restrictedPayload.disallowedFields || restrictedPayload.errors,
-      );
-    }
-    bodyData = restrictedPayload.payload;
-  }
-
-  ["amount", "installmentPeriod"].forEach((key) => {
-    if (bodyData[key] !== undefined && bodyData[key] !== "") {
-      const parsed = Number(bodyData[key]);
-      if (!Number.isNaN(parsed)) {
-        bodyData[key] = parsed;
+        );
       }
+
+      const restrictedPayload = validateSavingsCoaOnlyPayload(bodyData, {
+        isSplit: Boolean(existingSaving.isSplit),
+      });
+      if (!restrictedPayload.valid) {
+        const statusCode = restrictedPayload.disallowedFields?.length ? 403 : 400;
+        throw new ApiError(
+          statusCode,
+          restrictedPayload.errors[0]
+            || "Akses Simpanan ini hanya boleh mengubah Record Account dan Category",
+          restrictedPayload.disallowedFields || restrictedPayload.errors,
+        );
+      }
+      bodyData = restrictedPayload.payload;
     }
+
+    ["amount", "installmentPeriod"].forEach((key) => {
+      if (bodyData[key] !== undefined && bodyData[key] !== "") {
+        const parsed = Number(bodyData[key]);
+        if (!Number.isNaN(parsed)) {
+          bodyData[key] = parsed;
+        }
+      }
+    });
+
+    if (bodyData.paymentDate === "") {
+      bodyData.paymentDate = null;
+    }
+
+    const { error, value } = updateSavingsSchema.validate(bodyData);
+    if (error) {
+      throw new ApiError(400, error.details[0].message);
+    }
+
+    const updateData = { ...value };
+    ["accountId", "categoryId", "transactionId"].forEach((key) => {
+      if (updateData[key] === "") updateData[key] = null;
+    });
+    if (updateData.categoryType === "") updateData.categoryType = null;
+    if (req.file) {
+      updateData.proofFile = req.file.filename;
+    }
+
+    const savings = await updateWorkflow.execute({
+      id,
+      existingSaving,
+      updateData,
+      requestBody: req.body,
+    });
+    return res
+      .status(200)
+      .json(new ApiResponse(200, savings, "Data simpanan berhasil diperbarui"));
   });
-
-  if (bodyData.paymentDate === "") {
-    bodyData.paymentDate = null;
-  }
-
-  const { error, value } = updateSavingsSchema.validate(bodyData);
-  if (error) {
-    throw new ApiError(400, error.details[0].message);
-  }
-
-  const updateData = { ...value };
-
-  // Empty strings for ObjectId fields → null
-  ["accountId", "categoryId", "transactionId"].forEach((key) => {
-    if (updateData[key] === "") updateData[key] = null;
-  });
-  if (updateData.categoryType === "") updateData.categoryType = null;
-
-  // Handle file upload jika ada
-  if (req.file) {
-    updateData.proofFile = req.file.filename; // Only store filename, not full path (consistent with create)
-  }
-
-  // Validasi member dan product jika diupdate
-  if (updateData.memberId) {
-    const member = await Member.findById(updateData.memberId);
-    if (!member) {
-      throw new ApiError(404, "Anggota tidak ditemukan");
-    }
-  }
-
-  if (updateData.productId) {
-    const product = await Product.findById(updateData.productId);
-    if (!product) {
-      throw new ApiError(404, "Produk tidak ditemukan");
-    }
-  }
-
-  const productIdForPaymentType = updateData.productId || existingSaving.productId;
-  const amountForPaymentType =
-    updateData.amount !== undefined ? updateData.amount : existingSaving.amount;
-  if (productIdForPaymentType && amountForPaymentType !== undefined) {
-    const product = await Product.findById(productIdForPaymentType);
-    if (product) {
-      updateData.paymentType =
-        Number(amountForPaymentType) < Number(product.depositAmount)
-          ? "Partial"
-          : "Full";
-    }
-  }
-
-  // Persist COA fields from body when present
-  const hasCoaBody =
-    req.body.accountId !== undefined ||
-    req.body.account_id !== undefined ||
-    req.body.categoryId !== undefined ||
-    req.body.category_id !== undefined ||
-    req.body.categoryType !== undefined ||
-    req.body.category_type !== undefined ||
-    req.body.isSplit !== undefined ||
-    req.body.splits !== undefined;
-
-  let resolvedCoa = null;
-  if (hasCoaBody) {
-    resolvedCoa = resolveSavingsCoaInput(
-      {
-        accountId: req.body.accountId ?? req.body.account_id ?? existingSaving.accountId,
-        categoryId:
-          req.body.categoryId ?? req.body.category_id ?? existingSaving.categoryId,
-        categoryType:
-          req.body.categoryType ??
-          req.body.category_type ??
-          existingSaving.categoryType,
-        isSplit: req.body.isSplit ?? existingSaving.isSplit,
-        splits: req.body.splits ?? req.body.split_data,
-        senderName: req.body.senderName ?? req.body.sender_name,
-      },
-      { requireAccount: false },
-    );
-    if (resolvedCoa.accountId) {
-      updateData.accountId = resolvedCoa.accountId;
-      updateData.categoryId = resolvedCoa.isSplit ? null : resolvedCoa.categoryId;
-      updateData.categoryType = resolvedCoa.isSplit
-        ? null
-        : resolvedCoa.categoryType;
-      updateData.isSplit = Boolean(resolvedCoa.isSplit);
-    }
-  }
-
-  const previousStatus = existingSaving.status;
-  const nextStatus = updateData.status || previousStatus;
-
-  // Leaving Approved → reverse journal
-  if (
-    previousStatus === "Approved" &&
-    nextStatus !== "Approved" &&
-    existingSaving.transactionId
-  ) {
-    await reverseSavingsAccountingTransaction(existingSaving);
-    updateData.transactionId = null;
-  }
-
-  let savings = await Savings.findByIdAndUpdate(id, updateData, {
-    new: true,
-    runValidators: true,
-  })
-    .populate("memberId", "name email phone")
-    .populate("productId");
-
-  if (!savings) {
-    throw new ApiError(404, "Data simpanan tidak ditemukan");
-  }
-
-  // Approved with accountId → create/update linked AccountingTransaction
-  const accountIdForSync =
-    normalizeObjectId(savings.accountId) ||
-    (resolvedCoa && resolvedCoa.accountId) ||
-    null;
-
-  if (savings.status === "Approved" && accountIdForSync) {
-    const coaForSync =
-      resolvedCoa ||
-      resolveSavingsCoaInput(
-        {
-          accountId: savings.accountId,
-          categoryId: savings.categoryId,
-          categoryType: savings.categoryType,
-          isSplit: savings.isSplit,
-        },
-        { requireAccount: true },
-      );
-
-    const transaction = await syncSavingsAccountingTransaction(savings, coaForSync);
-    if (
-      !savings.transactionId ||
-      String(savings.transactionId) !== String(transaction._id)
-    ) {
-      savings.transactionId = transaction._id;
-      savings.accountId = coaForSync.accountId;
-      savings.categoryId = coaForSync.isSplit ? null : coaForSync.categoryId;
-      savings.categoryType = coaForSync.isSplit ? null : coaForSync.categoryType;
-      savings.isSplit = Boolean(coaForSync.isSplit);
-      await savings.save();
-    }
-
-    savings = await Savings.findById(savings._id)
-      .populate("memberId", "name email phone")
-      .populate("productId")
-      .populate("accountId", "accountName accountCode currency balance")
-      .populate("transactionId");
-  }
-
-  res
-    .status(200)
-    .json(new ApiResponse(200, savings, "Data simpanan berhasil diperbarui"));
-});
 
 // Delete savings
-const deleteSavings = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const savings = await Savings.findById(id);
-  if (!savings) {
-    throw new ApiError(404, "Data simpanan tidak ditemukan");
-  }
-
-  // Reverse linked accounting transaction if any
-  if (savings.transactionId || savings.status === "Approved") {
-    await reverseSavingsAccountingTransaction(savings);
-  }
-
-  // Delete proof file if exists
-  if (savings.proofFile) {
-    try {
-      const fs = await import("fs");
-      const filePath = resolveUploadedFilePath(savings.proofFile, {
-        defaultSubdir: "simpanan",
-      });
-
-      if (filePath && fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (error) {
-      // Continue with deletion even if file removal fails
-    }
-  }
-
-  await Savings.findByIdAndDelete(id);
-
-  res.status(200).json(new ApiResponse(200, null, "Simpanan dan bukti berhasil dihapus"));
-});
+// Delete savings
+const deleteSavingsHandler = (deletionWorkflow) =>
+  asyncHandler(async (req, res) => {
+    await deletionWorkflow.execute(req.params.id);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, null, "Simpanan dan bukti berhasil dihapus"));
+  });
 
 // Get savings by member
 const getSavingsByMember = asyncHandler(async (req, res) => {
@@ -872,9 +633,9 @@ const getStudentDashboardSavings = asyncHandler(async (req, res) => {
 export {
   getAllSavings,
   getSavingsById,
-  createSavings,
-  updateSavings,
-  deleteSavings,
+  createSavingsHandler,
+  updateSavingsHandler,
+  deleteSavingsHandler,
   getSavingsByMember,
   getSavingsSummary,
   getLastInstallmentPeriod,

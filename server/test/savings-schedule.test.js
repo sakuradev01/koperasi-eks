@@ -109,3 +109,38 @@ test("uses old and new targets around an upgrade", () => {
   assert.equal(result.periods[2].baseTarget, 3_000_000);
   assert.equal(result.periods[2].isFullyPaid, true);
 });
+
+test("only approved or partial deposits count toward the savings schedule", () => {
+  const result = calculateSavingsSchedule({
+    termDuration: 4,
+    baseDeposit: 1_000,
+    savings: [
+      saving(1, 9_000, "Pending"),
+      saving(1, 8_000, "Rejected"),
+      { ...saving(1, 7_000), type: "Penarikan" },
+      saving(2, 1_200),
+      saving(3, 900, "Partial"),
+    ],
+  });
+
+  assert.equal(result.periods[0].paid, 0);
+  assert.equal(result.periods[0].status, "Belum Bayar");
+  assert.equal(result.periods[1].paid, 1_200);
+  assert.equal(result.periods[1].overpayment, 200);
+  assert.equal(result.periods[2].creditApplied, 200);
+  assert.equal(result.periods[2].effectiveTarget, 800);
+  assert.equal(result.periods[2].overpayment, 100);
+  assert.equal(result.periods[3].creditApplied, 100);
+  assert.equal(result.periods[3].remaining, 900);
+});
+
+test("continues counting legacy approved rows without an explicit savings type", () => {
+  const result = calculateSavingsSchedule({
+    termDuration: 1,
+    baseDeposit: 1_000,
+    savings: [{ installmentPeriod: 1, amount: 1_000, status: "Approved" }],
+  });
+
+  assert.equal(result.periods[0].paid, 1_000);
+  assert.equal(result.periods[0].isFullyPaid, true);
+});
