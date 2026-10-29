@@ -26,7 +26,6 @@ const expenseSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "SavingsWithdrawal",
       default: undefined,
-      index: true,
     },
     expenseSource: {
       type: String,
