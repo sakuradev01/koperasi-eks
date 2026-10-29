@@ -195,6 +195,16 @@ const menuItems = [
     permissionKey: "reports",
     children: [
       {
+        title: "Projection Per Bulan",
+        path: "/laporan/per-bulan",
+        permissionKey: "reports",
+      },
+      {
+        title: "Projection Per Tahun",
+        path: "/laporan/per-tahun",
+        permissionKey: "reports",
+      },
+      {
         title: "Profit & Loss",
         path: "/reports/profit-loss",
         permissionKey: "reports",
