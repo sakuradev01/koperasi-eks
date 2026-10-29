@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import PropTypes from "prop-types";
@@ -9,13 +9,16 @@ import { API_URL } from "../api/config";
 const Topbar = ({ setSidebarOpen }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { user } = useSelector((state) => state.auth);
+  const { userData: user } = useSelector((state) => state.auth);
+  const canViewSavingsWithdrawals = user?.role === "admin"
+    || (user?.permissions?.simpanan?.view === true && user?.permissions?.simpanan?.editCoaOnly !== true);
   
   // Notification state
   const [pendingMembers, setPendingMembers] = useState([]);
   const [pendingAddressMembers, setPendingAddressMembers] = useState([]);
   const [pendingIdentityMembers, setPendingIdentityMembers] = useState([]);
   const [pendingSavings, setPendingSavings] = useState([]);
+  const [pendingWithdrawals, setPendingWithdrawals] = useState([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [readNotifIds, setReadNotifIds] = useState(() => {
     const saved = localStorage.getItem("readNotifIds");
@@ -85,6 +88,24 @@ const Topbar = ({ setSidebarOpen }) => {
     }
   };
 
+  const fetchPendingWithdrawals = useCallback(async () => {
+    if (!canViewSavingsWithdrawals) {
+      setPendingWithdrawals([]);
+      return;
+    }
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${API_URL}/api/admin/savings-withdrawals?status=submitted&limit=50`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.data.success) {
+        setPendingWithdrawals(Array.isArray(response.data.data?.items) ? response.data.data.items : []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch savings withdrawal requests:", err);
+    }
+  }, [canViewSavingsWithdrawals]);
+
   useEffect(() => {
     fetchPendingMembers();
     fetchPendingAddressMembers();
@@ -98,6 +119,13 @@ const Topbar = ({ setSidebarOpen }) => {
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetchPendingWithdrawals();
+    if (!canViewSavingsWithdrawals) return undefined;
+    const interval = setInterval(fetchPendingWithdrawals, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPendingWithdrawals, canViewSavingsWithdrawals]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -116,6 +144,7 @@ const Topbar = ({ setSidebarOpen }) => {
     ...pendingAddressMembers.map(m => ({ ...m, _notifType: "address" })),
     ...pendingIdentityMembers.map(m => ({ ...m, _notifType: "identity" })),
     ...pendingSavings.map(s => ({ ...s, _notifType: "savings" })),
+    ...pendingWithdrawals.map((request) => ({ ...request, _notifType: "savings-withdrawal" })),
   ];
 
   // Count unread notifications
@@ -133,6 +162,8 @@ const Topbar = ({ setSidebarOpen }) => {
       navigate(`/master/anggota?filter=address-pending`);
     } else if (notif._notifType === "identity") {
       navigate(`/master/anggota?filter=identity-pending`);
+    } else if (notif._notifType === "savings-withdrawal") {
+      navigate(`/savings-withdrawals?status=submitted`);
     } else {
       const memberId = notif.memberId?._id || notif.memberId;
       navigate(`/simpanan?member=${memberId}&status=Pending`);
@@ -252,6 +283,7 @@ const Topbar = ({ setSidebarOpen }) => {
                       const isMember = notif._notifType === "member";
                       const isAddress = notif._notifType === "address";
                       const isIdentity = notif._notifType === "identity";
+                      const isWithdrawal = notif._notifType === "savings-withdrawal";
                       return (
                         <div
                           key={`${notif._notifType}-${notif._id}`}
@@ -261,7 +293,7 @@ const Topbar = ({ setSidebarOpen }) => {
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-primary-500" : isAddress ? "bg-amber-500" : isIdentity ? "bg-emerald-500" : "bg-primary-500") : "bg-slate-300"}`} />
+                            <div className={`w-2 h-2 rounded-full mt-2 ${!isRead ? (isMember ? "bg-primary-500" : isAddress ? "bg-amber-500" : isIdentity ? "bg-emerald-500" : isWithdrawal ? "bg-rose-500" : "bg-primary-500") : "bg-slate-300"}`} />
                             <div className="flex-1 min-w-0">
                               {isMember ? (
                                 <>
@@ -291,6 +323,16 @@ const Topbar = ({ setSidebarOpen }) => {
                                   </p>
                                   <p className="text-xs text-gray-500 mt-1">
                                     UUID: {notif.uuid} • Anggota lama
+                                  </p>
+                                </>
+                              ) : isWithdrawal ? (
+                                <>
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {notif.memberNameSnapshot || notif.memberId?.name || "Anggota"}
+                                    <span className="text-gray-500 font-normal"> mengajukan tutup tabungan</span>
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {notif.memberUuidSnapshot || notif.memberId?.uuid || ""} · {notif.requestNumber} · Rp {(notif.netAmount || 0).toLocaleString("id-ID")}
                                   </p>
                                 </>
                               ) : (

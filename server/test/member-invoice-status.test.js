@@ -4,6 +4,7 @@ import { getAllMembers, exportMembersExcel } from "../src/controllers/admin/memb
 import { Invoice } from "../src/models/invoice.model.js";
 import { Member } from "../src/models/member.model.js";
 import { Savings } from "../src/models/savings.model.js";
+import { SavingsWithdrawal } from "../src/models/savingsWithdrawal.model.js";
 
 const members = [
   { _id: "member-a", uuid: "JPSB-A", name: "Siswa Draft Paid", isVerified: true, membershipStatus: "active" },
@@ -51,6 +52,7 @@ function mockMemberData(t, onMemberFilter = () => {}) {
     return query(invoices);
   });
   mockMethod(t, Savings, "aggregate", async () => []);
+  mockMethod(t, SavingsWithdrawal, "aggregate", async () => []);
   return invoiceFilters;
 }
 

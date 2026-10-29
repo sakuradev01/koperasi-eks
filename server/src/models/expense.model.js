@@ -22,6 +22,18 @@ const expenseSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    savingsWithdrawalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SavingsWithdrawal",
+      default: undefined,
+      index: true,
+    },
+    expenseSource: {
+      type: String,
+      enum: ["manual", "savings_withdrawal"],
+      default: "manual",
+      index: true,
+    },
     title: {
       type: String,
       required: [true, "Judul expense wajib diisi"],
@@ -119,6 +131,10 @@ const expenseSchema = new mongoose.Schema(
 expenseSchema.index({ status: 1, createdAt: -1 });
 expenseSchema.index({ applicantMemberId: 1, createdAt: -1 });
 expenseSchema.index({ applicantName: 1 });
+expenseSchema.index(
+  { savingsWithdrawalId: 1 },
+  { unique: true, partialFilterExpression: { savingsWithdrawalId: { $type: "objectId" } } },
+);
 
 const Expense = mongoose.model("Expense", expenseSchema);
 

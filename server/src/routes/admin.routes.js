@@ -75,6 +75,14 @@ import {
 import { clearAllData } from "../controllers/admin/system.controller.js";
 import { verifyToken, requireAdmin } from "../middlewares/auth.middleware.js";
 import { requireFeaturePermission } from "../middlewares/permission.middleware.js";
+import {
+  getSavingsWithdrawalSettings,
+  updateSavingsWithdrawalSettings,
+  listSavingsWithdrawals,
+  getSavingsWithdrawalDetail,
+  setSavingsWithdrawalBankFee,
+  recordLegacySavingsWithdrawal,
+} from "../controllers/admin/savingsWithdrawal.controller.js";
 import multer from "multer";
 import productUpgradeRoutes from "./admin/productUpgrade.routes.js";
 import loanRoutes from "./loan.routes.js";
@@ -118,6 +126,19 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage: storage });
+
+const { expensePaymentProofs: withdrawalProofDir } = ensureUploadsSubdirs();
+const withdrawalProofUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, withdrawalProofDir),
+    filename: (_req, file, cb) => cb(null, `WD_${Date.now()}_${Math.random().toString(36).slice(2, 9)}${path.extname(file.originalname || "")}`),
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    cb(allowed.includes(file.mimetype) ? null : new Error("Bukti harus berupa JPG, PNG, WEBP, atau PDF."), allowed.includes(file.mimetype));
+  },
+});
 
 const router = express.Router();
 const createSavings = createSavingsHandler(createMongooseAdminSavingsCreator());
@@ -230,6 +251,35 @@ router.get(
   verifyToken,
   requireFeaturePermission("simpanan", "view"),
   getSavingsPeriodSummary,
+);
+
+// Savings closure/withdrawal requests.
+router.get("/savings-withdrawals/settings", verifyToken, requireAdmin, getSavingsWithdrawalSettings);
+router.put("/savings-withdrawals/settings", verifyToken, requireAdmin, updateSavingsWithdrawalSettings);
+router.post(
+  "/savings-withdrawals/legacy/:uuid",
+  verifyToken,
+  requireFeaturePermission("simpanan", "edit", { allowSavingsCoaOnly: false }),
+  withdrawalProofUpload.single("proofFile"),
+  recordLegacySavingsWithdrawal,
+);
+router.get(
+  "/savings-withdrawals",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view", { allowSavingsCoaOnly: false }),
+  listSavingsWithdrawals,
+);
+router.get(
+  "/savings-withdrawals/:id",
+  verifyToken,
+  requireFeaturePermission("simpanan", "view", { allowSavingsCoaOnly: false }),
+  getSavingsWithdrawalDetail,
+);
+router.patch(
+  "/savings-withdrawals/:id/bank-fee",
+  verifyToken,
+  requireFeaturePermission("expenses", "edit"),
+  setSavingsWithdrawalBankFee,
 );
 
 // Donation routes

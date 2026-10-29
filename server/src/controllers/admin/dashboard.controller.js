@@ -5,12 +5,19 @@ import { LoanProduct } from "../../models/loanProduct.model.js";
 import { Loan } from "../../models/loan.model.js";
 import { LoanPayment } from "../../models/loanPayment.model.js";
 import { Member } from "../../models/member.model.js";
+import { SavingsWithdrawal } from "../../models/savingsWithdrawal.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
 const getDashboardStats = asyncHandler(async (req, res) => {
   try {
     // Get total members count
     const totalMembers = await Member.countDocuments();
+    const withdrawalSummary = await SavingsWithdrawal.aggregate([
+      { $match: { status: { $in: ["submitted", "reviewing", "approved", "waiting_payment"] } } },
+      { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: "$netAmount" } } },
+    ]);
+    const openSavingsWithdrawals = withdrawalSummary[0]?.count || 0;
+    const openSavingsWithdrawalAmount = withdrawalSummary[0]?.amount || 0;
 
     // Get total savings amount (only approved deposits)
     const totalSavingsResult = await Savings.aggregate([
@@ -256,6 +263,8 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       success: true,
       data: {
         totalMembers,
+        openSavingsWithdrawals,
+        openSavingsWithdrawalAmount,
         totalSavings,
         totalProducts,
         activeSavingsCount,

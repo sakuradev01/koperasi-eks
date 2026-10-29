@@ -31,6 +31,7 @@ function makeHarness(overrides = {}) {
     discardedFiles: [],
     createdSaving: null,
     pendingExists: false,
+    withdrawalOpen: false,
     existingCount: 0,
     paidSavings: [],
     member: validMember(),
@@ -66,6 +67,9 @@ function makeHarness(overrides = {}) {
       },
       populateProduct: async (saving) => saving,
     },
+    withdrawalRepository: {
+      findOpenByMember: async () => state.withdrawalOpen ? { _id: "withdrawal-1", status: "submitted" } : null,
+    },
     proofStorage: {
       discard: async (file) => state.discardedFiles.push(file),
     },
@@ -78,6 +82,20 @@ function makeHarness(overrides = {}) {
 }
 
 const file = { path: "/tmp/payment-proof.jpg", filename: "payment-proof.jpg" };
+
+test("blocks new student savings submissions while a withdrawal request is open", async () => {
+  const { state, useCase } = makeHarness({ withdrawalOpen: true });
+  const result = await useCase.execute({
+    memberId: "member-1",
+    input: { amount: 1_000, productId: "product-1" },
+    proofFile: file,
+  });
+
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.body.code, "SAVINGS_WITHDRAWAL_PENDING");
+  assert.deepEqual(state.discardedFiles, [file]);
+  assert.equal(state.createdSaving, null);
+});
 
 test("creates a pending savings attempt for the first incomplete period", async () => {
   const { state, useCase } = makeHarness({

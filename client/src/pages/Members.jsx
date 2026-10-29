@@ -58,6 +58,16 @@ const MEMBERSHIP_STATUS_OPTIONS = Object.entries(MEMBERSHIP_STATUS_META).map(
   ([value, meta]) => ({ value, label: meta.label }),
 );
 
+const WITHDRAWAL_STATUS_OPTIONS = [
+  { value: "none", label: "Belum Ada Pengajuan" },
+  { value: "submitted", label: "Menunggu Finance" },
+  { value: "reviewing", label: "Ditinjau" },
+  { value: "approved", label: "Disetujui" },
+  { value: "waiting_payment", label: "Menunggu Pencairan" },
+  { value: "rejected", label: "Ditolak" },
+  { value: "paid", label: "Sudah Dibayar" },
+];
+
 const getMembershipStatus = (member) => {
   const status = String(
     member?.membershipStatusClassification || member?.membershipStatusRaw || "",
@@ -112,6 +122,7 @@ const Members = () => {
   const [filterStatus, setFilterStatus] = useState([]);
   const [filterVerification, setFilterVerification] = useState([]);
   const [filterInvoiceStatus, setFilterInvoiceStatus] = useState([]);
+  const [filterWithdrawalStatus, setFilterWithdrawalStatus] = useState([]);
   const [filterMembershipStatus, setFilterMembershipStatus] = useState([]);
   const [filterProduct, setFilterProduct] = useState([]);
   const [exporting, setExporting] = useState(false);
@@ -164,6 +175,8 @@ const Members = () => {
     } else if (filterParam === "rejected") {
       setFilterVerification(["rejected"]);
     }
+    const withdrawalStatusParam = searchParams.get("withdrawalStatus");
+    if (withdrawalStatusParam) setFilterWithdrawalStatus(withdrawalStatusParam.split(",").filter(Boolean));
     fetchMembers();
     fetchProducts();
     fetchAvailableUuids(); // 🔴 NEW: ambil daftar UUID dari API student
@@ -619,6 +632,7 @@ const Members = () => {
       setSelected("completionStatus", filterStatus);
       setSelected("verificationStatus", filterVerification);
       setSelected("invoiceStatus", filterInvoiceStatus);
+      setSelected("withdrawalStatus", filterWithdrawalStatus);
       setSelected("membershipStatus", filterMembershipStatus);
       setSelected("productId", filterProduct);
       if (searchTerm) params.set("search", searchTerm);
@@ -672,6 +686,10 @@ const Members = () => {
       ));
     }
 
+    if (filterWithdrawalStatus.length > 0) {
+      result = result.filter((member) => filterWithdrawalStatus.includes(member.savingsWithdrawalStatus || "none"));
+    }
+
     if (filterVerification.length > 0) {
       result = result.filter((member) => filterVerification.some((status) => {
         if (status === "verified") return member.isVerified === true;
@@ -705,7 +723,7 @@ const Members = () => {
     }
     
     return result;
-  }, [members, searchTerm, filterStatus, filterInvoiceStatus, filterVerification, filterMembershipStatus, filterProduct]);
+  }, [members, searchTerm, filterStatus, filterInvoiceStatus, filterWithdrawalStatus, filterVerification, filterMembershipStatus, filterProduct]);
 
   // Pagination logic with useMemo for performance
   const paginationData = useMemo(() => {
@@ -855,6 +873,12 @@ const Members = () => {
             onChange={(values) => { setFilterInvoiceStatus(values); setCurrentPage(1); }}
           />
           <MultiSelectFilter
+            label="Status Penarikan"
+            options={WITHDRAWAL_STATUS_OPTIONS}
+            selectedValues={filterWithdrawalStatus}
+            onChange={(values) => { setFilterWithdrawalStatus(values); setCurrentPage(1); }}
+          />
+          <MultiSelectFilter
             label="Verifikasi"
             options={VERIFICATION_STATUS_OPTIONS}
             selectedValues={filterVerification}
@@ -875,7 +899,7 @@ const Members = () => {
           
           {/* Search Results Info */}
           <div className="text-sm text-gray-600">
-            {searchTerm || filterStatus.length > 0 || filterInvoiceStatus.length > 0 || filterVerification.length > 0 || filterMembershipStatus.length > 0 || filterProduct.length > 0 ? (
+            {searchTerm || filterStatus.length > 0 || filterInvoiceStatus.length > 0 || filterWithdrawalStatus.length > 0 || filterVerification.length > 0 || filterMembershipStatus.length > 0 || filterProduct.length > 0 ? (
               <span className="flex items-center flex-wrap gap-1">
                 <span className="font-medium text-pink-600">{filteredMembers.length}</span>
                 <span>dari {members.length} anggota</span>
@@ -892,6 +916,11 @@ const Members = () => {
                 {filterInvoiceStatus.map((status) => (
                   <span key={status} className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
                     Invoice: {INVOICE_STATUS_OPTIONS.find((option) => option.value === status)?.label || status}
+                  </span>
+                ))}
+                {filterWithdrawalStatus.map((status) => (
+                  <span key={status} className="px-2 py-1 rounded-full text-xs bg-amber-100 text-amber-800">
+                    Penarikan: {WITHDRAWAL_STATUS_OPTIONS.find((option) => option.value === status)?.label || status}
                   </span>
                 ))}
                 {filterVerification.map((status) => (
@@ -956,6 +985,9 @@ const Members = () => {
                 Status Invoice
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
+                Status Penarikan
+              </th>
+              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
                 Keanggotaan
               </th>
               <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-pink-700 uppercase tracking-wider">
@@ -969,7 +1001,7 @@ const Members = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {currentMembers.length === 0 ? (
               <tr>
-                <td colSpan="14" className="px-6 py-12 text-center">
+                <td colSpan="15" className="px-6 py-12 text-center">
                   <div className="flex flex-col items-center">
                     <div className="text-6xl mb-4">🔍</div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -1068,6 +1100,16 @@ const Members = () => {
                         ))
                       : <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Belum Ada Invoice</span>}
                   </div>
+                </td>
+                <td className="px-3 sm:px-6 py-3 sm:py-4 min-w-40 text-xs sm:text-sm">
+                  {member.savingsWithdrawalStatus && member.savingsWithdrawalStatus !== "none" ? (
+                    <div className="flex flex-col items-start gap-1">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${member.savingsWithdrawalStatus === "paid" ? "bg-emerald-100 text-emerald-800" : member.savingsWithdrawalStatus === "rejected" ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"}`}>
+                        {WITHDRAWAL_STATUS_OPTIONS.find((option) => option.value === member.savingsWithdrawalStatus)?.label || member.savingsWithdrawalStatus}
+                      </span>
+                      {member.savingsWithdrawal?.requestNumber && <span className="font-mono text-[10px] text-gray-500">{member.savingsWithdrawal.requestNumber}</span>}
+                    </div>
+                  ) : <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Belum Ada Pengajuan</span>}
                 </td>
                 <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
                   <span className={`px-2 py-1 rounded-full text-xs font-semibold ${MEMBERSHIP_STATUS_META[getMembershipStatus(member)].badgeClass}`}>

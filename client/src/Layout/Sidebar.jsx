@@ -87,6 +87,7 @@ const icons = {
 const menuIconMap = {
   Dashboard: "dashboard",
   Simpanan: "savings",
+  "Penutupan Tabungan": "savings",
   Donasi: "gift",
   "Manajemen Pinjaman": "bank",
   "Dana Darurat": "emergency",
@@ -146,6 +147,7 @@ const menuItems = [
     title: "Expenses",
     permissionKey: "expenses",
     children: [
+      { title: "Penutupan Tabungan", path: "/savings-withdrawals", permissionKey: "simpanan" },
       {
         title: "Expenses Management",
         path: "/expense/admin",
@@ -245,7 +247,9 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     if (!permKey) return true; // fallback: show if no permission key
     const perms = user.permissions || {};
     const feature = perms[permKey];
-    if (permKey === "simpanan" && feature?.editCoaOnly === true) return true;
+    if (permKey === "simpanan" && feature?.editCoaOnly === true) {
+      return item.path !== "/savings-withdrawals";
+    }
     return feature?.view === true;
   };
 

@@ -31,6 +31,7 @@ export function createMemberSavingsSubmission({
   memberRepository,
   productRepository,
   savingsRepository,
+  withdrawalRepository = null,
   proofStorage,
   scheduleCalculator = calculateSavingsSchedule,
   clock = () => new Date(),
@@ -70,6 +71,18 @@ export function createMemberSavingsSubmission({
           membershipStatus,
           message: getMembershipStatusMessage(membershipStatus),
         });
+      }
+
+      if (withdrawalRepository) {
+        const openWithdrawal = await withdrawalRepository.findOpenByMember(member._id);
+        if (openWithdrawal) {
+          await proofStorage.discard(proofFile);
+          return failure(409, {
+            success: false,
+            code: "SAVINGS_WITHDRAWAL_PENDING",
+            message: "Pengajuan tutup tabungan sedang diproses. Setoran baru dibuka kembali jika pengajuan ditolak.",
+          });
+        }
       }
 
       if (isBlankAddress(member.completeAddress)) {

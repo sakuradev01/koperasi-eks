@@ -15,12 +15,13 @@ export function buildAccountBalanceUpdate(amount, transactionType, reverse = fal
   };
 }
 
-export async function updateAccountBalance(accountId, amount, transactionType, reverse = false) {
+export async function updateAccountBalance(accountId, amount, transactionType, reverse = false, options = {}) {
   if (!accountId) return false;
 
   const update = buildAccountBalanceUpdate(amount, transactionType, reverse);
   if (!update) return false;
 
-  const result = await CoaAccount.updateOne({ _id: accountId }, update);
+  const queryOptions = options.session ? { session: options.session } : {};
+  const result = await CoaAccount.updateOne({ _id: accountId }, update, queryOptions);
   return (result.matchedCount ?? result.n ?? 0) > 0;
 }

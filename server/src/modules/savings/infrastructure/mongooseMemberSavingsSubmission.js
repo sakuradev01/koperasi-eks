@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import { Member } from "../../../models/member.model.js";
 import { Product } from "../../../models/product.model.js";
 import { Savings } from "../../../models/savings.model.js";
+import { createMongooseWithdrawalRepository } from "../../savings-withdrawal/infrastructure/mongooseWithdrawalRepository.js";
 import {
   createMemberSavingsSubmission,
 } from "../application/createMemberSavingsSubmission.js";
@@ -45,6 +46,7 @@ export function createMongooseMemberSavingsSubmission() {
       create: (data) => new Savings(data).save(),
       populateProduct: (saving) => saving.populate("product"),
     },
+    withdrawalRepository: createMongooseWithdrawalRepository(),
     proofStorage: {
       discard: discardUploadedProof,
     },

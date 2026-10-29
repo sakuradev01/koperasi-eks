@@ -66,6 +66,8 @@ const Dashboard = () => {
     overdueLoans: 0,
     recentLoanActivities: [],
     monthlyLoanStats: [],
+    openSavingsWithdrawals: 0,
+    openSavingsWithdrawalAmount: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -91,6 +93,8 @@ const Dashboard = () => {
             overdueLoans: response.data.data.overdueLoans || 0,
             recentLoanActivities: response.data.data.recentLoanActivities || [],
             monthlyLoanStats: response.data.data.monthlyLoanStats || [],
+            openSavingsWithdrawals: response.data.data.openSavingsWithdrawals || 0,
+            openSavingsWithdrawalAmount: response.data.data.openSavingsWithdrawalAmount || 0,
           });
         }
       } catch (err) {
@@ -166,6 +170,23 @@ const Dashboard = () => {
           Ringkasan aktivitas Koperasi SAMIT hari ini.
         </p>
       </div>
+
+      <Link to="/savings-withdrawals?status=all" className="mb-5 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 transition hover:border-amber-300 hover:bg-amber-100 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+            Pengajuan tutup tabungan
+            {stats.openSavingsWithdrawals > 0 ? <span className="inline-flex min-w-6 justify-center rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">{stats.openSavingsWithdrawals}</span> : <span className="inline-flex min-w-6 justify-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700">0</span>}
+          </div>
+          <p className="mt-1 text-xs text-amber-800">Pantau pengajuan baru dan lanjutkan pembukuan pencairan melalui Expense.</p>
+        </div>
+        <div className="flex items-center justify-between gap-4 sm:justify-end">
+          <div className="text-left sm:text-right">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700">Estimasi transfer terbuka</div>
+            <div className="text-base font-bold text-amber-950">{formatIDR(stats.openSavingsWithdrawalAmount)}</div>
+          </div>
+          <span className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-amber-900 shadow-sm">Lihat</span>
+        </div>
+      </Link>
 
       {/* Savings Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4 sm:mb-6">

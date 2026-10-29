@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { useSelector } from "react-redux";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import api from "../api/index.jsx";
@@ -7,6 +8,7 @@ import { loanApi, loanPaymentApi } from "../api/loanApi.jsx";
 import Pagination from "../components/Pagination.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import MemberDocumentImage from "../components/MemberDocumentImage.jsx";
+import SavingsWithdrawalLegacyModal from "../components/SavingsWithdrawalLegacyModal.jsx";
 import { toast } from "react-toastify";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -42,6 +44,10 @@ const getRegistrationStatus = (member) => {
 const MemberDetail = () => {
   const { uuid } = useParams();
   const navigate = useNavigate();
+  const { userData: currentUser } = useSelector((state) => state.auth);
+  const savingsPermission = currentUser?.permissions?.simpanan || {};
+  const canRecordLegacyWithdrawal = currentUser?.role === "admin"
+    || (savingsPermission.edit === true && savingsPermission.editCoaOnly !== true);
   
   const [member, setMember] = useState(null);
   const [savings, setSavings] = useState([]);
@@ -87,6 +93,9 @@ const MemberDetail = () => {
   const [showLoanDetailModal, setShowLoanDetailModal] = useState(false);
   const [showPaymentProofModal, setShowPaymentProofModal] = useState(false);
   const [selectedPaymentProof, setSelectedPaymentProof] = useState(null);
+  const [savingsWithdrawal, setSavingsWithdrawal] = useState(null);
+  const [withdrawalHistoryLoaded, setWithdrawalHistoryLoaded] = useState(false);
+  const [showLegacyWithdrawalModal, setShowLegacyWithdrawalModal] = useState(false);
 
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState({
@@ -105,6 +114,8 @@ const MemberDetail = () => {
     if (uuid) {
       // Avoid showing previous anggota saldo/lampiran while new uuid loads
       setMember(null);
+      setSavingsWithdrawal(null);
+      setWithdrawalHistoryLoaded(false);
       setSavings([]);
       setLoans([]);
       setDanaDaruratApps([]);
@@ -150,6 +161,23 @@ const MemberDetail = () => {
       setLoading(false);
     }
   };
+
+  const fetchSavingsWithdrawalHistory = useCallback(async () => {
+    if (!member?._id) return;
+    try {
+      const response = await api.get(`/api/admin/savings-withdrawals?memberId=${member._id}&limit=1`);
+      const latest = response.data?.data?.items?.[0] || null;
+      setSavingsWithdrawal(latest);
+    } catch (err) {
+      console.error("Savings withdrawal history fetch error:", err);
+    } finally {
+      setWithdrawalHistoryLoaded(true);
+    }
+  }, [member?._id]);
+
+  useEffect(() => {
+    if (member?._id) fetchSavingsWithdrawalHistory();
+  }, [member?._id, fetchSavingsWithdrawalHistory]);
 
   const handleApproveAddress = () => {
     if (!member) return;
@@ -1364,6 +1392,7 @@ const MemberDetail = () => {
   const saldoSimpanan = totalSetoran - totalPenarikan;
 
   const periodStatusData = buildMemberSavingsPeriodRows({ member, savings });
+  const paidSavingsPeriods = periodStatusData.filter((period) => period.status === "paid").length;
   // Total target efektif (sudah dikurangi kredit kelebihan bayar antar periode)
   const totalEffectiveTarget = periodStatusData.reduce((sum, p) => sum + (p.requiredAmount || 0), 0);
 
@@ -1508,6 +1537,11 @@ const MemberDetail = () => {
               ✅ LUNAS
             </span>
           )}
+          {savingsWithdrawal && (
+            <Link to="/savings-withdrawals" className={`px-3 py-1 rounded-full text-xs font-semibold ${savingsWithdrawal.status === "paid" ? "bg-emerald-100 text-emerald-800" : savingsWithdrawal.status === "rejected" ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"}`}>
+              Penutupan: {savingsWithdrawal.status}
+            </Link>
+          )}
         </div>
         
         {/* Button Tandai Lunas dan Export Formulir */}
@@ -1576,6 +1610,16 @@ const MemberDetail = () => {
               className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold text-sm"
             >
               ↩️ Batalkan Lunas
+            </button>
+          )}
+          {canRecordLegacyWithdrawal && withdrawalHistoryLoaded && (!savingsWithdrawal || ["rejected", "cancelled"].includes(savingsWithdrawal.status)) && (
+            <button
+              type="button"
+              onClick={() => setShowLegacyWithdrawalModal(true)}
+              className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 font-semibold text-sm"
+              title="Catat pencairan tabungan lama ke Expense dan transaksi akuntansi"
+            >
+              Tutup Tabungan Lama
             </button>
           )}
         </div>
@@ -3529,6 +3573,20 @@ const MemberDetail = () => {
         type={confirmDialog.type}
         loading={confirmLoading}
       />
+      {showLegacyWithdrawalModal && (
+        <SavingsWithdrawalLegacyModal
+          member={member}
+          savings={savings}
+          paidPeriodCount={paidSavingsPeriods}
+          onClose={() => setShowLegacyWithdrawalModal(false)}
+          onSaved={() => {
+            setShowLegacyWithdrawalModal(false);
+            toast.success("Penutupan tabungan lama berhasil masuk Expense dan transaksi akuntansi.");
+            fetchMemberDetail();
+            fetchSavingsWithdrawalHistory();
+          }}
+        />
+      )}
     </div>
   );
 };

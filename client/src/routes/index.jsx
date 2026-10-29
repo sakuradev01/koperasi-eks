@@ -10,6 +10,7 @@ import Dashboard from "../pages/Dashboard.jsx";
 import Members from "../pages/Members.jsx";
 import MemberRegistrationRejections from "../pages/MemberRegistrationRejections.jsx";
 import MemberDetail from "../pages/MemberDetail.jsx";
+import SavingsWithdrawals from "../pages/SavingsWithdrawals.jsx";
 import Products from "../pages/Products.jsx";
 import Savings from "../pages/Savings.jsx";
 import Loans from "../pages/Loans.jsx";
@@ -76,6 +77,7 @@ const router = createBrowserRouter(
         <Route path="/master/produk" element={<Products />} />
         <Route path="/master/loan-products" element={<LoanProducts />} />
         <Route path="/simpanan" element={<Savings />} />
+        <Route path="/savings-withdrawals" element={<SavingsWithdrawals />} />
         <Route path="/pinjaman" element={<Loans />} />
         <Route path="/donasi" element={<Donations />} />
         <Route path="/loan-management" element={<LoanManagement />} />

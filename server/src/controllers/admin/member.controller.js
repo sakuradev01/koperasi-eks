@@ -6,6 +6,7 @@ import { LoanPayment } from "../../models/loanPayment.model.js";
 import { ProductUpgrade } from "../../models/productUpgrade.model.js";
 import { MemberRegistrationRejection } from "../../models/memberRegistrationRejection.model.js";
 import { Invoice } from "../../models/invoice.model.js";
+import { SavingsWithdrawal } from "../../models/savingsWithdrawal.model.js";
 import mongoose from "mongoose";
 import fs from "fs/promises";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
@@ -127,6 +128,7 @@ const getAllMembers = asyncHandler(async (req, res) => {
     membershipStatus,
     invoiceStatus,
     verificationStatus,
+    withdrawalStatus,
   } = req.query;
   let filter = {};
   if (verificationStatus !== undefined) {
@@ -168,10 +170,26 @@ const getAllMembers = asyncHandler(async (req, res) => {
     .lean();
 
   const invoiceStatusCountsByMember = await getInvoiceStatusCounts(members.map((member) => member._id));
-  const filteredMembers = members.filter((member) => matchesInvoiceStatusFilter(
+  let filteredMembers = members.filter((member) => matchesInvoiceStatusFilter(
     invoiceStatusCountsByMember.get(String(member._id)) || {},
     invoiceStatus,
   ));
+
+  const withdrawals = await SavingsWithdrawal.aggregate([
+    { $match: { memberId: { $in: members.map((member) => member._id) } } },
+    { $sort: { createdAt: -1, _id: -1 } },
+    { $group: { _id: "$memberId", request: { $first: "$$ROOT" } } },
+    { $replaceRoot: { newRoot: "$request" } },
+    { $project: { memberId: 1, _id: 1, requestNumber: 1, status: 1, grossAmount: 1, netAmount: 1, createdAt: 1 } },
+  ]);
+  const withdrawalByMember = new Map(withdrawals.map((request) => [String(request.memberId), request]));
+  const requestedWithdrawalStatuses = normalizeQueryValues(withdrawalStatus);
+  if (requestedWithdrawalStatuses.length) {
+    filteredMembers = filteredMembers.filter((member) => {
+      const status = withdrawalByMember.get(String(member._id))?.status || "none";
+      return requestedWithdrawalStatuses.includes(status);
+    });
+  }
 
   // Batched savings total — single aggregate, no N+1
   const memberIds = filteredMembers.map((m) => m._id);
@@ -191,6 +209,8 @@ const getAllMembers = asyncHandler(async (req, res) => {
     membershipStatusClassification: getMembershipClassification(m),
     invoiceStatusCounts: invoiceStatusCountsByMember.get(String(m._id)) || {},
     totalSavings: savingsMap.get(String(m._id)) || 0,
+    savingsWithdrawal: withdrawalByMember.get(String(m._id)) || null,
+    savingsWithdrawalStatus: withdrawalByMember.get(String(m._id))?.status || "none",
   }));
 
   res.status(200).json({
@@ -1107,6 +1127,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     membershipStatus,
     invoiceStatus,
     verificationStatus,
+    withdrawalStatus,
   } = req.query;
   let filter = {};
   if (verificationStatus !== undefined) {
@@ -1156,10 +1177,24 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     .lean();
 
   const invoiceStatusCountsByMember = await getInvoiceStatusCounts(members.map((member) => member._id));
-  const exportMembers = members.filter((member) => matchesInvoiceStatusFilter(
+  let exportMembers = members.filter((member) => matchesInvoiceStatusFilter(
     invoiceStatusCountsByMember.get(String(member._id)) || {},
     invoiceStatus,
   ));
+  const latestWithdrawals = members.length
+    ? await SavingsWithdrawal.aggregate([
+        { $match: { memberId: { $in: members.map((member) => member._id) } } },
+        { $sort: { createdAt: -1, _id: -1 } },
+        { $group: { _id: "$memberId", status: { $first: "$status" } } },
+      ])
+    : [];
+  const withdrawalStatusByMember = new Map(latestWithdrawals.map((item) => [String(item._id), item.status]));
+  const requestedWithdrawalStatuses = normalizeQueryValues(withdrawalStatus);
+  if (requestedWithdrawalStatuses.length) {
+    exportMembers = exportMembers.filter((member) => requestedWithdrawalStatuses.includes(
+      withdrawalStatusByMember.get(String(member._id)) || "none",
+    ));
+  }
   const memberIds = exportMembers.map((m) => m._id);
   const savingsAgg = memberIds.length
     ? await Savings.aggregate([
@@ -1225,6 +1260,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
     "Alasan Tolak Alamat",
     "Status Tabungan",
     "Status Invoice",
+    "Status Penutupan Tabungan",
     "Tanggal Daftar",
     "Mulai Tabungan",
     "Tanggal Verifikasi",
@@ -1264,6 +1300,7 @@ const exportMembersExcel = asyncHandler(async (req, res) => {
       m.addressUpdateRejectionReason || "",
       m.isCompleted ? "Lunas" : "Belum Lunas",
       invoiceStatusText,
+      withdrawalStatusByMember.get(String(m._id)) || "Belum Ada Pengajuan",
       fmt(m.createdAt),
       fmt(m.savingsStartDate),
       fmt(m.verifiedAt),

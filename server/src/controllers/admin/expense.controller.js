@@ -1,4 +1,4 @@
-import fs from "fs";
+import mongoose from "mongoose";
 import { Expense } from "../../models/expense.model.js";
 import { ExpenseLine } from "../../models/expenseLine.model.js";
 import { ExpenseAttachment } from "../../models/expenseAttachment.model.js";
@@ -6,12 +6,30 @@ import { ExpensePaymentProof } from "../../models/expensePaymentProof.model.js";
 import { CoaAccount } from "../../models/coaAccount.model.js";
 import { Member } from "../../models/member.model.js";
 import { AccountingTransaction } from "../../models/accountingTransaction.model.js";
+import { SavingsWithdrawal } from "../../models/savingsWithdrawal.model.js";
 import {
   createTransactionFromExpense,
   syncTransactionDateForExpense,
   deleteLinkedTransactionForExpense,
 } from "../../services/expenseAccounting.service.js";
-import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
+import {
+  getLineAmountTotal,
+  getUploadedFieldFiles,
+  hasExpenseLinesInput,
+  normalizeMoney,
+  normalizeText,
+  parseExpenseLines,
+  removeUploadedFile,
+  toDate,
+} from "../../utils/expenseInput.js";
+import { createMongooseWithdrawalRepository } from "../../modules/savings-withdrawal/infrastructure/mongooseWithdrawalRepository.js";
+import {
+  assertSavingsWithdrawalBankFeeConfirmed,
+  syncSavingsWithdrawalExpense,
+} from "../../modules/savings-withdrawal/application/syncWithdrawalExpense.js";
+import { calculateSavingsWithdrawalSnapshot } from "../../modules/savings-withdrawal/domain/withdrawalPolicy.js";
+
+const savingsWithdrawalRepository = createMongooseWithdrawalRepository();
 
 const VALID_STATUSES = new Set([
   "uncategorized",
@@ -23,77 +41,16 @@ const VALID_STATUSES = new Set([
   "rejected",
 ]);
 
-function normalizeMoney(value) {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.abs(parsed);
-}
-
-function normalizeText(value) {
-  if (value === undefined || value === null) return "";
-  return String(value).trim();
-}
-
-function toDate(value) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
-}
-
-function parseJsonArray(rawValue) {
-  if (Array.isArray(rawValue)) return rawValue;
-  if (!rawValue) return [];
-  if (typeof rawValue === "string") {
-    try {
-      const parsed = JSON.parse(rawValue);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function parseExpenseLines(body) {
-  const source = body.expense_lines ?? body.expenseLine ?? body.lines ?? body.expenseLines;
-  const rows = parseJsonArray(source);
-  return rows
-    .map((row) => ({
-      categoryId: row.categoryId ?? row.category_id ?? row.category ?? null,
-      description: normalizeText(row.description ?? row.notes ?? ""),
-      amount: normalizeMoney(row.amount),
-    }))
-    .filter((row) => row.categoryId && row.amount > 0);
-}
-
-function getLineAmountTotal(lines = []) {
-  return lines.reduce((sum, line) => sum + normalizeMoney(line.amount), 0);
-}
-
-function hasExpenseLinesInput(body) {
-  return ["expense_lines", "expenseLine", "lines", "expenseLines"].some((key) => Object.prototype.hasOwnProperty.call(body, key));
-}
-
-function getUploadedFieldFiles(req, fieldNames = []) {
-  const files = [];
-  for (const fieldName of fieldNames) {
-    if (Array.isArray(req.files?.[fieldName])) {
-      files.push(...req.files[fieldName]);
-    }
-  }
-  return files;
-}
-
-function removeUploadedFile(storedName, defaultSubdir) {
-  if (!storedName) return;
-  const fullPath = resolveUploadedFilePath(storedName, { defaultSubdir });
-  if (!fullPath) return;
-  try {
-    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-  } catch {
-    // ignore cleanup failures
-  }
+async function rollbackPaidExpenseAttempt(expenseId, proofDocs) {
+  await Expense.updateOne(
+    { _id: expenseId },
+    { $set: { status: "waiting_payment", paymentProof: null, transferDate: null, paidBy: "", paidAt: null } },
+  );
+  await ExpensePaymentProof.deleteMany({
+    expenseId,
+    fileName: { $in: proofDocs.map((proof) => proof.fileName) },
+  });
+  proofDocs.forEach((proof) => removeUploadedFile(proof.fileName, "expense-payment-proofs"));
 }
 
 async function resolveApplicantPayload(body, fallback = {}) {
@@ -140,13 +97,14 @@ async function buildExpenseDetail(expenseDoc) {
   const expense = expenseDoc?.toObject ? expenseDoc.toObject() : expenseDoc;
   if (!expense) return null;
 
-  const [linesRaw, attachments, paymentProofs, linkedTransaction, member, paymentAccount] = await Promise.all([
+  const [linesRaw, attachments, paymentProofs, linkedTransaction, member, paymentAccount, savingsWithdrawal] = await Promise.all([
     ExpenseLine.find({ expenseId: expense._id }).sort({ createdAt: 1, _id: 1 }).lean(),
     ExpenseAttachment.find({ expenseId: expense._id }).sort({ createdAt: 1, _id: 1 }).lean(),
     ExpensePaymentProof.find({ expenseId: expense._id }).sort({ uploadedAt: -1, _id: -1 }).lean(),
     AccountingTransaction.findOne({ expenseId: expense._id }).select("_id transactionDate amount accountId").lean(),
     expense.applicantMemberId ? Member.findById(expense.applicantMemberId).select("_id name uuid email").lean() : null,
     expense.accountId ? CoaAccount.findById(expense.accountId).select("_id accountName accountCode currency").lean() : null,
+    expense.savingsWithdrawalId ? SavingsWithdrawal.findById(expense.savingsWithdrawalId).lean() : null,
   ]);
 
   const accountIds = linesRaw.map((line) => line.categoryId).filter(Boolean);
@@ -172,6 +130,7 @@ async function buildExpenseDetail(expenseDoc) {
     linkedTransaction,
     member,
     paymentAccount,
+    savingsWithdrawal,
   };
 }
 
@@ -463,9 +422,23 @@ export const updateExpense = async (req, res) => {
       return res.status(404).json({ success: false, message: "Expense tidak ditemukan" });
     }
 
+    if (expense.savingsWithdrawalId && ["paid", "rejected"].includes(expense.status)) {
+      return res.status(409).json({
+        success: false,
+        message: "Expense penutupan yang sudah dibayar atau ditolak tidak dapat diedit agar riwayat dan transaksi tetap konsisten.",
+      });
+    }
+
     const updatePayload = {
       updatedBy: req.user?.userId || null,
     };
+
+    if (expense.savingsWithdrawalId && (Object.prototype.hasOwnProperty.call(body, "amount") || Object.prototype.hasOwnProperty.call(body, "total"))) {
+      return res.status(409).json({
+        success: false,
+        message: "Nominal pengajuan penarikan diatur dari biaya transfer pada detail pengajuan.",
+      });
+    }
 
     const shouldUpdateApplicant = ["applicant_type", "applicantType", "applicant_member_id", "applicantMemberId", "applicant_name", "applicantName"].some(
       (key) => Object.prototype.hasOwnProperty.call(body, key)
@@ -546,6 +519,12 @@ export const updateExpense = async (req, res) => {
 
     const requestedStatus = normalizeText(body.status).toLowerCase();
     if (VALID_STATUSES.has(requestedStatus)) {
+      if (expense.savingsWithdrawalId && requestedStatus === "rejected") {
+        return res.status(400).json({
+          success: false,
+          message: "Gunakan aksi reject agar alasan penolakan tercatat dan akses setoran siswa dibuka kembali.",
+        });
+      }
       if (requestedStatus === "paid" && expense.status !== "paid") {
         return res.status(400).json({
           success: false,
@@ -591,7 +570,24 @@ export const updateExpense = async (req, res) => {
       );
     }
 
+    const originalExpense = expense.toObject();
     await Expense.updateOne({ _id: expense._id }, { $set: updatePayload });
+    Object.assign(expense, updatePayload);
+    try {
+      await syncSavingsWithdrawalExpense({
+        expense,
+        withdrawalRepository: savingsWithdrawalRepository,
+        actor: { type: "finance", id: req.user?.userId, name: req.user?.name },
+      });
+    } catch (syncError) {
+      const restore = { $set: {}, $unset: {} };
+      Object.keys(updatePayload).forEach((key) => {
+        if (originalExpense[key] === undefined) restore.$unset[key] = 1;
+        else restore.$set[key] = originalExpense[key];
+      });
+      await Expense.updateOne({ _id: expense._id }, restore);
+      throw syncError;
+    }
 
     return res.status(200).json({
       success: true,
@@ -616,7 +612,24 @@ export const approveExpense = async (req, res) => {
     const status = expense.status || "pending";
     let nextStatus = null;
 
-    if (status === "uncategorized" || status === "pending") {
+    if (expense.savingsWithdrawalId) {
+      const withdrawal = await SavingsWithdrawal.findById(expense.savingsWithdrawalId).lean();
+      if (!withdrawal) {
+        return res.status(409).json({ success: false, message: "Data pengajuan tutup tabungan tidak ditemukan." });
+      }
+      assertSavingsWithdrawalBankFeeConfirmed(withdrawal);
+    }
+
+    if (status === "uncategorized") {
+      const lineCount = await ExpenseLine.countDocuments({ expenseId: expense._id });
+      if (lineCount === 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Lengkapi kategori Expense terlebih dahulu sebelum mengajukan persetujuan.",
+        });
+      }
+      nextStatus = "waiting_approval";
+    } else if (status === "pending") {
       nextStatus = "waiting_approval";
     } else if (status === "waiting_approval") {
       nextStatus = "approved";
@@ -637,9 +650,23 @@ export const approveExpense = async (req, res) => {
       });
     }
 
+    const previousStatus = expense.status;
+    const previousUpdatedBy = expense.updatedBy;
     expense.status = nextStatus;
     expense.updatedBy = req.user?.userId || null;
     await expense.save();
+    try {
+      await syncSavingsWithdrawalExpense({
+        expense,
+        withdrawalRepository: savingsWithdrawalRepository,
+        actor: { type: "finance", id: req.user?.userId, name: req.user?.name },
+      });
+    } catch (syncError) {
+      expense.status = previousStatus;
+      expense.updatedBy = previousUpdatedBy;
+      await expense.save();
+      throw syncError;
+    }
 
     return res.status(200).json({
       success: true,
@@ -663,7 +690,7 @@ export const rejectExpense = async (req, res) => {
       return res.status(400).json({ success: false, message: "Alasan penolakan minimal 5 karakter." });
     }
 
-    const allowed = new Set(["pending", "waiting_approval", "waiting_payment"]);
+    const allowed = new Set(["uncategorized", "pending", "waiting_approval", "waiting_payment"]);
     if (!allowed.has(expense.status)) {
       return res.status(400).json({
         success: false,
@@ -671,12 +698,30 @@ export const rejectExpense = async (req, res) => {
       });
     }
 
+    const previous = {
+      status: expense.status,
+      rejectReason: expense.rejectReason,
+      rejectedBy: expense.rejectedBy,
+      rejectedAt: expense.rejectedAt,
+      updatedBy: expense.updatedBy,
+    };
     expense.status = "rejected";
     expense.rejectReason = reason;
     expense.rejectedBy = req.user?.name || "Unknown";
     expense.rejectedAt = new Date();
     expense.updatedBy = req.user?.userId || null;
     await expense.save();
+    try {
+      await syncSavingsWithdrawalExpense({
+        expense,
+        withdrawalRepository: savingsWithdrawalRepository,
+        actor: { type: "finance", id: req.user?.userId, name: req.user?.name },
+      });
+    } catch (syncError) {
+      Object.assign(expense, previous);
+      await expense.save();
+      throw syncError;
+    }
 
     return res.status(200).json({
       success: true,
@@ -700,6 +745,37 @@ export const markExpensePaid = async (req, res) => {
         success: false,
         message: 'Hanya expense status "waiting_payment" yang bisa ditandai paid.',
       });
+    }
+
+    if (expense.savingsWithdrawalId) {
+      const withdrawal = await SavingsWithdrawal.findById(expense.savingsWithdrawalId).lean();
+      const member = withdrawal
+        ? await savingsWithdrawalRepository.findForWithdrawal(withdrawal.memberId)
+        : null;
+      if (!withdrawal || !member) {
+        return res.status(409).json({ success: false, message: "Data pengajuan tutup tabungan tidak lengkap." });
+      }
+      const [savings, hasUnsettledPayment] = await Promise.all([
+        savingsWithdrawalRepository.findSavingsForMember(member._id),
+        savingsWithdrawalRepository.hasUnsettledSavingsPayment({ memberId: member._id, memberUuid: member.uuid }),
+      ]);
+      const currentSnapshot = calculateSavingsWithdrawalSnapshot({
+        product: member.productId || {},
+        upgrade: member.currentUpgradeId,
+        savings,
+      });
+      if (hasUnsettledPayment || Math.round(currentSnapshot.grossBalance) !== Math.round(withdrawal.grossAmount)) {
+        return res.status(409).json({
+          success: false,
+          message: "Saldo berubah atau masih ada setoran yang menunggu Finance sejak pengajuan dibuat. Tolak pengajuan ini dan minta siswa mengajukan ulang agar nominal pencairan tidak keliru.",
+        });
+      }
+      if (Math.round(Number(expense.amount || 0)) !== Math.round(Number(withdrawal.netAmount || 0))) {
+        return res.status(409).json({
+          success: false,
+          message: "Nilai Expense belum sama dengan estimasi transfer pengajuan. Periksa kembali biaya antarbank sebelum membayar.",
+        });
+      }
     }
 
     if (!expense.accountId) {
@@ -731,6 +807,94 @@ export const markExpensePaid = async (req, res) => {
       uploadedAt: new Date(),
     }));
 
+    if (expense.savingsWithdrawalId) {
+      let session;
+      const paidAt = new Date();
+      let result;
+      try {
+        session = await mongoose.startSession();
+        await session.withTransaction(async () => {
+          const claimedExpense = await Expense.findOneAndUpdate(
+            { _id: expense._id, status: "waiting_payment" },
+            {
+              $set: {
+                status: "paid",
+                paymentProof: proofDocs[0].fileName,
+                transferDate,
+                paidBy: paidByName,
+                paidAt,
+                updatedBy: req.user?.userId || null,
+              },
+            },
+            { new: true, session },
+          );
+          if (!claimedExpense) {
+            const error = new Error("Pencairan ini sedang atau sudah diproses Finance. Muat ulang Expense.");
+            error.statusCode = 409;
+            throw error;
+          }
+
+          await ExpensePaymentProof.insertMany(proofDocs, { session });
+          result = await createTransactionFromExpense(claimedExpense, { transferDate, session });
+          if (!result.success) {
+            const error = new Error(result.message || "Transaksi akuntansi gagal dibuat.");
+            error.statusCode = 422;
+            throw error;
+          }
+
+          await syncSavingsWithdrawalExpense({
+            expense: { ...claimedExpense.toObject(), paymentProofs: proofDocs },
+            withdrawalRepository: createMongooseWithdrawalRepository({ session }),
+            actor: { type: "finance", id: req.user?.userId, name: req.user?.name },
+            now: paidAt,
+            transactionCreated: true,
+          });
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: `Expense berhasil ditandai paid (${proofDocs.length} bukti transfer).`,
+          data: { new_status: "paid", transaction_id: result.data?._id || null },
+        });
+      } catch (error) {
+        if (error.hasErrorLabel?.("UnknownTransactionCommitResult")) {
+          try {
+            const [committedExpense, committedTransaction] = await Promise.all([
+              Expense.findOne({ _id: expense._id, status: "paid" }).select("_id").lean(),
+              AccountingTransaction.findOne({ savingsWithdrawalId: expense.savingsWithdrawalId }).select("_id").lean(),
+            ]);
+            if (committedExpense && committedTransaction) {
+              return res.status(200).json({
+                success: true,
+                message: "Expense berhasil ditandai paid.",
+                data: { new_status: "paid", transaction_id: committedTransaction._id },
+              });
+            }
+          } catch {
+            // Keep uploaded proofs when commit outcome cannot be checked safely.
+          }
+          return res.status(503).json({
+            success: false,
+            message: "Hasil commit belum dapat dipastikan. Muat ulang Expense dan cek transaksi sebelum mencoba lagi.",
+          });
+        }
+        proofDocs.forEach((proof) => removeUploadedFile(proof.fileName, "expense-payment-proofs"));
+        const statusCode = Number(error.statusCode) || 500;
+        const transactionsUnavailable = error.code === 20
+          || /transaction numbers are only allowed|transactions are not supported|replica set/i.test(error.message || "");
+        return res.status(transactionsUnavailable ? 503 : statusCode).json({
+          success: false,
+          message: transactionsUnavailable
+            ? "Database Koperasi belum mendukung transaksi atomik. Tidak ada status pembayaran yang disimpan; hubungi admin untuk mengaktifkan MongoDB replica set sebelum mencatat pencairan."
+            : statusCode === 500
+              ? "Pembayaran tidak berhasil dibukukan secara utuh. Tidak ada perubahan yang disimpan; silakan coba kembali atau hubungi admin jika berulang."
+              : error.message,
+        });
+      } finally {
+        if (session) await session.endSession();
+      }
+    }
+
     await ExpensePaymentProof.insertMany(proofDocs);
 
     expense.status = "paid";
@@ -741,25 +905,18 @@ export const markExpensePaid = async (req, res) => {
     expense.updatedBy = req.user?.userId || null;
     await expense.save();
 
-    const result = await createTransactionFromExpense(expense, { transferDate });
+    let result;
+    try {
+      result = await createTransactionFromExpense(expense, { transferDate });
+    } catch (ledgerError) {
+      await rollbackPaidExpenseAttempt(expense._id, proofDocs);
+      return res.status(500).json({
+        success: false,
+        message: "Transaksi akuntansi gagal dibuat. Expense dikembalikan ke status menunggu pencairan; silakan coba kembali.",
+      });
+    }
     if (!result.success) {
-      await Expense.updateOne(
-        { _id: expense._id },
-        {
-          $set: {
-            status: "waiting_payment",
-            paymentProof: null,
-            transferDate: null,
-            paidBy: "",
-            paidAt: null,
-          },
-        }
-      );
-
-      for (const proof of proofDocs) {
-        removeUploadedFile(proof.fileName, "expense-payment-proofs");
-      }
-      await ExpensePaymentProof.deleteMany({ expenseId: expense._id, fileName: { $in: proofDocs.map((proof) => proof.fileName) } });
+      await rollbackPaidExpenseAttempt(expense._id, proofDocs);
 
       return res.status(400).json({ success: false, message: result.message });
     }
@@ -782,6 +939,13 @@ export const deleteExpense = async (req, res) => {
     const expense = await Expense.findById(req.params.id).lean();
     if (!expense) {
       return res.status(404).json({ success: false, message: "Expense tidak ditemukan." });
+    }
+
+    if (expense.savingsWithdrawalId) {
+      return res.status(409).json({
+        success: false,
+        message: "Expense penutupan tabungan adalah bagian dari riwayat keuangan dan tidak dapat dihapus.",
+      });
     }
 
     await deleteLinkedTransactionForExpense(expense._id);

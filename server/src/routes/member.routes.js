@@ -17,6 +17,11 @@ import {
   createMongooseMemberSavingsSubmission,
 } from "../modules/savings/infrastructure/mongooseMemberSavingsSubmission.js";
 import { verifyMemberToken } from "../middlewares/memberAuth.middleware.js";
+import {
+  getMemberSavingsWithdrawalState,
+  submitMemberSavingsWithdrawal,
+  streamMemberSavingsWithdrawalProof,
+} from "../controllers/member/savingsWithdrawal.controller.js";
 import { getAuthenticatedMemberInvoices } from "../controllers/admin/invoice.controller.js";
 import multer from "multer";
 import loanRoutes from "./member/loan.routes.js";
@@ -87,6 +92,9 @@ router.get("/savings", verifyMemberToken, getMemberSavings);
 router.post("/savings", verifyMemberToken, upload.single("proofFile"), createMemberSaving);
 router.get("/savings/summary", verifyMemberToken, getMemberSavingsSummary);
 router.get("/savings/:id", verifyMemberToken, getMemberSavingById);
+router.get("/savings-withdrawals/current", verifyMemberToken, getMemberSavingsWithdrawalState);
+router.post("/savings-withdrawals", verifyMemberToken, submitMemberSavingsWithdrawal);
+router.get("/savings-withdrawals/:id/proofs/:proofId", verifyMemberToken, streamMemberSavingsWithdrawalProof);
 
 // Loan routes
 router.use("/loans", loanRoutes);

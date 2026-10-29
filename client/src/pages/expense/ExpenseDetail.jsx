@@ -69,7 +69,7 @@ export default function ExpenseDetail() {
     [status]
   );
 
-  const canReject = useMemo(() => ["pending", "waiting_approval", "waiting_payment"].includes(status), [status]);
+  const canReject = useMemo(() => ["uncategorized", "pending", "waiting_approval", "waiting_payment"].includes(status), [status]);
 
   const handleApprove = async () => {
     if (!payload?._id) return;
@@ -171,9 +171,11 @@ export default function ExpenseDetail() {
               Reject
             </button>
           ) : null}
-          <Link className="exp-btn-secondary" to={`/expense/edit/${payload._id}`}>
-            Edit
-          </Link>
+          {!(["paid", "rejected"].includes(status) && payload.savingsWithdrawal) ? (
+            <Link className="exp-btn-secondary" to={`/expense/edit/${payload._id}`}>
+              Edit
+            </Link>
+          ) : null}
           <button type="button" className="exp-btn-ghost" onClick={() => navigate("/expense/report")}>
             Back
           </button>
@@ -181,6 +183,24 @@ export default function ExpenseDetail() {
       </div>
 
       {error ? <div className="exp-error">{error}</div> : null}
+
+      {payload.savingsWithdrawal ? (
+        <section className="exp-card">
+          <div className="exp-detail-section-title">Detail Pengajuan Tutup Tabungan</div>
+          <div className="exp-grid">
+            <div className="exp-grid-4"><span className="exp-label">No. Pengajuan</span><div>{payload.savingsWithdrawal.requestNumber || "-"}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Jenis simpanan</span><div>{payload.savingsWithdrawal.productNameSnapshot || "Simpanan"}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Periode lunas / kontrak</span><div>{payload.savingsWithdrawal.paidPeriodCount} / {payload.savingsWithdrawal.contractPeriodCount}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Saldo bruto</span><div className="exp-detail-money">{formatMoney(payload.savingsWithdrawal.grossAmount)}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Penalti</span><div>{formatMoney(payload.savingsWithdrawal.penaltyAmount)}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Biaya antarbank</span><div>{formatMoney(payload.savingsWithdrawal.bankFeeAmount)}</div></div>
+            <div className="exp-grid-4"><span className="exp-label">Estimasi / total transfer</span><div className="exp-detail-money">{formatMoney(payload.savingsWithdrawal.netAmount)}</div></div>
+            <div className="exp-grid-8"><span className="exp-label">Rekening tujuan</span><div>{payload.savingsWithdrawal.bankNameSnapshot || "-"} · {payload.savingsWithdrawal.accountNumberSnapshot || "-"} · a.n. {payload.savingsWithdrawal.accountHolderSnapshot || "-"}</div></div>
+            <div className="exp-grid-12"><span className="exp-label">Alasan siswa</span><div>{payload.savingsWithdrawal.reason || "-"}</div></div>
+            {status === "uncategorized" ? <div className="exp-grid-12 exp-sub">Pilih akun sumber dan rincian kategori melalui tombol Edit. Setelah kategori lengkap, proses persetujuan dapat dilanjutkan.</div> : null}
+          </div>
+        </section>
+      ) : null}
 
       <div className="exp-grid">
         <div className="exp-grid-8">

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import mongoose from "mongoose";
 import { AccountingTransaction } from "../models/accountingTransaction.model.js";
 import { TransactionSplit } from "../models/transactionSplit.model.js";
 import { ExpenseLine } from "../models/expenseLine.model.js";
@@ -72,82 +73,184 @@ async function copyFirstAttachmentAsReceipt(expenseId) {
   }
 }
 
+export function createExpenseTransactionPoster({
+  findExistingTransaction,
+  findExpenseLines,
+  copyReceipt,
+  createTransaction,
+  createSplits,
+  deleteSplits,
+  deleteTransaction,
+  applyBalance,
+  reverseBalance,
+  removeReceipt,
+}) {
+  return async function postExpenseTransaction(expense, options = {}) {
+    const expenseId = toIdString(expense?._id || expense?.id);
+    if (!expenseId) return { success: false, message: "Expense tidak valid." };
+    if (!expense?.accountId) {
+      return { success: false, message: "Bank account wajib diisi sebelum mark as paid." };
+    }
+
+    const session = options.session || null;
+    const existingTransaction = await findExistingTransaction({
+      expenseId,
+      savingsWithdrawalId: expense.savingsWithdrawalId,
+      session,
+    });
+    if (existingTransaction) {
+      return { success: false, message: "Transaction sudah ada untuk expense ini." };
+    }
+
+    const expenseLines = await findExpenseLines(expenseId, session);
+    if (!expenseLines.length) {
+      return { success: false, message: "Expense belum punya category lines." };
+    }
+    const linesTotal = expenseLines.reduce((sum, line) => sum + normalizeMoney(line.amount), 0);
+    if (linesTotal <= 0) {
+      return { success: false, message: "Total category lines tidak valid." };
+    }
+    if (Math.abs(linesTotal - normalizeMoney(expense.amount)) > 0.01) {
+      return { success: false, message: "Total category lines tidak sama dengan total expense." };
+    }
+
+    const transferDate = options.transferDate ? new Date(options.transferDate) : null;
+    const transactionDate = transferDate && !Number.isNaN(transferDate.getTime())
+      ? transferDate
+      : (expense.dateStart ? new Date(expense.dateStart) : new Date());
+    let receiptFile = null;
+    let createdTransaction = null;
+    let balanceApplied = false;
+
+    try {
+      receiptFile = await copyReceipt(expenseId);
+      const transactionPayload = {
+        expenseId,
+        savingsWithdrawalId: expense.savingsWithdrawalId || undefined,
+        transactionDate,
+        description: `${expense.title || "Expense"} - ${expense.applicantName || "-"}`,
+        accountId: expense.accountId,
+        transactionType: "Withdrawal",
+        amount: linesTotal,
+        categoryId: null,
+        categoryType: null,
+        customerId: expense.applicantType === "member" ? expense.applicantMemberId || null : null,
+        vendorId: expense.seller || null,
+        notes: expense.description || "",
+        receiptFile,
+        isSplit: expenseLines.length > 1,
+      };
+
+      if (expenseLines.length === 1) {
+        transactionPayload.categoryId = expenseLines[0].categoryId;
+        transactionPayload.categoryType = "account";
+      }
+
+      createdTransaction = await createTransaction(transactionPayload, session);
+      if (expenseLines.length > 1) {
+        const splitDocs = expenseLines.map((line) => ({
+          transactionId: createdTransaction._id,
+          amount: normalizeMoney(line.amount),
+          categoryId: line.categoryId,
+          categoryType: "account",
+          description: line.description || "",
+        }));
+        await createSplits(splitDocs, session);
+      }
+
+      balanceApplied = await applyBalance(createdTransaction, session);
+      if (!balanceApplied) throw new Error("Saldo akun pembayaran tidak berhasil diperbarui.");
+
+      return {
+        success: true,
+        message: "Transaction berhasil dibuat dari expense.",
+        data: createdTransaction,
+      };
+    } catch (error) {
+      if (createdTransaction) {
+        if (balanceApplied) {
+          await reverseBalance(createdTransaction, session).catch((rollbackError) => {
+            console.error("Failed to reverse an expense balance update:", rollbackError);
+          });
+        }
+        await deleteSplits(createdTransaction._id, session).catch((rollbackError) => {
+          console.error("Failed to remove partial expense splits:", rollbackError);
+        });
+        await deleteTransaction(createdTransaction._id, session).catch((rollbackError) => {
+          console.error("Failed to remove a partial expense transaction:", rollbackError);
+        });
+      }
+      if (receiptFile) removeReceipt(receiptFile);
+      throw error;
+    }
+  };
+}
+
+const postExpenseTransaction = createExpenseTransactionPoster({
+  findExistingTransaction: async ({ expenseId, savingsWithdrawalId, session }) => {
+    const filter = savingsWithdrawalId
+      ? { $or: [{ savingsWithdrawalId }, { expenseId }] }
+      : { expenseId };
+    const query = AccountingTransaction.findOne(filter);
+    return session ? query.session(session) : query;
+  },
+  findExpenseLines: async (expenseId, session) => {
+    let query = ExpenseLine.find({ expenseId }).sort({ createdAt: 1, _id: 1 });
+    if (session) query = query.session(session);
+    return query.lean();
+  },
+  copyReceipt: copyFirstAttachmentAsReceipt,
+  createTransaction: async (payload, session) => {
+    const documents = await AccountingTransaction.create([payload], session ? { session } : {});
+    return documents[0];
+  },
+  createSplits: (rows, session) => TransactionSplit.insertMany(rows, session ? { session } : {}),
+  deleteSplits: (transactionId, session) => TransactionSplit.deleteMany(
+    { transactionId },
+    session ? { session } : {},
+  ),
+  deleteTransaction: (transactionId, session) => AccountingTransaction.deleteOne(
+    { _id: transactionId },
+    session ? { session } : {},
+  ),
+  applyBalance: (transaction, session) => updateAccountBalance(
+    transaction.accountId,
+    transaction.amount,
+    transaction.transactionType,
+    false,
+    { session },
+  ),
+  reverseBalance: (transaction, session) => updateAccountBalance(
+    transaction.accountId,
+    transaction.amount,
+    transaction.transactionType,
+    true,
+    { session },
+  ),
+  removeReceipt: removeTransactionReceiptFile,
+});
+
 export async function createTransactionFromExpense(expense, options = {}) {
-  const expenseId = toIdString(expense?._id || expense?.id);
-  if (!expenseId) {
-    return { success: false, message: "Expense tidak valid." };
+  if (options.session) return postExpenseTransaction(expense, options);
+  if (!options.transactional) return postExpenseTransaction(expense, options);
+
+  const session = await mongoose.startSession();
+  let result;
+  try {
+    await session.withTransaction(async () => {
+      result = await postExpenseTransaction(expense, { ...options, session });
+      if (!result.success) {
+        const error = new Error(result.message);
+        error.statusCode = 422;
+        throw error;
+      }
+    });
+    return result;
+  } catch (error) {
+    return { success: false, message: error.message || "Transaksi Expense gagal dibukukan." };
+  } finally {
+    await session.endSession();
   }
-
-  if (!expense?.accountId) {
-    return { success: false, message: "Bank account wajib diisi sebelum mark as paid." };
-  }
-
-  const existingTransaction = await AccountingTransaction.findOne({ expenseId });
-  if (existingTransaction) {
-    return { success: false, message: "Transaction sudah ada untuk expense ini." };
-  }
-
-  const expenseLines = await ExpenseLine.find({ expenseId }).sort({ createdAt: 1, _id: 1 }).lean();
-  if (!expenseLines.length) {
-    return { success: false, message: "Expense belum punya category lines." };
-  }
-  const linesTotal = expenseLines.reduce((sum, line) => sum + normalizeMoney(line.amount), 0);
-  if (linesTotal <= 0) {
-    return { success: false, message: "Total category lines tidak valid." };
-  }
-
-  if (Math.abs(linesTotal - normalizeMoney(expense.amount)) > 0.01) {
-    return { success: false, message: "Total category lines tidak sama dengan total expense." };
-  }
-
-  const transferDate = options.transferDate ? new Date(options.transferDate) : null;
-  const transactionDate = transferDate && !Number.isNaN(transferDate.getTime())
-    ? transferDate
-    : (expense.dateStart ? new Date(expense.dateStart) : new Date());
-
-  const receiptFile = await copyFirstAttachmentAsReceipt(expenseId);
-
-  const transactionPayload = {
-    expenseId,
-    transactionDate,
-    description: `${expense.title || "Expense"} - ${expense.applicantName || "-"}`,
-    accountId: expense.accountId,
-    transactionType: "Withdrawal",
-    amount: linesTotal,
-    categoryId: null,
-    categoryType: null,
-    customerId: expense.applicantType === "member" ? expense.applicantMemberId || null : null,
-    vendorId: expense.seller || null,
-    notes: expense.description || "",
-    receiptFile,
-    isSplit: expenseLines.length > 1,
-  };
-
-  if (expenseLines.length === 1) {
-    transactionPayload.categoryId = expenseLines[0].categoryId;
-    transactionPayload.categoryType = "account";
-  }
-
-  const createdTransaction = await AccountingTransaction.create(transactionPayload);
-
-  if (expenseLines.length > 1) {
-    const splitDocs = expenseLines.map((line) => ({
-      transactionId: createdTransaction._id,
-      amount: normalizeMoney(line.amount),
-      categoryId: line.categoryId,
-      categoryType: "account",
-      description: line.description || "",
-    }));
-    await TransactionSplit.insertMany(splitDocs);
-  }
-
-  await updateAccountBalance(createdTransaction.accountId, createdTransaction.amount, createdTransaction.transactionType);
-
-  return {
-    success: true,
-    message: "Transaction berhasil dibuat dari expense.",
-    data: createdTransaction,
-  };
 }
 
 export async function syncTransactionDateForExpense(expenseId, transferDate) {

@@ -21,6 +21,11 @@ const accountingTransactionSchema = new mongoose.Schema(
       ref: "Expense",
       default: null,
     },
+    savingsWithdrawalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SavingsWithdrawal",
+      default: undefined,
+    },
     savingsId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Savings",
@@ -125,6 +130,10 @@ accountingTransactionSchema.index({ accountId: 1, transactionDate: -1 });
 accountingTransactionSchema.index({ transactionDate: -1 });
 accountingTransactionSchema.index({ reviewed: 1 });
 accountingTransactionSchema.index({ expenseId: 1 }, { sparse: true });
+accountingTransactionSchema.index(
+  { savingsWithdrawalId: 1 },
+  { unique: true, partialFilterExpression: { savingsWithdrawalId: { $type: "objectId" } } },
+);
 accountingTransactionSchema.index({ savingsId: 1 }, { sparse: true });
 accountingTransactionSchema.index({ invoiceNumber: 1 }, { sparse: true });
 accountingTransactionSchema.index({ invoiceProjectionId: 1 }, { sparse: true });

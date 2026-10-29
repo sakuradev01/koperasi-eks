@@ -10,6 +10,9 @@ const Settings = () => {
   const [operators, setOperators] = useState([]);
   const [operatorsLoading, setOperatorsLoading] = useState(false);
   const [updatingOperatorId, setUpdatingOperatorId] = useState(null);
+  const [withdrawalEnabled, setWithdrawalEnabled] = useState(false);
+  const [withdrawalSettingLoading, setWithdrawalSettingLoading] = useState(false);
+  const [withdrawalSettingSaving, setWithdrawalSettingSaving] = useState(false);
 
   const isAdmin = user?.role === "admin";
 
@@ -29,8 +32,43 @@ const Settings = () => {
     }
   };
 
+  const fetchWithdrawalSetting = async () => {
+    if (!isAdmin) return;
+    setWithdrawalSettingLoading(true);
+    try {
+      const response = await api.get("/api/admin/savings-withdrawals/settings");
+      if (response.data.success) {
+        setWithdrawalEnabled(response.data.data?.studentRequestEnabled === true);
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Gagal memuat pengaturan penutupan tabungan");
+    } finally {
+      setWithdrawalSettingLoading(false);
+    }
+  };
+
+  const updateWithdrawalSetting = async (enabled) => {
+    setWithdrawalSettingSaving(true);
+    try {
+      const response = await api.put("/api/admin/savings-withdrawals/settings", {
+        studentRequestEnabled: enabled,
+      });
+      if (response.data.success) {
+        setWithdrawalEnabled(response.data.data?.studentRequestEnabled === true);
+        alert(enabled
+          ? "Pengajuan tutup tabungan sekarang dibuka untuk siswa yang memenuhi syarat."
+          : "Tombol pengajuan tutup tabungan disembunyikan dari siswa.");
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Gagal mengubah pengaturan penutupan tabungan");
+    } finally {
+      setWithdrawalSettingSaving(false);
+    }
+  };
+
   useEffect(() => {
     fetchOperators();
+    fetchWithdrawalSetting();
     // The admin identity is restored from persisted auth state after the
     // first render, so re-run when the role becomes available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,6 +152,27 @@ const Settings = () => {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">⚙️ Pengaturan Sistem</h1>
+
+      <section className="bg-white border border-slate-200 rounded-lg p-6 mb-6 shadow-sm" aria-labelledby="savings-withdrawal-setting-title">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 id="savings-withdrawal-setting-title" className="text-lg font-bold text-slate-900">Pengajuan Tutup Tabungan oleh Siswa</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Default nonaktif. Jika dibuka, tombol hanya tampil untuk anggota aktif dengan minimal 12 periode yang lunas dan disetujui Finance. Pengajuan terbuka menahan setoran baru sampai ditolak atau dibayar.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => updateWithdrawalSetting(!withdrawalEnabled)}
+            disabled={withdrawalSettingLoading || withdrawalSettingSaving}
+            aria-pressed={withdrawalEnabled}
+            className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${withdrawalEnabled ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-600 hover:bg-slate-700"}`}
+          >
+            {withdrawalSettingLoading ? "Memuat…" : withdrawalSettingSaving ? "Menyimpan…" : withdrawalEnabled ? "Aktif — matikan fitur" : "Nonaktif — buka fitur"}
+          </button>
+        </div>
+        <p className="mt-3 text-xs font-medium text-slate-500">Status saat ini: {withdrawalSettingLoading ? "memuat" : withdrawalEnabled ? "TOMBOL SISWA AKTIF" : "TOMBOL SISWA TERSEMBUNYI"}</p>
+      </section>
 
       {isAdmin && (
         <div className="bg-white border border-blue-200 rounded-lg p-6 mb-6 shadow-sm">
