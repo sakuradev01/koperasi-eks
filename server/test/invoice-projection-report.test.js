@@ -1,0 +1,148 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const loadReportBuilder = async () => {
+  const module = await import(
+    "../src/modules/invoice-projections/application/buildInvoiceProjectionReport.js"
+  ).catch(() => null);
+  assert.ok(
+    module?.buildInvoiceProjectionReport,
+    "invoice projection report builder should be available",
+  );
+  return module.buildInvoiceProjectionReport;
+};
+
+const invoices = [
+  {
+    _id: "invoice-jpy",
+    invoiceNumber: "PDD2610002",
+    customerSnapshot: { name: "Puspaini" },
+    currency: "JPY",
+    status: "sent",
+    dueDate: "2026-02-28T00:00:00.000Z",
+    projections: [
+      { _id: "p1", description: "Cicilan 1", estimateDate: "2026-01-10T00:00:00.000Z", amount: 100 },
+      { _id: "p2", description: "Cicilan 2", estimateDate: "2026-02-10T00:00:00.000Z", amount: 200 },
+    ],
+    payments: [
+      {
+        _id: "pay-batch",
+        paymentDate: "2026-01-15T00:00:00.000Z",
+        amount: 250,
+        coveredProjectionIds: ["p1", "p2"],
+        coveredProjectionBreakdown: [
+          { projectionId: "p1", projectionIndex: 1, amount: 100 },
+          { projectionId: "p2", projectionIndex: 2, amount: 150 },
+        ],
+      },
+      { _id: "pay-unallocated", paymentDate: "2026-01-20T00:00:00.000Z", amount: 25 },
+      { _id: "pay-after-cutoff", paymentDate: "2027-01-05T00:00:00.000Z", amount: 50, projectionId: "p2" },
+    ],
+  },
+  {
+    _id: "invoice-idr",
+    invoiceNumber: "A2601001",
+    customerSnapshot: { name: "Anggitia" },
+    currency: "IDR",
+    status: "sent",
+    projections: [
+      { _id: "p-idr", description: "Biaya administrasi", estimateDate: "2026-01-20T00:00:00.000Z", amount: 50 },
+    ],
+    payments: [],
+  },
+  {
+    _id: "invoice-draft",
+    invoiceNumber: "DRAFT-1",
+    customerSnapshot: { name: "Draft" },
+    currency: "IDR",
+    status: "draft",
+    projections: [
+      { _id: "p-draft", estimateDate: "2026-01-20T00:00:00.000Z", amount: 900 },
+    ],
+    payments: [],
+  },
+];
+
+test("monthly activity report separates scheduled projections, actual payment dates, and unallocated money by currency", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport(invoices, {
+    mode: "monthly",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    asOfDate: "2026-01-31T23:59:59.999Z",
+  });
+
+  const batchProjection = report.rows.find((row) => row.projectionId === "p1");
+  const earlyPaymentProjection = report.rows.find((row) => row.projectionId === "p2");
+  const unallocatedPayment = report.rows.find((row) => row.rowType === "unallocated");
+
+  assert.equal(report.mode, "monthly");
+  assert.ok(batchProjection);
+  assert.equal(batchProjection.projectedAmount, 100);
+  assert.equal(batchProjection.realizedAmount, 100);
+  assert.equal(batchProjection.status, "Paid");
+  assert.ok(earlyPaymentProjection, "early payment remains visible in its actual payment month");
+  assert.equal(earlyPaymentProjection.projectedAmount, 0);
+  assert.equal(earlyPaymentProjection.realizedAmount, 150);
+  assert.equal(earlyPaymentProjection.status, "Partial");
+  assert.equal(unallocatedPayment.realizedAmount, 25);
+  assert.equal(report.rows.some((row) => row.invoiceNumber === "DRAFT-1"), false);
+  assert.deepEqual(report.summary.byCurrency, [
+    { currency: "IDR", totalProjection: 50, totalRealized: 0, difference: 50, totalUnallocated: 0 },
+    { currency: "JPY", totalProjection: 100, totalRealized: 275, difference: -175, totalUnallocated: 25 },
+  ]);
+});
+
+test("year matrix shows scheduled outstanding balance after cutoff and never nets different currencies", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport(invoices, {
+    mode: "yearly",
+    startYear: 2026,
+    endYear: 2026,
+    asOfDate: "2026-03-01T23:59:59.999Z",
+  });
+
+  const jpyRow = report.rows.find((row) => row.invoiceNumber === "PDD2610002");
+  const idrRow = report.rows.find((row) => row.invoiceNumber === "A2601001");
+
+  assert.equal(report.periods.length, 12);
+  assert.equal(jpyRow.months["2026-01"], 0);
+  assert.equal(jpyRow.months["2026-02"], 50);
+  assert.equal(jpyRow.totalOutstanding, 50);
+  assert.equal(idrRow.totalOutstanding, 50);
+  assert.deepEqual(report.summary.byCurrency, [
+    { currency: "IDR", totalProjection: 50, totalOutstanding: 50, totalUnallocated: 0 },
+    { currency: "JPY", totalProjection: 300, totalOutstanding: 50, totalUnallocated: 25 },
+  ]);
+});
+
+test("year matrix does not count payments posted after its as-of date", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport(invoices, {
+    mode: "yearly",
+    startYear: 2026,
+    endYear: 2026,
+    asOfDate: "2026-12-31T23:59:59.999Z",
+  });
+
+  const jpyRow = report.rows.find((row) => row.invoiceNumber === "PDD2610002");
+  assert.equal(jpyRow.months["2026-02"], 50);
+});
+
+test("monthly status filter narrows rows and summary to the selected status", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport(invoices, {
+    mode: "monthly",
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    asOfDate: "2026-01-31T23:59:59.999Z",
+    status: "paid",
+  });
+
+  assert.ok(report.rows.length > 0);
+  assert.ok(report.rows.every((row) => row.status === "Paid"));
+  assert.equal(report.rows.some((row) => row.rowType === "unallocated"), false);
+  assert.deepEqual(report.summary.byCurrency, [
+    { currency: "JPY", totalProjection: 100, totalRealized: 100, difference: 0, totalUnallocated: 0 },
+  ]);
+});

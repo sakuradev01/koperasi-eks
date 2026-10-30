@@ -17,11 +17,11 @@ import Loans from "../pages/Loans.jsx";
 import Donations from "../pages/Donations.jsx";
 import LoanProducts from "../pages/LoanProducts.jsx";
 import LoanManagement from "../pages/LoanManagement.jsx";
-import DanaDarurat from "../pages/DanaDarurat.jsx";
 import Operators from "../pages/Operators.jsx";
 import Settings from "../pages/Settings.jsx";
 import Reports from "../pages/Reports.jsx";
 import PaymentProjectionReport from "../pages/PaymentProjectionReport.jsx";
+import InvoiceProjectionReport from "../pages/InvoiceProjectionReport.jsx";
 import PrivateRoute from "../utils/PrivateRoute.jsx";
 import ChartOfAccounts from "../pages/accounting/ChartOfAccounts.jsx";
 import Transactions from "../pages/accounting/Transactions.jsx";
@@ -86,6 +86,8 @@ const router = createBrowserRouter(
         <Route path="/laporan" element={<Reports />} />
         <Route path="/laporan/per-bulan" element={<PaymentProjectionReport mode="monthly" />} />
         <Route path="/laporan/per-tahun" element={<PaymentProjectionReport mode="yearly" />} />
+        <Route path="/reports/invoice-projections/per-bulan" element={<InvoiceProjectionReport mode="monthly" />} />
+        <Route path="/reports/invoice-projections/per-tahun" element={<InvoiceProjectionReport mode="yearly" />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/akuntansi/transaksi" element={<Transactions />} />
         <Route path="/transactions" element={<Transactions />} />

@@ -12,6 +12,10 @@ import {
   exportAccountTransactionsCsv,
   getAgedReceivables,
 } from "../controllers/admin/reports.controller.js";
+import {
+  getInvoiceProjectionReport,
+} from "../controllers/admin/invoiceProjectionReport.controller.js";
+import { requireFeaturePermission } from "../middlewares/permission.middleware.js";
 
 const router = express.Router();
 
@@ -33,5 +37,12 @@ router.get("/account-transactions/export-csv", exportAccountTransactionsCsv);
 
 // Aged Receivables
 router.get("/aged-receivables", getAgedReceivables);
+
+// Invoice payment projections
+router.get(
+  "/invoice-projections",
+  requireFeaturePermission("reports", "view"),
+  getInvoiceProjectionReport,
+);
 
 export default router;

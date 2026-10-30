@@ -92,6 +92,7 @@ const menuIconMap = {
   "Manajemen Pinjaman": "bank",
   "Dana Darurat": "emergency",
   "Projection (Simpanan)": "report",
+  "Projection (Invoice)": "invoice",
   Invoice: "invoice",
   "Master Data": "master",
   Expenses: "expense",
@@ -201,6 +202,14 @@ const menuItems = [
         children: [
           { title: "Per Bulan", path: "/laporan", permissionKey: "laporan" },
           { title: "Per Tahun", path: "/laporan/per-tahun", permissionKey: "reports" },
+        ],
+      },
+      {
+        title: "Projection (Invoice)",
+        permissionKey: "reports",
+        children: [
+          { title: "Per Bulan", path: "/reports/invoice-projections/per-bulan", permissionKey: "reports" },
+          { title: "Per Tahun", path: "/reports/invoice-projections/per-tahun", permissionKey: "reports" },
         ],
       },
       {

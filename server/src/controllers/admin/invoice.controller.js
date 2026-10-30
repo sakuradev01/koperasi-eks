@@ -20,6 +20,10 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { updateAccountBalance } from "../../services/accountBalance.service.js";
 import { getEffectiveInvoiceStatus } from "../../utils/invoiceStatus.js";
+import {
+  paymentContributionToProjection,
+  paymentMatchesProjection,
+} from "../../modules/invoice-projections/domain/projectionSettlement.js";
 
 const AVAILABLE_CURRENCIES = ["IDR", "JPY", "USD", "AUD", "EUR", "GBP"];
 const AVAILABLE_PAYMENT_METHODS = [
@@ -358,59 +362,6 @@ function dateDiffInDays(left, right) {
     return 0;
   }
   return Math.round((leftDate - rightDate) / (24 * 60 * 60 * 1000));
-}
-
-function paymentMatchesProjection(payment, projection, projectionIndex) {
-  if (!payment || !projection) return false;
-
-  const coveredIds = parseFlexibleArray(payment.coveredProjectionIds)
-    .map((id) => normalizeObjectId(id))
-    .filter(Boolean);
-  if (coveredIds.length > 0) {
-    return coveredIds.some((id) => sameObjectId(id, projection._id));
-  }
-
-  // projectionId harus jadi source of truth.
-  // Kalau projectionId ada, jangan fallback ke projectionIndex.
-  if (payment.projectionId) {
-    return sameObjectId(payment.projectionId, projection._id);
-  }
-
-  // Fallback ini hanya untuk payment lama/legacy yang belum punya projectionId.
-  return (
-    Number(payment.projectionIndex || 0) > 0 &&
-    Number(payment.projectionIndex) === Number(projectionIndex)
-  );
-}
-
-/** Amount of a payment that counts toward one cicilan (multi-cover uses breakdown). */
-function paymentContributionToProjection(payment, projection, projectionIndex) {
-  if (!paymentMatchesProjection(payment, projection, projectionIndex)) {
-    return 0;
-  }
-
-  const breakdown = Array.isArray(payment.coveredProjectionBreakdown)
-    ? payment.coveredProjectionBreakdown
-    : [];
-  if (breakdown.length > 0) {
-    const row = breakdown.find(
-      (item) =>
-        sameObjectId(item?.projectionId, projection._id) ||
-        (Number(item?.projectionIndex || 0) > 0 &&
-          Number(item.projectionIndex) === Number(projectionIndex)),
-    );
-    return clampMoney(row?.amount);
-  }
-
-  const coveredIds = parseFlexibleArray(payment.coveredProjectionIds)
-    .map((id) => normalizeObjectId(id))
-    .filter(Boolean);
-  // Legacy multi-cover without breakdown: never attribute full total to each cicilan.
-  if (coveredIds.length > 1) {
-    return 0;
-  }
-
-  return clampMoney(payment.amount);
 }
 
 function enrichProjections(projections, payments) {
