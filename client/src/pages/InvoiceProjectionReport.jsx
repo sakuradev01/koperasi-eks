@@ -6,6 +6,7 @@ import {
   buildInvoiceProjectionXlsx,
   createInvoiceProjectionFilename,
 } from "../utils/invoiceProjectionExport.js";
+import { buildYearlyInvoiceMonthlyTotals } from "../utils/invoiceProjectionTotals.js";
 
 /* eslint-disable react/prop-types -- route supplies the report mode. */
 
@@ -139,6 +140,12 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
   const size = Number(pageSize);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / size));
   const visibleRows = filteredRows.slice((page - 1) * size, page * size);
+  const yearlyMonthlyTotals = useMemo(
+    () => mode === "yearly"
+      ? buildYearlyInvoiceMonthlyTotals(filteredRows, report?.periods || [])
+      : [],
+    [mode, filteredRows, report?.periods],
+  );
   const exportReport = useMemo(
     () => report ? buildCurrencySummary(report, filteredRows) : null,
     [report, filteredRows],
@@ -271,7 +278,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
             <h2 className="font-bold text-slate-900">Rincian {mode === "monthly" ? "aktivitas invoice" : "sisa proyeksi per bulan"}</h2>
-            <p className="mt-1 text-xs text-slate-500">{loading ? "Memuat data…" : `${filteredRows.length.toLocaleString("id-ID")} baris · mata uang dihitung terpisah`}</p>
+            <p className="mt-1 text-xs text-slate-500">{loading ? "Memuat data…" : `${filteredRows.length.toLocaleString("id-ID")} baris · ${mode === "yearly" ? "total per bulan mencakup seluruh hasil pencarian · " : ""}mata uang dihitung terpisah`}</p>
           </div>
           <label className="block text-sm text-slate-600 sm:w-80">Cari invoice / siswa
             <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="No. invoice atau nama siswa" className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-100" />
@@ -314,6 +321,16 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
                     <td className="sticky right-0 z-[1] whitespace-nowrap bg-white px-4 py-3 text-right font-semibold tabular-nums">{money(row.totalOutstanding, row.currency)}</td>
                   </tr>)}
                 </tbody>
+                {yearlyMonthlyTotals.length > 0 ? (
+                  <tfoot className="bg-sky-50 font-semibold text-slate-900">
+                    {yearlyMonthlyTotals.map((summary) => <tr key={summary.currency} className="border-t-2 border-sky-200">
+                      <td colSpan="2" className="sticky left-0 z-10 whitespace-nowrap bg-sky-50 px-4 py-3">Total per Bulan</td>
+                      <td className="whitespace-nowrap bg-sky-50 px-4 py-3 text-slate-600">{summary.currency}</td>
+                      {(report?.periods || []).map((period) => <td key={period.key} className="whitespace-nowrap bg-sky-50 px-4 py-3 text-right tabular-nums">{money(summary.totalsByPeriod[period.key], summary.currency)}</td>)}
+                      <td className="sticky right-0 z-10 whitespace-nowrap bg-sky-50 px-4 py-3 text-right font-bold tabular-nums">{money(summary.totalOutstanding, summary.currency)}</td>
+                    </tr>)}
+                  </tfoot>
+                ) : null}
               </>
             )}
           </table>

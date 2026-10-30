@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getMembers } from "../../api/accountingApi.jsx";
 import { exportInvoices, getInvoices } from "../../api/invoiceApi.jsx";
+import {
+  buildInvoiceListXlsx,
+  parseInvoiceExportTsv,
+} from "../../utils/invoiceListExport.js";
 import "./invoice.css";
 
 const formatMoney = (amount, currency = "IDR") => {
@@ -37,6 +41,7 @@ const sortableInvoiceColumns = {
   issued: "Issued",
 };
 
+/* eslint-disable react/prop-types -- local summary card receives simple display values. */
 function StatCard({ label, value }) {
   return (
     <div className="inv-stat">
@@ -145,18 +150,20 @@ export default function Invoices() {
       });
 
       const res = await exportInvoices(params);
-      const blob = new Blob([res.data], {
-        type: "application/vnd.ms-excel;charset=utf-8",
+      const tsv = await res.data.text();
+      const workbook = buildInvoiceListXlsx(parseInvoiceExportTsv(tsv));
+      const blob = new Blob([workbook], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       const dateStr = new Date().toISOString().slice(0, 10);
-      a.download = `all-invoice-report-${dateStr}.xls`;
+      a.download = `all-invoice-report-${dateStr}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(url);
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
     } catch (err) {
       setError(
         err?.response?.data?.message ||

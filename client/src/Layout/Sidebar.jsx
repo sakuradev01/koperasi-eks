@@ -319,7 +319,9 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
                 <span className="mr-3 flex-shrink-0">
                   <Icon paths={iconPaths} />
                 </span>
-                <span className="font-medium text-sm truncate">{item.title}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words font-medium text-sm leading-5">
+                  {item.title}
+                </span>
               </div>
               <svg
                 width="14"
@@ -340,7 +342,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
             </button>
             <div
               className={`overflow-hidden transition-all duration-200 ease-out ${
-                isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+                isOpen ? "max-h-screen opacity-100" : "max-h-0 opacity-0"
               }`}
             >
               <div className="ml-7 mt-1">{renderMenuItems(item.children)}</div>
@@ -369,7 +371,9 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
           <span className="mr-3 flex-shrink-0">
             <Icon paths={iconPaths} />
           </span>
-          <span className="text-sm truncate">{item.title}</span>
+          <span className="min-w-0 flex-1 whitespace-normal break-words text-sm leading-5">
+            {item.title}
+          </span>
         </Link>
       );
     });

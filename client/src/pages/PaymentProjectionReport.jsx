@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "../api/index.jsx";
 import { buildPaymentProjectionReport } from "../utils/paymentProjectionReport.js";
+import { buildProjectionTableData } from "../utils/paymentProjectionTable.js";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 
@@ -13,7 +14,7 @@ const years = (current) => Array.from({ length: 8 }, (_, index) => current - 5 +
 const PaymentProjectionReport = ({ mode = "monthly" }) => {
   const currentYear = new Date().getFullYear();
   const [params, setParams] = useSearchParams();
-  const [startYear, setStartYear] = useState(Number(params.get("from_year")) || currentYear);
+  const [startYear, setStartYear] = useState(Number(params.get("year") || params.get("from_year")) || currentYear);
   const [endYear, setEndYear] = useState(Number(params.get("to_year")) || currentYear);
   const [members, setMembers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -61,15 +62,32 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
     () => buildPaymentProjectionReport({ members, products, savings, startYear, endYear }),
     [members, products, savings, startYear, endYear],
   );
-  const visiblePeriods = mode === "monthly"
-    ? report.periods.filter((period) => period.year === startYear)
-    : report.periods;
-  const visibleRows = report.rows.filter((row) => visiblePeriods.some((period) => row.months[period.key] > 0));
+  const visiblePeriods = useMemo(
+    () => mode === "monthly"
+      ? report.periods.filter((period) => period.year === startYear)
+      : report.periods,
+    [mode, report.periods, startYear],
+  );
+  const tableData = useMemo(
+    () => buildProjectionTableData(report.rows, visiblePeriods),
+    [report.rows, visiblePeriods],
+  );
+  const visibleRows = tableData.rows;
+  const periodTotals = tableData.totalsByPeriod;
 
   const exportExcel = () => {
-    const header = ["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label)];
-    const rows = visibleRows.map((row) => [row.customerName, row.customerCode, ...visiblePeriods.map((period) => row.months[period.key] || 0)]);
-    const csv = [header, ["Total Sisa Projection", "", ...visiblePeriods.map((period) => report.totals[period.key] || 0)], ...rows]
+    const header = ["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label), "Total Sisa"];
+    const rows = visibleRows.map((row) => [
+      row.customerName,
+      row.customerCode,
+      ...visiblePeriods.map((period) => row.months[period.key] || 0),
+      row.visibleTotalOutstanding,
+    ]);
+    const csv = [
+      header,
+      ["Total Sisa Projection", "", ...visiblePeriods.map((period) => periodTotals[period.key] || 0), tableData.totalOutstanding],
+      ...rows,
+    ]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
       .join("\n");
     const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
@@ -88,10 +106,22 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
     documentPdf.text(`Periode: ${startYear}${mode === "yearly" && endYear !== startYear ? `-${endYear}` : ""}`, 36, 52);
     documentPdf.autoTable({
       startY: 68,
-      head: [["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label)]],
-      body: visibleRows.map((row) => [row.customerName, row.customerCode, ...visiblePeriods.map((period) => money.format(row.months[period.key] || 0))]),
+      head: [["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label), "Total Sisa"]],
+      body: visibleRows.map((row) => [
+        row.customerName,
+        row.customerCode,
+        ...visiblePeriods.map((period) => money.format(row.months[period.key] || 0)),
+        money.format(row.visibleTotalOutstanding),
+      ]),
+      foot: [[
+        "Total Sisa Projection",
+        "",
+        ...visiblePeriods.map((period) => money.format(periodTotals[period.key] || 0)),
+        money.format(tableData.totalOutstanding),
+      ]],
       styles: { fontSize: 7 },
       headStyles: { fillColor: [15, 23, 42] },
+      footStyles: { fillColor: [224, 242, 254], textColor: [12, 74, 110], fontStyle: "bold" },
     });
     documentPdf.save(`Payment_Projection_${mode === "monthly" ? "Per_Bulan" : "Per_Tahun"}_${startYear}.pdf`);
   };
@@ -117,7 +147,7 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
             <p className="mt-2 max-w-2xl text-sm text-slate-300">Sisa target setoran per periode. Anggota Draft/Nonaktif tidak ikut proyeksi.</p>
           </div>
           <div className="flex gap-2 text-sm">
-            <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan">Per Bulan</Link>
+            <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan/per-bulan">Per Bulan</Link>
             <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan/per-tahun">Per Tahun</Link>
           </div>
         </div>
@@ -137,19 +167,46 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
         <button type="button" onClick={applyPeriod} className="rounded-xl bg-sky-600 px-5 py-2.5 font-semibold text-white hover:bg-sky-700">Terapkan</button>
         <button type="button" onClick={exportExcel} disabled={!visibleRows.length} className="rounded-xl border border-emerald-200 px-4 py-2.5 font-semibold text-emerald-700 disabled:opacity-40">Export Excel</button>
         <button type="button" onClick={exportPdf} disabled={!visibleRows.length} className="rounded-xl border border-rose-200 px-4 py-2.5 font-semibold text-rose-700 disabled:opacity-40">Export PDF</button>
-        <div className="ml-auto rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-800">Total sisa: <strong>{money.format(report.totalOutstanding)}</strong></div>
+        <div className="ml-auto rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-800">Total sisa: <strong>{money.format(tableData.totalOutstanding)}</strong></div>
       </section>
 
       <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full border-collapse text-sm">
-            <thead className="bg-slate-900 text-white">
-              <tr><th rowSpan="2" className="sticky left-0 z-20 bg-slate-900 px-5 py-4 text-left">Nama Siswa</th><th rowSpan="2" className="sticky left-[220px] z-20 bg-slate-900 px-5 py-4 text-left">No. Anggota</th>{mode === "yearly" ? Array.from(new Set(visiblePeriods.map((period) => period.year))).map((year) => <th key={year} colSpan="12" className="border-l border-slate-700 px-4 py-3 text-center">{year}</th>) : null}</tr>
-              <tr>{visiblePeriods.map((period) => <th key={period.key} className="min-w-[120px] px-4 py-3 text-right font-semibold">{mode === "monthly" ? period.label : period.label.split(" ")[0]}</th>)}</tr>
-            </thead>
+        <div className="relative max-h-[70vh] min-h-[14rem] overflow-auto overscroll-contain">
+          <table className="min-w-max w-full border-collapse text-sm">
+            {mode === "yearly" ? (
+              <thead className="bg-slate-900 text-white">
+                <tr className="sticky top-0 z-40 h-14">
+                  <th rowSpan="2" scope="col" className="sticky left-0 top-0 z-50 w-[260px] min-w-[260px] max-w-[260px] bg-slate-900 px-5 py-4 text-left">Nama Siswa</th>
+                  <th rowSpan="2" scope="col" className="sticky left-[260px] top-0 z-50 w-[170px] min-w-[170px] max-w-[170px] bg-slate-900 px-5 py-4 text-left">No. Anggota</th>
+                  {Array.from(new Set(visiblePeriods.map((period) => period.year))).map((year) => (
+                    <th key={year} scope="colgroup" colSpan={visiblePeriods.filter((period) => period.year === year).length} className="sticky top-0 border-l border-slate-700 bg-slate-900 px-4 py-3 text-center">{year}</th>
+                  ))}
+                  <th rowSpan="2" scope="col" className="sticky right-0 top-0 z-50 w-[180px] min-w-[180px] max-w-[180px] bg-slate-900 px-4 py-4 text-right">Total Sisa</th>
+                </tr>
+                <tr className="sticky top-14 z-30 h-12">{visiblePeriods.map((period) => <th key={period.key} scope="col" className="sticky top-14 min-w-[128px] whitespace-nowrap bg-slate-900 px-4 py-3 text-right font-semibold">{period.label.split(" ")[0]}</th>)}</tr>
+              </thead>
+            ) : (
+              <thead className="bg-slate-900 text-white">
+                <tr className="sticky top-0 z-40">
+                  <th scope="col" className="sticky left-0 top-0 z-50 w-[260px] min-w-[260px] max-w-[260px] bg-slate-900 px-5 py-4 text-left">Nama Siswa</th>
+                  <th scope="col" className="sticky left-[260px] top-0 z-50 w-[170px] min-w-[170px] max-w-[170px] bg-slate-900 px-5 py-4 text-left">No. Anggota</th>
+                  {visiblePeriods.map((period) => <th key={period.key} scope="col" className="sticky top-0 min-w-[128px] whitespace-nowrap bg-slate-900 px-4 py-3 text-right font-semibold">{period.label}</th>)}
+                  <th scope="col" className="sticky right-0 top-0 z-50 w-[180px] min-w-[180px] max-w-[180px] bg-slate-900 px-4 py-4 text-right">Total Sisa</th>
+                </tr>
+              </thead>
+            )}
             <tbody>
-              <tr className="bg-sky-50 font-bold text-sky-900"><td colSpan="2" className="sticky left-0 z-10 bg-sky-50 px-5 py-4">Total Sisa Projection</td>{visiblePeriods.map((period) => <td key={period.key} className="px-4 py-4 text-right">{report.totals[period.key] ? money.format(report.totals[period.key]) : "-"}</td>)}</tr>
-              {visibleRows.length === 0 ? <tr><td colSpan={2 + visiblePeriods.length} className="px-6 py-12 text-center text-slate-500">Tidak ada sisa projection pada periode ini.</td></tr> : visibleRows.map((row) => <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50"><td className="sticky left-0 z-10 bg-white px-5 py-4 font-semibold text-slate-900"><Link className="text-sky-700 hover:underline" to={`/master/anggota/${row.customerCode}`}>{row.customerName}</Link><div className="text-xs font-normal text-slate-500">{row.productTitle}</div></td><td className="sticky left-[220px] z-10 bg-white px-5 py-4 text-slate-600">{row.customerCode}</td>{visiblePeriods.map((period) => <td key={period.key} className="px-4 py-4 text-right font-medium text-slate-700">{row.months[period.key] ? money.format(row.months[period.key]) : "-"}</td>)}</tr>)}
+              <tr className="bg-sky-50 font-bold text-sky-900">
+                <td colSpan="2" className="sticky left-0 z-20 w-[430px] min-w-[430px] bg-sky-50 px-5 py-4">Total Sisa Projection</td>
+                {visiblePeriods.map((period) => <td key={period.key} className="whitespace-nowrap px-4 py-4 text-right tabular-nums">{periodTotals[period.key] ? money.format(periodTotals[period.key]) : "-"}</td>)}
+                <td className="sticky right-0 z-20 w-[180px] min-w-[180px] bg-sky-50 px-4 py-4 text-right tabular-nums">{money.format(tableData.totalOutstanding)}</td>
+              </tr>
+              {visibleRows.length === 0 ? <tr><td colSpan={3 + visiblePeriods.length} className="px-6 py-12 text-center text-slate-500">Tidak ada sisa projection pada periode ini.</td></tr> : visibleRows.map((row) => <tr key={row.id} className="group border-t border-slate-100 hover:bg-slate-50">
+                <td className="sticky left-0 z-10 w-[260px] min-w-[260px] max-w-[260px] bg-white px-5 py-4 font-semibold text-slate-900 group-hover:bg-slate-50"><Link className="text-sky-700 hover:underline" to={`/master/anggota/${row.customerCode}`}>{row.customerName}</Link><div className="text-xs font-normal text-slate-500">{row.productTitle}</div></td>
+                <td className="sticky left-[260px] z-10 w-[170px] min-w-[170px] max-w-[170px] bg-white px-5 py-4 text-slate-600 group-hover:bg-slate-50">{row.customerCode}</td>
+                {visiblePeriods.map((period) => <td key={period.key} className="whitespace-nowrap px-4 py-4 text-right font-medium tabular-nums text-slate-700">{row.months[period.key] ? money.format(row.months[period.key]) : "-"}</td>)}
+                <td className="sticky right-0 z-10 w-[180px] min-w-[180px] bg-white px-4 py-4 text-right font-semibold tabular-nums text-slate-900 group-hover:bg-slate-50">{money.format(row.visibleTotalOutstanding)}</td>
+              </tr>)}
             </tbody>
           </table>
         </div>

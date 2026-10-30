@@ -20,6 +20,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { resolveUploadedFilePath } from "../../utils/uploadsDir.js";
 import { updateAccountBalance } from "../../services/accountBalance.service.js";
 import { getEffectiveInvoiceStatus } from "../../utils/invoiceStatus.js";
+import { buildInvoiceExportTsv } from "../../utils/invoiceExport.js";
 import {
   paymentContributionToProjection,
   paymentMatchesProjection,
@@ -1432,12 +1433,6 @@ function formatExportDate(value) {
   return `${y}-${m}-${d}`;
 }
 
-function escTsv(value) {
-  return String(value ?? "")
-    .replace(/[\t\n\r]+/g, " ")
-    .trim();
-}
-
 function buildPublicInvoiceUrl(invoiceNumber) {
   const base = String(
     process.env.CLIENT_URL ||
@@ -1572,22 +1567,6 @@ export const exportAllInvoices = asyncHandler(async (req, res) => {
     });
   }
 
-  // samitbank report.php columns
-  const headers = [
-    "Customer",
-    "Reff",
-    "Invoice Number",
-    "Issued Date",
-    "Invoice Total",
-    "Invoice Paid",
-    "Invoice Due",
-    "Due Date",
-    "Status",
-    "Due Aging",
-    "Invoice",
-    "Notes",
-  ];
-
   const rows = filtered.map((inv) => {
     const customer = inv.customerSnapshot?.name || "";
     const reff =
@@ -1597,29 +1576,29 @@ export const exportAllInvoices = asyncHandler(async (req, res) => {
       "";
     const invoiceNumber = inv.invoiceNumber || "";
     const invoiceUrl = buildPublicInvoiceUrl(invoiceNumber);
-    return [
+    return {
       customer,
       reff,
-      invoiceUrl,
-      formatExportDate(inv.issuedDate),
-      inv.total ?? inv.subTotal ?? 0,
-      inv.totalPaid ?? 0,
-      inv.amountDue ?? Math.max((inv.total || 0) - (inv.totalPaid || 0), 0),
-      formatExportDate(inv.dueDate),
-      inv.status || "",
-      formatDueAging(inv.dueDate),
       invoiceNumber,
-      inv.notes || "",
-    ]
-      .map(escTsv)
-      .join("\t");
+      currency: inv.currency || "IDR",
+      issuedDate: formatExportDate(inv.issuedDate),
+      invoiceTotal: inv.total ?? inv.subTotal ?? 0,
+      invoicePaid: inv.totalPaid ?? 0,
+      invoiceDue:
+        inv.amountDue ?? Math.max((inv.total || 0) - (inv.totalPaid || 0), 0),
+      dueDate: formatExportDate(inv.dueDate),
+      status: inv.status || "",
+      dueAging: formatDueAging(inv.dueDate),
+      invoiceUrl,
+      notes: inv.notes || "",
+    };
   });
 
-  const tsv = "\uFEFF" + [headers.map(escTsv).join("\t"), ...rows].join("\n");
+  const tsv = buildInvoiceExportTsv(rows);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `all-invoice-report-${dateStr}.xls`;
+  const filename = `all-invoice-report-${dateStr}.tsv`;
 
-  res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+  res.setHeader("Content-Type", "text/tab-separated-values; charset=utf-8");
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${filename}"`,
