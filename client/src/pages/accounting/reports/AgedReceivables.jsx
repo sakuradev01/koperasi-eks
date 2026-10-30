@@ -358,7 +358,7 @@ export default function AgedReceivables() {
 
       <div className="ar-table-card">
         <div className="ar-table-caption">Number of Days Overdue</div>
-        <div className="ar-table-scroll">
+        <div className="ar-table-scroll" role="region" aria-label="Tabel aged receivables, dapat digulir ke samping dan ke bawah" tabIndex={0}>
           <table className="ar-table">
             <thead>
               <tr>
