@@ -196,10 +196,10 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
               </thead>
             )}
             <tbody>
-              <tr className="bg-sky-50 font-bold text-sky-900">
-                <td colSpan="2" className="sticky left-0 z-20 w-[430px] min-w-[430px] bg-sky-50 px-5 py-4">Total Sisa Projection</td>
-                {visiblePeriods.map((period) => <td key={period.key} className="whitespace-nowrap px-4 py-4 text-right tabular-nums">{periodTotals[period.key] ? money.format(periodTotals[period.key]) : "-"}</td>)}
-                <td className="sticky right-0 z-20 w-[180px] min-w-[180px] bg-sky-50 px-4 py-4 text-right tabular-nums">{money.format(tableData.totalOutstanding)}</td>
+              <tr className={`bg-sky-50 font-bold text-sky-900 ${mode === "yearly" ? "h-14" : ""}`}>
+                <td colSpan="2" className={`sticky left-0 z-20 w-[430px] min-w-[430px] bg-sky-50 px-5 py-4 ${mode === "yearly" ? "top-[104px] z-30" : ""}`}>Total Sisa Projection</td>
+                {visiblePeriods.map((period) => <td key={period.key} className={`whitespace-nowrap px-4 py-4 text-right tabular-nums ${mode === "yearly" ? "sticky top-[104px] z-20 bg-sky-50" : ""}`}>{periodTotals[period.key] ? money.format(periodTotals[period.key]) : "-"}</td>)}
+                <td className={`sticky right-0 z-20 w-[180px] min-w-[180px] bg-sky-50 px-4 py-4 text-right tabular-nums ${mode === "yearly" ? "top-[104px] z-30" : ""}`}>{money.format(tableData.totalOutstanding)}</td>
               </tr>
               {visibleRows.length === 0 ? <tr><td colSpan={3 + visiblePeriods.length} className="px-6 py-12 text-center text-slate-500">Tidak ada sisa projection pada periode ini.</td></tr> : visibleRows.map((row) => <tr key={row.id} className="group border-t border-slate-100 hover:bg-slate-50">
                 <td className="sticky left-0 z-10 w-[260px] min-w-[260px] max-w-[260px] bg-white px-5 py-4 font-semibold text-slate-900 group-hover:bg-slate-50"><Link className="text-sky-700 hover:underline" to={`/master/anggota/${row.customerCode}`}>{row.customerName}</Link><div className="text-xs font-normal text-slate-500">{row.productTitle}</div></td>

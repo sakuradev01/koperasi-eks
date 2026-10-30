@@ -15,6 +15,8 @@ const currentYear = today.getFullYear();
 const currentMonth = String(today.getMonth() + 1).padStart(2, "0");
 const dateInput = (year, month, day) => `${year}-${month}-${day}`;
 const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+const YEARLY_TABLE_HEADER_HEIGHT = 48;
+const YEARLY_TOTAL_ROW_HEIGHT = 48;
 
 const statusOptions = [
   { value: "all", label: "Semua status" },
@@ -284,7 +286,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="No. invoice atau nama siswa" className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-100" />
           </label>
         </div>
-        <div className="relative min-h-56 overflow-auto">
+        <div className={`relative min-h-56 overflow-auto ${mode === "yearly" ? "max-h-[70vh]" : ""}`}>
           {loading ? <div className="absolute inset-0 z-20 grid place-items-center bg-white/80 text-sm font-medium text-slate-600" role="status">Memuat proyeksi invoice…</div> : null}
           <table className={`min-w-full border-collapse text-left text-sm ${mode === "yearly" ? "min-w-max" : "min-w-[1120px]"}`}>
             {mode === "monthly" ? (
@@ -309,10 +311,21 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
               </>
             ) : (
               <>
-                <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr><th scope="col" className="sticky left-0 z-20 min-w-48 border-b border-slate-200 bg-slate-50 px-4 py-3">Invoice</th><th scope="col" className="sticky left-48 z-20 min-w-52 border-b border-slate-200 bg-slate-50 px-4 py-3">Nama Siswa</th><th scope="col" className="border-b border-slate-200 px-4 py-3">Mata Uang</th>{(report?.periods || []).map((period) => <th key={period.key} scope="col" className="min-w-32 border-b border-slate-200 px-4 py-3 text-right">{period.label}</th>)}<th scope="col" className="sticky right-0 z-20 min-w-40 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">Total Sisa</th></tr>
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                  <tr className="sticky top-0 z-40 h-12"><th scope="col" className="sticky left-0 top-0 z-50 min-w-48 border-b border-slate-200 bg-slate-50 px-4 py-3">Invoice</th><th scope="col" className="sticky left-48 top-0 z-50 min-w-52 border-b border-slate-200 bg-slate-50 px-4 py-3">Nama Siswa</th><th scope="col" className="sticky top-0 z-40 border-b border-slate-200 bg-slate-50 px-4 py-3">Mata Uang</th>{(report?.periods || []).map((period) => <th key={period.key} scope="col" className="sticky top-0 z-40 min-w-32 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">{period.label}</th>)}<th scope="col" className="sticky right-0 top-0 z-50 min-w-40 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">Total Sisa</th></tr>
                 </thead>
                 <tbody>
+                  {yearlyMonthlyTotals.map((summary, index) => {
+                    const stickyTop = YEARLY_TABLE_HEADER_HEIGHT + index * YEARLY_TOTAL_ROW_HEIGHT;
+                    const stickyOffset = { top: `${stickyTop}px` };
+
+                    return <tr key={`total-${summary.currency}`} className="h-12 border-t-2 border-sky-200 font-semibold text-slate-900">
+                      <td colSpan="2" style={stickyOffset} className="sticky left-0 z-40 h-12 whitespace-nowrap bg-sky-50 px-4 py-3">Total per Bulan</td>
+                      <td style={stickyOffset} className="sticky z-30 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-slate-600">{summary.currency}</td>
+                      {(report?.periods || []).map((period) => <td key={period.key} style={stickyOffset} className="sticky z-30 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-right tabular-nums">{money(summary.totalsByPeriod[period.key], summary.currency)}</td>)}
+                      <td style={stickyOffset} className="sticky right-0 z-40 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-right font-bold tabular-nums">{money(summary.totalOutstanding, summary.currency)}</td>
+                    </tr>;
+                  })}
                   {visibleRows.map((row) => <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/80">
                     <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-4 py-3 font-semibold"><Link className="text-sky-800 hover:underline" to={`/invoice/${encodeURIComponent(row.invoiceNumber)}`}>{row.invoiceNumber}</Link></td>
                     <td className="sticky left-48 z-[1] bg-white px-4 py-3 text-slate-800">{row.customerName}</td>
@@ -321,16 +334,6 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
                     <td className="sticky right-0 z-[1] whitespace-nowrap bg-white px-4 py-3 text-right font-semibold tabular-nums">{money(row.totalOutstanding, row.currency)}</td>
                   </tr>)}
                 </tbody>
-                {yearlyMonthlyTotals.length > 0 ? (
-                  <tfoot className="bg-sky-50 font-semibold text-slate-900">
-                    {yearlyMonthlyTotals.map((summary) => <tr key={summary.currency} className="border-t-2 border-sky-200">
-                      <td colSpan="2" className="sticky left-0 z-10 whitespace-nowrap bg-sky-50 px-4 py-3">Total per Bulan</td>
-                      <td className="whitespace-nowrap bg-sky-50 px-4 py-3 text-slate-600">{summary.currency}</td>
-                      {(report?.periods || []).map((period) => <td key={period.key} className="whitespace-nowrap bg-sky-50 px-4 py-3 text-right tabular-nums">{money(summary.totalsByPeriod[period.key], summary.currency)}</td>)}
-                      <td className="sticky right-0 z-10 whitespace-nowrap bg-sky-50 px-4 py-3 text-right font-bold tabular-nums">{money(summary.totalOutstanding, summary.currency)}</td>
-                    </tr>)}
-                  </tfoot>
-                ) : null}
               </>
             )}
           </table>
