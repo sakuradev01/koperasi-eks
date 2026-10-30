@@ -117,7 +117,7 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
             <p className="mt-2 max-w-2xl text-sm text-slate-300">Sisa target setoran per periode. Anggota Draft/Nonaktif tidak ikut proyeksi.</p>
           </div>
           <div className="flex gap-2 text-sm">
-            <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan/per-bulan">Per Bulan</Link>
+            <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan">Per Bulan</Link>
             <Link className="rounded-full border border-slate-500 px-4 py-2 hover:bg-slate-800" to="/laporan/per-tahun">Per Tahun</Link>
           </div>
         </div>

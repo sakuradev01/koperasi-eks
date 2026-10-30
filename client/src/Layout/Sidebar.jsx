@@ -91,7 +91,7 @@ const menuIconMap = {
   Donasi: "gift",
   "Manajemen Pinjaman": "bank",
   "Dana Darurat": "emergency",
-  Laporan: "report",
+  "Projection (Simpanan)": "report",
   Invoice: "invoice",
   "Master Data": "master",
   Expenses: "expense",
@@ -111,7 +111,6 @@ const menuItems = [
     permissionKey: "manajemenPinjaman",
   },
   { title: "Dana Darurat", path: "/dana-darurat", permissionKey: "danaDarurat" },
-  { title: "Laporan", path: "/laporan", permissionKey: "laporan" },
   {
     title: "Invoice",
     permissionKey: "invoice",
@@ -197,14 +196,12 @@ const menuItems = [
     permissionKey: "reports",
     children: [
       {
-        title: "Projection Per Bulan",
-        path: "/laporan/per-bulan",
+        title: "Projection (Simpanan)",
         permissionKey: "reports",
-      },
-      {
-        title: "Projection Per Tahun",
-        path: "/laporan/per-tahun",
-        permissionKey: "reports",
+        children: [
+          { title: "Per Bulan", path: "/laporan", permissionKey: "laporan" },
+          { title: "Per Tahun", path: "/laporan/per-tahun", permissionKey: "reports" },
+        ],
       },
       {
         title: "Profit & Loss",
@@ -253,24 +250,19 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     return feature?.view === true;
   };
 
-  const filterMenuItems = (items) => {
-    return items
-      .filter((item) => {
-        if (item.children) return true;
-        return canView(item);
-      })
-      .map((item) => {
-        if (item.children) {
-          const filtered = item.children.filter(canView);
-          return { ...item, children: filtered };
+  const filterMenuItems = (items) =>
+    items.reduce((visibleItems, item) => {
+      if (item.children) {
+        const visibleChildren = filterMenuItems(item.children);
+        if (visibleChildren.length > 0) {
+          visibleItems.push({ ...item, children: visibleChildren });
         }
-        return item;
-      })
-      .filter((item) => {
-        if (item.children) return item.children.length > 0;
-        return true;
-      });
-  };
+      } else if (canView(item)) {
+        visibleItems.push(item);
+      }
+
+      return visibleItems;
+    }, []);
 
   const filteredMenuItems = filterMenuItems(menuItems);
 
