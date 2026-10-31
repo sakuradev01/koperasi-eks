@@ -1,6 +1,7 @@
 import {
   allocateInvoicePaymentsToProjections,
 } from "../domain/projectionSettlement.js";
+import { getEffectiveInvoiceStatus } from "../../../utils/invoiceStatus.js";
 
 const EPSILON = 0.000001;
 const MONTHS = [
@@ -102,6 +103,20 @@ const projectionStatus = (projection, paidToDate, asOfDate) => {
   return "Sent";
 };
 
+const getInvoiceStatus = (invoice, asOfDate) =>
+  getEffectiveInvoiceStatus(
+    String(invoice?.status || "draft").toLowerCase(),
+    invoice?.dueDate,
+    invoice?.total,
+    invoice?.totalPaid,
+    new Date(asOfDate),
+  );
+
+const matchesInvoiceStatusFilter = (invoice, invoiceStatus, selectedStatuses = []) => {
+  if (selectedStatuses.length) return selectedStatuses.includes(invoiceStatus);
+  return String(invoice?.status || "").toLowerCase() !== "draft";
+};
+
 function buildMonthlyReport(invoices, filters) {
   const rows = [];
   const totals = new Map();
@@ -110,9 +125,9 @@ function buildMonthlyReport(invoices, filters) {
   const asOfDate = filters.asOfDate;
   const statusFilter = String(filters.status || "all").toLowerCase();
 
-  invoices
-    .filter((invoice) => String(invoice?.status || "").toLowerCase() !== "draft")
-    .forEach((invoice) => {
+  invoices.forEach((invoice) => {
+      const invoiceStatus = getInvoiceStatus(invoice, asOfDate);
+      if (!matchesInvoiceStatusFilter(invoice, invoiceStatus, filters.invoiceStatuses)) return;
       const projections = Array.isArray(invoice.projections) ? invoice.projections : [];
       const payments = Array.isArray(invoice.payments) ? invoice.payments : [];
       const { allocations, unallocatedPayments } =
@@ -165,6 +180,7 @@ function buildMonthlyReport(invoices, filters) {
           invoiceNumber: invoice.invoiceNumber || "-",
           customerName: invoiceName(invoice),
           currency,
+          invoiceStatus,
           projectionId: id,
           projectionIndex: index + 1,
           projectionDate,
@@ -199,6 +215,7 @@ function buildMonthlyReport(invoices, filters) {
           invoiceNumber: invoice.invoiceNumber || "-",
           customerName: invoiceName(invoice),
           currency,
+          invoiceStatus,
           projectionId: null,
           projectionIndex: null,
           projectionDate: null,
@@ -242,9 +259,10 @@ function buildYearlyReport(invoices, filters) {
   const rangeStart = `${startYear}-01-01`;
   const rangeEnd = `${endYear}-12-31`;
 
-  invoices
-    .filter((invoice) => String(invoice?.status || "").toLowerCase() !== "draft")
-    .forEach((invoice) => {
+  invoices.forEach((invoice) => {
+      const invoiceStatus = getInvoiceStatus(invoice, asOfDate);
+      const hasStatusFilter = Boolean(filters.invoiceStatuses?.length);
+      if (!matchesInvoiceStatusFilter(invoice, invoiceStatus, filters.invoiceStatuses)) return;
       const projections = Array.isArray(invoice.projections) ? invoice.projections : [];
       const payments = Array.isArray(invoice.payments) ? invoice.payments : [];
       const inRangeProjections = projections
@@ -290,7 +308,7 @@ function buildYearlyReport(invoices, filters) {
             .reduce((sum, payment) => sum + payment.amount, 0),
       );
 
-      if (totalOutstanding > EPSILON) {
+      if (totalOutstanding > EPSILON || hasStatusFilter) {
         rows.push({
           id: invoiceId,
           invoiceId,
@@ -298,6 +316,7 @@ function buildYearlyReport(invoices, filters) {
           customerName: invoiceName(invoice),
           currency,
           status: String(invoice.status || "sent").toLowerCase(),
+          invoiceStatus,
           months,
           totalProjection,
           totalOutstanding,

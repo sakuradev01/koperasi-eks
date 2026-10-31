@@ -23,7 +23,7 @@ export function createGetInvoiceProjectionReport({ repository, now = () => new D
     const filters = parseInvoiceProjectionReportFilters(query, currentDate);
     const [invoices, rawAvailableYears] = await Promise.all([
       repository.findReportInvoices(filters),
-      repository.listAvailableYears(),
+      repository.listAvailableYears(filters),
     ]);
     const report = buildInvoiceProjectionReport(invoices, filters);
     const availableYears = new Set([

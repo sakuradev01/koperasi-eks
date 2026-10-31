@@ -23,6 +23,7 @@ test("defaults to the current Jakarta calendar month and caps as-of at now", asy
   assert.equal(filters.endDate, "2026-10-31");
   assert.equal(filters.asOfDate, "2026-10-30T04:00:00.000Z");
   assert.equal(filters.status, "all");
+  assert.deepEqual(filters.invoiceStatuses, []);
 });
 
 test("normalizes reversed yearly bounds and rejects ranges wider than ten years", async () => {
@@ -34,10 +35,21 @@ test("normalizes reversed yearly bounds and rejects ranges wider than ten years"
 
   assert.equal(filters.startYear, 2026);
   assert.equal(filters.endYear, 2027);
+  assert.deepEqual(filters.invoiceStatuses, []);
   assert.throws(
     () => parseFilters({ mode: "yearly", fromYear: "2000", toYear: "2020" }),
     /maksimal 10 tahun/i,
   );
+});
+
+test("normalizes multiple invoice statuses from comma-separated and repeated values", async () => {
+  const parseFilters = await loadParser();
+  const filters = parseFilters({
+    mode: "monthly",
+    invoiceStatuses: [" Draft, Sent ", "sent", "PARTIAL"],
+  });
+
+  assert.deepEqual(filters.invoiceStatuses, ["draft", "sent", "partial"]);
 });
 
 test("rejects invalid date ranges and unsupported status filters", async () => {
@@ -54,5 +66,9 @@ test("rejects invalid date ranges and unsupported status filters", async () => {
   assert.throws(
     () => parseFilters({ mode: "monthly", status: "unknown" }),
     /status/i,
+  );
+  assert.throws(
+    () => parseFilters({ mode: "yearly", invoiceStatuses: "draft,unknown" }),
+    /status invoice/i,
   );
 });

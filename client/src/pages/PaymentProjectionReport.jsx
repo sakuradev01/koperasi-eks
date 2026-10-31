@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import api from "../api/index.jsx";
 import { buildPaymentProjectionReport } from "../utils/paymentProjectionReport.js";
 import { buildProjectionTableData } from "../utils/paymentProjectionTable.js";
+import MultiSelectFilter from "../components/MultiSelectFilter.jsx";
+import { parseMultiSelectQueryValues, withMultiSelectQueryParam } from "../utils/multiSelectQueryParams.js";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 
@@ -10,17 +12,35 @@ import "jspdf-autotable";
 
 const money = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 const years = (current) => Array.from({ length: 8 }, (_, index) => current - 5 + index);
+const membershipStatusOptions = [
+  { value: "active", label: "Aktif" },
+  { value: "inactive", label: "Nonaktif" },
+  { value: "draft", label: "Draft" },
+];
+const membershipStatusLabels = { active: "Aktif", inactive: "Nonaktif", draft: "Draft" };
 
 const PaymentProjectionReport = ({ mode = "monthly" }) => {
   const currentYear = new Date().getFullYear();
   const [params, setParams] = useSearchParams();
   const [startYear, setStartYear] = useState(Number(params.get("year") || params.get("from_year")) || currentYear);
   const [endYear, setEndYear] = useState(Number(params.get("to_year")) || currentYear);
+  const memberStatusParam = params.getAll("memberStatus").join(",");
+  const appliedMembershipStatuses = useMemo(
+    () => parseMultiSelectQueryValues(memberStatusParam),
+    [memberStatusParam],
+  );
+  const appliedMembershipStatusKey = appliedMembershipStatuses.join(",");
+  const [selectedMembershipStatuses, setSelectedMembershipStatuses] = useState(appliedMembershipStatuses);
   const [members, setMembers] = useState([]);
   const [products, setProducts] = useState([]);
   const [savings, setSavings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setSelectedMembershipStatuses(parseMultiSelectQueryValues(appliedMembershipStatusKey));
+    // URL state is the committed filter; keep the draft picker in sync with back/forward navigation.
+  }, [appliedMembershipStatusKey]);
 
   useEffect(() => {
     let mounted = true;
@@ -59,8 +79,8 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
   }, []);
 
   const report = useMemo(
-    () => buildPaymentProjectionReport({ members, products, savings, startYear, endYear }),
-    [members, products, savings, startYear, endYear],
+    () => buildPaymentProjectionReport({ members, products, savings, startYear, endYear, membershipStatuses: appliedMembershipStatuses }),
+    [members, products, savings, startYear, endYear, appliedMembershipStatuses],
   );
   const visiblePeriods = useMemo(
     () => mode === "monthly"
@@ -76,16 +96,18 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
   const periodTotals = tableData.totalsByPeriod;
 
   const exportExcel = () => {
-    const header = ["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label), "Total Sisa"];
+    const includeStatus = appliedMembershipStatuses.length > 0;
+    const header = ["Nama Siswa", "No. Anggota", ...(includeStatus ? ["Status Keanggotaan"] : []), ...visiblePeriods.map((period) => period.label), "Total Sisa"];
     const rows = visibleRows.map((row) => [
       row.customerName,
       row.customerCode,
+      ...(includeStatus ? [membershipStatusLabels[row.membershipStatus] || "-"] : []),
       ...visiblePeriods.map((period) => row.months[period.key] || 0),
       row.visibleTotalOutstanding,
     ]);
     const csv = [
       header,
-      ["Total Sisa Projection", "", ...visiblePeriods.map((period) => periodTotals[period.key] || 0), tableData.totalOutstanding],
+      ["Total Sisa Projection", "", ...(includeStatus ? [""] : []), ...visiblePeriods.map((period) => periodTotals[period.key] || 0), tableData.totalOutstanding],
       ...rows,
     ]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
@@ -100,22 +122,25 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
   };
 
   const exportPdf = () => {
+    const includeStatus = appliedMembershipStatuses.length > 0;
     const documentPdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a3" });
     documentPdf.text(`Payment Projection ${mode === "monthly" ? "Per Bulan" : "Per Tahun"}`, 36, 36);
     documentPdf.setFontSize(9);
     documentPdf.text(`Periode: ${startYear}${mode === "yearly" && endYear !== startYear ? `-${endYear}` : ""}`, 36, 52);
     documentPdf.autoTable({
       startY: 68,
-      head: [["Nama Siswa", "No. Anggota", ...visiblePeriods.map((period) => period.label), "Total Sisa"]],
+      head: [["Nama Siswa", "No. Anggota", ...(includeStatus ? ["Status Keanggotaan"] : []), ...visiblePeriods.map((period) => period.label), "Total Sisa"]],
       body: visibleRows.map((row) => [
         row.customerName,
         row.customerCode,
+        ...(includeStatus ? [membershipStatusLabels[row.membershipStatus] || "-"] : []),
         ...visiblePeriods.map((period) => money.format(row.months[period.key] || 0)),
         money.format(row.visibleTotalOutstanding),
       ]),
       foot: [[
         "Total Sisa Projection",
         "",
+        ...(includeStatus ? [""] : []),
         ...visiblePeriods.map((period) => money.format(periodTotals[period.key] || 0)),
         money.format(tableData.totalOutstanding),
       ]],
@@ -131,7 +156,10 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
     const nextEnd = Math.max(startYear, endYear);
     setStartYear(nextStart);
     setEndYear(mode === "monthly" ? nextStart : nextEnd);
-    setParams(mode === "monthly" ? { year: String(nextStart) } : { mode: "range", from_year: String(nextStart), to_year: String(nextEnd) });
+    const periodParams = mode === "monthly"
+      ? { year: String(nextStart) }
+      : { mode: "range", from_year: String(nextStart), to_year: String(nextEnd) };
+    setParams(withMultiSelectQueryParam(periodParams, "memberStatus", selectedMembershipStatuses));
   };
 
   if (loading) return <div className="p-8 text-center text-slate-500">Memuat payment projection...</div>;
@@ -164,6 +192,14 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
             {years(currentYear + 2).map((year) => <option key={year} value={year}>{year}</option>)}
           </select>
         </label> : null}
+        <MultiSelectFilter
+          label="Status Anggota"
+          options={membershipStatusOptions}
+          selectedValues={selectedMembershipStatuses}
+          onChange={setSelectedMembershipStatuses}
+          emptyLabel="Default (Aktif)"
+          tone="navy"
+        />
         <button type="button" onClick={applyPeriod} className="rounded-xl bg-sky-600 px-5 py-2.5 font-semibold text-white hover:bg-sky-700">Terapkan</button>
         <button type="button" onClick={exportExcel} disabled={!visibleRows.length} className="rounded-xl border border-emerald-200 px-4 py-2.5 font-semibold text-emerald-700 disabled:opacity-40">Export Excel</button>
         <button type="button" onClick={exportPdf} disabled={!visibleRows.length} className="rounded-xl border border-rose-200 px-4 py-2.5 font-semibold text-rose-700 disabled:opacity-40">Export PDF</button>
@@ -202,7 +238,7 @@ const PaymentProjectionReport = ({ mode = "monthly" }) => {
                 <td className={`sticky right-0 z-20 w-[180px] min-w-[180px] bg-sky-50 px-4 py-4 text-right tabular-nums ${mode === "yearly" ? "top-[104px] z-30" : ""}`}>{money.format(tableData.totalOutstanding)}</td>
               </tr>
               {visibleRows.length === 0 ? <tr><td colSpan={3 + visiblePeriods.length} className="px-6 py-12 text-center text-slate-500">Tidak ada sisa projection pada periode ini.</td></tr> : visibleRows.map((row) => <tr key={row.id} className="group border-t border-slate-100 hover:bg-slate-50">
-                <td className="sticky left-0 z-10 w-[260px] min-w-[260px] max-w-[260px] bg-white px-5 py-4 font-semibold text-slate-900 group-hover:bg-slate-50"><Link className="text-sky-700 hover:underline" to={`/master/anggota/${row.customerCode}`}>{row.customerName}</Link><div className="text-xs font-normal text-slate-500">{row.productTitle}</div></td>
+                <td className="sticky left-0 z-10 w-[260px] min-w-[260px] max-w-[260px] bg-white px-5 py-4 font-semibold text-slate-900 group-hover:bg-slate-50"><Link className="text-sky-700 hover:underline" to={`/master/anggota/${row.customerCode}`}>{row.customerName}</Link><div className="text-xs font-normal text-slate-500">{row.productTitle}</div>{row.isProjectionEligible === false ? <span className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">{membershipStatusLabels[row.membershipStatus] || row.membershipStatus}</span> : null}</td>
                 <td className="sticky left-[260px] z-10 w-[170px] min-w-[170px] max-w-[170px] bg-white px-5 py-4 text-slate-600 group-hover:bg-slate-50">{row.customerCode}</td>
                 {visiblePeriods.map((period) => <td key={period.key} className="whitespace-nowrap px-4 py-4 text-right font-medium tabular-nums text-slate-700">{row.months[period.key] ? money.format(row.months[period.key]) : "-"}</td>)}
                 <td className="sticky right-0 z-10 w-[180px] min-w-[180px] bg-white px-4 py-4 text-right font-semibold tabular-nums text-slate-900 group-hover:bg-slate-50">{money.format(row.visibleTotalOutstanding)}</td>

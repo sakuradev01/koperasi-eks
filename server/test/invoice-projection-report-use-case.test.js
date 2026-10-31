@@ -45,5 +45,27 @@ test("rejects invalid filters before querying invoice data", async () => {
   });
 
   await assert.rejects(useCase({ mode: "monthly", startDate: "invalid" }), /tanggal/i);
+  await assert.rejects(
+    useCase({ mode: "monthly", invoiceStatuses: "sent,invalid" }),
+    /status invoice/i,
+  );
   assert.equal(repositoryCalls, 0);
+});
+
+test("passes status filters to both report queries", async () => {
+  const createUseCase = await loadUseCase();
+  let reportFilters;
+  let yearFilters;
+  const useCase = createUseCase({
+    now: () => new Date("2026-10-30T04:00:00.000Z"),
+    repository: {
+      findReportInvoices: async (filters) => { reportFilters = filters; return []; },
+      listAvailableYears: async (filters) => { yearFilters = filters; return []; },
+    },
+  });
+
+  await useCase({ mode: "yearly", invoiceStatuses: "draft,sent" });
+
+  assert.deepEqual(reportFilters.invoiceStatuses, ["draft", "sent"]);
+  assert.deepEqual(yearFilters.invoiceStatuses, ["draft", "sent"]);
 });

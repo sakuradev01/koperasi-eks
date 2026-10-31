@@ -1,11 +1,25 @@
 /* eslint-disable react/prop-types -- this project does not ship prop-types. */
-const summaryLabel = (selectedValues) => {
-  if (selectedValues.length === 0) return "Semua";
+const summaryLabel = (selectedValues, emptyLabel) => {
+  if (selectedValues.length === 0) return emptyLabel;
   return `${selectedValues.length} dipilih`;
 };
 
-export default function MultiSelectFilter({ label, options, selectedValues, onChange }) {
+export default function MultiSelectFilter({
+  label,
+  options,
+  selectedValues,
+  onChange,
+  emptyLabel = "Semua",
+  tone = "pink",
+}) {
   const selected = Array.isArray(selectedValues) ? selectedValues : [];
+  const focusRingClass = tone === "navy" ? "focus:ring-[#04214A]" : "focus:ring-pink-500";
+  const checkboxClass = tone === "navy"
+    ? "text-[#04214A] focus:ring-[#04214A]"
+    : "text-pink-600 focus:ring-pink-500";
+  const clearButtonClass = tone === "navy"
+    ? "text-[#04214A] hover:bg-slate-50"
+    : "text-pink-700 hover:bg-pink-50";
 
   const toggleOption = (value) => {
     onChange(
@@ -20,10 +34,10 @@ export default function MultiSelectFilter({ label, options, selectedValues, onCh
       <span className="text-sm text-gray-600 whitespace-nowrap">{label}:</span>
       <details className="relative">
         <summary
-          aria-label={`${label}: ${summaryLabel(selected)}`}
-          className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+          aria-label={`${label}: ${summaryLabel(selected, emptyLabel)}`}
+          className={`flex cursor-pointer list-none items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 ${focusRingClass}`}
         >
-          <span>{summaryLabel(selected)}</span>
+          <span>{summaryLabel(selected, emptyLabel)}</span>
           <span aria-hidden="true" className="text-gray-400">▾</span>
         </summary>
         <div
@@ -41,7 +55,7 @@ export default function MultiSelectFilter({ label, options, selectedValues, onCh
                   type="checkbox"
                   checked={selected.includes(option.value)}
                   onChange={() => toggleOption(option.value)}
-                  className="mt-0.5 rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+                  className={`mt-0.5 rounded border-gray-300 ${checkboxClass}`}
                 />
                 <span>{option.label}</span>
               </label>
@@ -52,7 +66,7 @@ export default function MultiSelectFilter({ label, options, selectedValues, onCh
               <button
                 type="button"
                 onClick={() => onChange([])}
-                className="w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-pink-700 hover:bg-pink-50"
+                className={`w-full rounded-md px-2 py-1.5 text-left text-xs font-medium ${clearButtonClass}`}
               >
                 Hapus pilihan
               </button>

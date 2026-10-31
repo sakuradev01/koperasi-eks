@@ -1,8 +1,22 @@
+import { INVOICE_STATUSES } from "../../../utils/invoiceStatus.js";
+
 const ALLOWED_MONTHLY_STATUSES = new Set([
   "all", "paid", "partial", "overdue", "sent", "unallocated",
 ]);
 const MAX_MONTHLY_RANGE_DAYS = 366 * 10;
 const MAX_YEAR_RANGE = 10;
+
+const parseInvoiceStatuses = (value) => {
+  const values = (Array.isArray(value) ? value : [value ?? ""])
+    .flatMap((item) => String(item).split(","))
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const unique = [...new Set(values)];
+  if (unique.some((status) => !INVOICE_STATUSES.includes(status))) {
+    throw new RangeError("Status invoice projection tidak valid.");
+  }
+  return unique;
+};
 
 const jakartaDateParts = (date) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -49,6 +63,7 @@ export function parseInvoiceProjectionReportFilters(query = {}, now = new Date()
   }
 
   if (mode === "monthly") {
+    const invoiceStatuses = parseInvoiceStatuses(query.invoiceStatuses);
     const defaultRange = currentJakartaMonthRange(now);
     const startDate = query.startDate || defaultRange.startDate;
     const endDate = query.endDate || defaultRange.endDate;
@@ -72,8 +87,10 @@ export function parseInvoiceProjectionReportFilters(query = {}, now = new Date()
 
     const periodEnd = dateAtEndOfDay(endDate);
     const asOfDate = new Date(Math.min(periodEnd.getTime(), now.getTime()));
-    return { mode, startDate, endDate, asOfDate: asIso(asOfDate), status };
+    return { mode, startDate, endDate, asOfDate: asIso(asOfDate), status, invoiceStatuses };
   }
+
+  const invoiceStatuses = parseInvoiceStatuses(query.invoiceStatuses);
 
   const currentYear = currentJakartaYear(now);
   let startYear = parseYear(query.fromYear, currentYear);
@@ -85,5 +102,5 @@ export function parseInvoiceProjectionReportFilters(query = {}, now = new Date()
 
   const periodEnd = new Date(Date.UTC(endYear, 11, 31, 23, 59, 59, 999));
   const asOfDate = new Date(Math.min(periodEnd.getTime(), now.getTime()));
-  return { mode, startYear, endYear, asOfDate: asIso(asOfDate) };
+  return { mode, startYear, endYear, asOfDate: asIso(asOfDate), invoiceStatuses };
 }

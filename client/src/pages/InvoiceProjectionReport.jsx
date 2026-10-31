@@ -7,6 +7,8 @@ import {
   createInvoiceProjectionFilename,
 } from "../utils/invoiceProjectionExport.js";
 import { buildYearlyInvoiceMonthlyTotals } from "../utils/invoiceProjectionTotals.js";
+import MultiSelectFilter from "../components/MultiSelectFilter.jsx";
+import { parseMultiSelectQueryValues, withMultiSelectQueryParam } from "../utils/multiSelectQueryParams.js";
 
 /* eslint-disable react/prop-types -- route supplies the report mode. */
 
@@ -26,6 +28,14 @@ const statusOptions = [
   { value: "overdue", label: "Overdue" },
   { value: "unallocated", label: "Pembayaran belum dialokasikan" },
 ];
+const invoiceStatusOptions = [
+  { value: "draft", label: "Draft" },
+  { value: "sent", label: "Sent" },
+  { value: "partial", label: "Partial" },
+  { value: "paid", label: "Paid" },
+  { value: "overdue", label: "Overdue" },
+];
+const invoiceStatusLabels = Object.fromEntries(invoiceStatusOptions.map(({ value, label }) => [value, label]));
 
 const money = (value, currency) => {
   const amount = Number(value || 0);
@@ -96,6 +106,13 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
     searchParams.get("endDate") || dateInput(currentYear, currentMonth, String(monthEnd).padStart(2, "0")),
   );
   const [status, setStatus] = useState(searchParams.get("status") || "all");
+  const invoiceStatusParam = searchParams.getAll("invoiceStatuses").join(",");
+  const appliedInvoiceStatuses = useMemo(
+    () => parseMultiSelectQueryValues(invoiceStatusParam),
+    [invoiceStatusParam],
+  );
+  const appliedInvoiceStatusKey = appliedInvoiceStatuses.join(",");
+  const [selectedInvoiceStatuses, setSelectedInvoiceStatuses] = useState(appliedInvoiceStatuses);
   const [startYear, setStartYear] = useState(Number(searchParams.get("fromYear")) || currentYear);
   const [endYear, setEndYear] = useState(Number(searchParams.get("toYear")) || currentYear);
   const [search, setSearch] = useState("");
@@ -106,6 +123,11 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
   const [error, setError] = useState("");
 
   const paramsKey = searchParams.toString();
+  useEffect(() => {
+    setSelectedInvoiceStatuses(parseMultiSelectQueryValues(appliedInvoiceStatusKey));
+    // URL state is the committed filter; keep the draft picker in sync with back/forward navigation.
+  }, [appliedInvoiceStatusKey]);
+
   useEffect(() => {
     let active = true;
     const query = Object.fromEntries(new URLSearchParams(paramsKey));
@@ -136,6 +158,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
       row.customerName,
       row.description,
       row.status,
+      row.invoiceStatus,
     ].some((value) => String(value || "").toLocaleLowerCase("id-ID").includes(normalizedSearch)));
   }, [report, search]);
 
@@ -162,14 +185,14 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
     event.preventDefault();
     setPage(1);
     if (mode === "monthly") {
-      setSearchParams({ startDate, endDate, status });
+      setSearchParams(withMultiSelectQueryParam({ startDate, endDate, status }, "invoiceStatuses", selectedInvoiceStatuses));
       return;
     }
     const from = Math.min(startYear, endYear);
     const to = Math.max(startYear, endYear);
     setStartYear(from);
     setEndYear(to);
-    setSearchParams({ fromYear: String(from), toYear: String(to) });
+    setSearchParams(withMultiSelectQueryParam({ fromYear: String(from), toYear: String(to) }, "invoiceStatuses", selectedInvoiceStatuses));
   };
 
   const downloadExcel = () => {
@@ -202,7 +225,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Reports · Projection (Invoice)</p>
             <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Proyeksi Invoice {title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-200">
-              Pantau nilai invoice yang dijadwalkan dan pembayaran yang benar-benar diterima. Draft tidak disertakan; pembayaran tetap mengikuti tanggal realisasi dan alokasi cicilan.
+              Pantau nilai invoice yang dijadwalkan dan pembayaran yang benar-benar diterima. Draft tidak ditampilkan secara default; pilih status invoice untuk menyertakannya. Pembayaran tetap mengikuti tanggal realisasi dan alokasi cicilan.
             </p>
           </div>
           <nav aria-label="Periode laporan" className="flex shrink-0 gap-2 text-sm">
@@ -241,6 +264,14 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             </label>
           </>
         )}
+        <MultiSelectFilter
+          label="Status Invoice"
+          options={invoiceStatusOptions}
+          selectedValues={selectedInvoiceStatuses}
+          onChange={setSelectedInvoiceStatuses}
+          emptyLabel="Default (tanpa Draft)"
+          tone="navy"
+        />
         <button type="submit" disabled={loading} className="rounded-xl bg-[#04214A] px-5 py-2.5 font-semibold text-white transition hover:bg-[#0b3975] disabled:cursor-wait disabled:opacity-60">Terapkan Filter</button>
         <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
           <button type="button" onClick={downloadExcel} disabled={loading || !filteredRows.length} className="flex-1 rounded-xl border border-emerald-200 px-3 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40">Export Excel</button>
@@ -292,7 +323,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             {mode === "monthly" ? (
               <>
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr>{["Tgl Proyeksi", "Tanggal Bayar", "Invoice", "Nama Siswa", "Keterangan", "Mata Uang", "Proyeksi", "Realisasi", "Selisih", "Status"].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
+                  <tr>{["Tgl Proyeksi", "Tanggal Bayar", "Invoice", "Nama Siswa", "Keterangan", "Mata Uang", "Proyeksi", "Realisasi", "Selisih", "Status", ...(appliedInvoiceStatuses.length ? ["Status Invoice"] : [])].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {visibleRows.map((row) => <tr key={row.id} className="border-b border-slate-100 align-top hover:bg-slate-50/80">
@@ -306,13 +337,14 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
                     <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-emerald-700 tabular-nums">{money(row.realizedAmount, row.currency)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700 tabular-nums">{row.difference === null ? "—" : money(row.difference, row.currency)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyle(row.status)}`}>{row.status}</span></td>
+                    {appliedInvoiceStatuses.length ? <td className="px-4 py-3"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyle(row.invoiceStatus)}`}>{invoiceStatusLabels[row.invoiceStatus] || row.invoiceStatus}</span></td> : null}
                   </tr>)}
                 </tbody>
               </>
             ) : (
               <>
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr className="sticky top-0 z-40 h-12"><th scope="col" className="sticky left-0 top-0 z-50 min-w-48 border-b border-slate-200 bg-slate-50 px-4 py-3">Invoice</th><th scope="col" className="sticky left-48 top-0 z-50 min-w-52 border-b border-slate-200 bg-slate-50 px-4 py-3">Nama Siswa</th><th scope="col" className="sticky top-0 z-40 border-b border-slate-200 bg-slate-50 px-4 py-3">Mata Uang</th>{(report?.periods || []).map((period) => <th key={period.key} scope="col" className="sticky top-0 z-40 min-w-32 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">{period.label}</th>)}<th scope="col" className="sticky right-0 top-0 z-50 min-w-40 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">Total Sisa</th></tr>
+                  <tr className="sticky top-0 z-40 h-12"><th scope="col" className="sticky left-0 top-0 z-50 min-w-48 border-b border-slate-200 bg-slate-50 px-4 py-3">Invoice</th><th scope="col" className="sticky left-48 top-0 z-50 min-w-52 border-b border-slate-200 bg-slate-50 px-4 py-3">Nama Siswa</th><th scope="col" className="sticky top-0 z-40 border-b border-slate-200 bg-slate-50 px-4 py-3">Mata Uang</th>{appliedInvoiceStatuses.length ? <th scope="col" className="sticky top-0 z-40 min-w-32 border-b border-slate-200 bg-slate-50 px-4 py-3">Status Invoice</th> : null}{(report?.periods || []).map((period) => <th key={period.key} scope="col" className="sticky top-0 z-40 min-w-32 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">{period.label}</th>)}<th scope="col" className="sticky right-0 top-0 z-50 min-w-40 border-b border-slate-200 bg-slate-50 px-4 py-3 text-right">Total Sisa</th></tr>
                 </thead>
                 <tbody>
                   {yearlyMonthlyTotals.map((summary, index) => {
@@ -322,6 +354,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
                     return <tr key={`total-${summary.currency}`} className="h-12 border-t-2 border-sky-200 font-semibold text-slate-900">
                       <td colSpan="2" style={stickyOffset} className="sticky left-0 z-40 h-12 whitespace-nowrap bg-sky-50 px-4 py-3">Total per Bulan</td>
                       <td style={stickyOffset} className="sticky z-30 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-slate-600">{summary.currency}</td>
+                      {appliedInvoiceStatuses.length ? <td style={stickyOffset} className="sticky z-30 h-12 whitespace-nowrap bg-sky-50 px-4 py-3">—</td> : null}
                       {(report?.periods || []).map((period) => <td key={period.key} style={stickyOffset} className="sticky z-30 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-right tabular-nums">{money(summary.totalsByPeriod[period.key], summary.currency)}</td>)}
                       <td style={stickyOffset} className="sticky right-0 z-40 h-12 whitespace-nowrap bg-sky-50 px-4 py-3 text-right font-bold tabular-nums">{money(summary.totalOutstanding, summary.currency)}</td>
                     </tr>;
@@ -330,6 +363,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
                     <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-4 py-3 font-semibold"><Link className="text-sky-800 hover:underline" to={`/invoice/${encodeURIComponent(row.invoiceNumber)}`}>{row.invoiceNumber}</Link></td>
                     <td className="sticky left-48 z-[1] bg-white px-4 py-3 text-slate-800">{row.customerName}</td>
                     <td className="px-4 py-3 text-slate-600">{row.currency}</td>
+                    {appliedInvoiceStatuses.length ? <td className="px-4 py-3"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyle(row.invoiceStatus)}`}>{invoiceStatusLabels[row.invoiceStatus] || row.invoiceStatus}</span></td> : null}
                     {(report?.periods || []).map((period) => <td key={period.key} className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{row.months?.[period.key] > 0 ? money(row.months[period.key], row.currency) : "—"}</td>)}
                     <td className="sticky right-0 z-[1] whitespace-nowrap bg-white px-4 py-3 text-right font-semibold tabular-nums">{money(row.totalOutstanding, row.currency)}</td>
                   </tr>)}

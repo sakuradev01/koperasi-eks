@@ -32,3 +32,23 @@ test("returns a stable empty projection table when rows or periods are empty", (
     totalOutstanding: 0,
   });
 });
+
+test("retains selected non-projectable members without adding them to visible totals", () => {
+  const periods = [{ key: "2026-01" }];
+  const rows = [
+    { id: "active", isProjectionEligible: true, months: { "2026-01": 100 } },
+    { id: "draft", membershipStatus: "draft", isProjectionEligible: false, months: { "2026-01": 0 } },
+    { id: "inactive", membershipStatus: "inactive", isProjectionEligible: false, months: { "2026-01": 25 } },
+  ];
+
+  const result = buildProjectionTableData(rows, periods);
+
+  assert.deepEqual(result.rows.map(({ id, visibleTotalOutstanding }) => [id, visibleTotalOutstanding]), [
+    ["active", 100],
+    ["draft", 0],
+    ["inactive", 0],
+  ]);
+  assert.deepEqual(result.rows.find(({ id }) => id === "inactive").months, { "2026-01": 0 });
+  assert.deepEqual(result.totalsByPeriod, { "2026-01": 100 });
+  assert.equal(result.totalOutstanding, 100);
+});

@@ -1,5 +1,6 @@
 const APPROVED_STATUSES = new Set(["Approved", "Partial"]);
 const OVERPAYMENT_THRESHOLD = 30_000;
+const MEMBERSHIP_STATUSES = new Set(["active", "inactive", "draft"]);
 
 const toId = (value) => {
   if (!value) return "";
@@ -45,6 +46,14 @@ const getMemberSavings = (member, savingsByMember) => {
   return keys.flatMap((key) => savingsByMember.get(key) || []);
 };
 
+const normalizeMembershipStatus = (status) =>
+  String(status || "active").trim().toLowerCase();
+
+const normalizeSelectedMembershipStatuses = (statuses) =>
+  [...new Set((Array.isArray(statuses) ? statuses : [])
+    .map((status) => String(status || "").trim().toLowerCase())
+    .filter((status) => MEMBERSHIP_STATUSES.has(status)))];
+
 export const buildProjectionPeriods = (startYear, endYear) => {
   const periods = [];
   for (let year = startYear; year <= endYear; year += 1) {
@@ -60,9 +69,11 @@ export const buildPaymentProjectionReport = ({
   members = [],
   products = [],
   savings = [],
+  membershipStatuses = [],
   startYear,
   endYear,
 }) => {
+  const selectedMembershipStatuses = normalizeSelectedMembershipStatuses(membershipStatuses);
   const productsById = new Map(products.map((product) => [toId(product?._id), product]));
   const savingsByMember = new Map();
   savings.forEach((saving) => {
@@ -78,8 +89,29 @@ export const buildPaymentProjectionReport = ({
   const rows = [];
 
   members
-    .filter((member) => member?.isVerified === true && (member.membershipStatus || "active") === "active")
+    .filter((member) => {
+      if (member?.isVerified !== true) return false;
+      const status = normalizeMembershipStatus(member.membershipStatus);
+      return selectedMembershipStatuses.length
+        ? selectedMembershipStatuses.includes(status)
+        : status === "active";
+    })
     .forEach((member) => {
+      const membershipStatus = normalizeMembershipStatus(member.membershipStatus);
+      if (membershipStatus !== "active") {
+        rows.push({
+          id: toId(member._id) || member.uuid,
+          customerName: member.name || "-",
+          customerCode: member.uuid || "-",
+          productTitle: getProduct(member, productsById)?.title || "-",
+          membershipStatus,
+          isProjectionEligible: false,
+          months: Object.fromEntries(periods.map((period) => [period.key, 0])),
+          totalOutstanding: 0,
+        });
+        return;
+      }
+
       const product = getProduct(member, productsById);
       if (!product) return;
       const memberSavings = getMemberSavings(member, savingsByMember);
@@ -122,6 +154,8 @@ export const buildPaymentProjectionReport = ({
           customerName: member.name || "-",
           customerCode: member.uuid || "-",
           productTitle: product.title || "-",
+          membershipStatus,
+          isProjectionEligible: true,
           months,
           totalOutstanding,
         });
