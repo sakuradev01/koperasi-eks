@@ -741,6 +741,10 @@ export const getAllCategories = async (req, res) => {
             name: acc.accountName,
             code: acc.accountCode || "",
             type: "account",
+            masterName: master.masterName,
+            submenuName: sub.submenuName,
+            currency: acc.currency || "",
+            balance: Number(acc.balance) || 0,
           });
         }
       }

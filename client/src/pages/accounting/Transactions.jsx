@@ -27,6 +27,7 @@ import {
   summarizeTransactionExport,
 } from "../../utils/transactionExport";
 import { buildTransactionPdf } from "../../utils/transactionPdfExport";
+import { buildTransactionAccountOptions } from "../../utils/transactionAccountOptions.js";
 
 // ==================== UTILITY FUNCTIONS ====================
 function formatNumber(num) {
@@ -550,6 +551,15 @@ export default function Transactions() {
   const allAssetsAccounts = useMemo(() => Object.values(assetsAccounts).flat(), [assetsAccounts]);
   const selectedAccount = allAssetsAccounts.find((a) => a._id === selectedAccountId);
   const currencyPrefix = selectedAccount?.currency || "Rp";
+  const accountDropdownOptions = useMemo(
+    () => buildTransactionAccountOptions(categories),
+    [categories],
+  );
+  const selectedFormAccount = useMemo(
+    () => accountDropdownOptions.flatMap((group) => group.items).find((account) => account.value === String(form.accountId)),
+    [accountDropdownOptions, form.accountId],
+  );
+  const formCurrencyPrefix = selectedFormAccount?.currency || currencyPrefix;
 
   const totalBalance = useMemo(() => {
     return allAssetsAccounts.reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
@@ -569,22 +579,6 @@ export default function Transactions() {
     });
     return opts;
   }, [categories]);
-
-  // Account options for SearchableDropdown
-  const accountDropdownOptions = useMemo(() => {
-    const groups = [];
-    Object.entries(assetsAccounts).forEach(([groupName, accounts]) => {
-      groups.push({
-        label: groupName,
-        items: accounts.map((a) => ({
-          value: a._id,
-          label: `${a.accountName} (${a.accountCode})`,
-          sublabel: `${a.currency || "Rp"} ${formatNumber(a.balance)}`,
-        })),
-      });
-    });
-    return groups;
-  }, [assetsAccounts]);
 
   const vendorOptions = useMemo(() => {
     const names = new Set(
@@ -833,7 +827,7 @@ export default function Transactions() {
       const usedAmt = splits.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
       const remaining = totalAmt - usedAmt;
       if (Math.abs(remaining) > 0.01) {
-        toast.error(`Split amounts don't balance. Remaining: ${formatCurrency(remaining, currencyPrefix)}`);
+        toast.error(`Split amounts don't balance. Remaining: ${formatCurrency(remaining, formCurrencyPrefix)}`);
         return;
       }
     }
@@ -1825,7 +1819,7 @@ export default function Transactions() {
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Amount</label>
                     <div className="flex border border-blue-200 rounded-md overflow-hidden focus-within:ring-2 focus-within:ring-pink-500 focus-within:border-pink-500">
-                      <span className="bg-gray-50 border-r border-blue-200 px-3 py-2.5 text-sm text-gray-500 font-medium">{currencyPrefix}</span>
+                      <span className="bg-gray-50 border-r border-blue-200 px-3 py-2.5 text-sm text-gray-500 font-medium">{formCurrencyPrefix}</span>
                       <input type="text" value={form.amountDisplay}
                         onChange={(e) => handleAmountDisplayChange(e.target.value)}
                         placeholder="0" className="flex-1 px-3 py-2.5 text-sm outline-none" required />
@@ -1918,10 +1912,10 @@ export default function Transactions() {
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-gray-900">Split Transaction</h4>
                       <div className="flex items-center gap-3 text-xs">
-                        <span className="text-gray-500">Total: <strong>{currencyPrefix} {formatNumber(form.amount)}</strong></span>
+                        <span className="text-gray-500">Total: <strong>{formCurrencyPrefix} {formatNumber(form.amount)}</strong></span>
                         <span className="text-gray-500">Remaining: <strong className={`${
                           splitRemaining < 0 ? "text-red-600" : splitRemaining === 0 ? "text-emerald-600" : "text-amber-600"
-                        }`}>{currencyPrefix} {formatNumber(splitRemaining)}</strong></span>
+                        }`}>{formCurrencyPrefix} {formatNumber(splitRemaining)}</strong></span>
                       </div>
                     </div>
 
@@ -1937,13 +1931,13 @@ export default function Transactions() {
                             <div className="w-36 shrink-0">
                               <label className="block text-[11px] text-gray-500 mb-0.5">Amount {idx + 1}</label>
                               <div className="flex border border-gray-300 rounded-md overflow-hidden">
-                                <span className="bg-gray-50 border-r border-gray-300 px-2 py-1.5 text-xs text-gray-500">{currencyPrefix}</span>
+                                <span className="bg-gray-50 border-r border-gray-300 px-2 py-1.5 text-xs text-gray-500">{formCurrencyPrefix}</span>
                                 <input type="text" value={sp.amountDisplay || ""}
                                   onChange={(e) => updateSplitAmount(idx, e.target.value)}
                                   placeholder="0" className="flex-1 px-2 py-1.5 text-sm outline-none w-full" />
                               </div>
                               <div className={`text-[10px] mt-0.5 ${exceedsMax ? "text-red-500 font-semibold" : "text-gray-400"}`}>
-                                {exceedsMax ? `Exceeds max! (${currencyPrefix} ${formatNumber(maxForThis)})` : `Max: ${currencyPrefix} ${formatNumber(maxForThis)}`}
+                                {exceedsMax ? `Exceeds max! (${formCurrencyPrefix} ${formatNumber(maxForThis)})` : `Max: ${formCurrencyPrefix} ${formatNumber(maxForThis)}`}
                               </div>
                             </div>
                             <div className="flex-1">
