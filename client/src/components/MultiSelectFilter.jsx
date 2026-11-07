@@ -1,4 +1,6 @@
 /* eslint-disable react/prop-types -- this project does not ship prop-types. */
+import { getMultiSelectDropdownLayerClass } from "../utils/multiSelectDropdownLayer.js";
+
 const summaryLabel = (selectedValues, emptyLabel) => {
   if (selectedValues.length === 0) return emptyLabel;
   return `${selectedValues.length} dipilih`;
@@ -20,6 +22,7 @@ export default function MultiSelectFilter({
   const clearButtonClass = tone === "navy"
     ? "text-[#04214A] hover:bg-slate-50"
     : "text-pink-700 hover:bg-pink-50";
+  const dropdownLayerClass = getMultiSelectDropdownLayerClass(tone);
 
   const toggleOption = (value) => {
     onChange(
@@ -43,7 +46,7 @@ export default function MultiSelectFilter({
         <div
           role="group"
           aria-label={`Pilihan ${label.toLowerCase()}`}
-          className="absolute left-0 z-30 mt-1 max-h-64 min-w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
+          className={`absolute left-0 ${dropdownLayerClass} mt-1 max-h-64 min-w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg`}
         >
           <div className="space-y-1">
             {options.map((option) => (
