@@ -78,11 +78,15 @@ const buildCurrencySummary = (report, rows) => {
     const summary = summaries.get(currency);
     if (row.invoiceId) summary.invoiceIds.add(row.invoiceId);
     if (report.mode === "monthly") {
-      summary.totalProjection += Number(row.projectedAmount || 0);
-      summary.totalRealized += Number(row.realizedAmount || 0);
-      summary.totalAdvanceReceived += Number(row.earlyRealizedAmount || 0);
-      summary.difference += Number(row.difference || 0);
-      if (row.rowType === "unallocated") summary.totalUnallocated += Number(row.realizedAmount || 0);
+      if (row.rowType === "unallocated") {
+        summary.totalUnallocated += Number(row.realizedAmount || 0);
+      } else {
+        summary.totalProjection += Number(row.projectedAmount || 0);
+        summary.totalRealized += Number(row.realizedAmount || 0);
+        summary.totalAdvanceReceived += Number(row.earlyRealizedAmount || 0);
+        summary.difference += Number(row.difference || 0);
+        summary.totalOutstanding += Number(row.remainingAmount ?? row.difference ?? 0);
+      }
     } else {
       summary.totalProjection += Number(row.totalProjection || 0);
       summary.totalOutstanding += Number(row.totalOutstanding || 0);
@@ -231,7 +235,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Reports · Projection (Invoice)</p>
             <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Proyeksi Invoice {title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-200">
-              Pantau nilai invoice yang dijadwalkan dan pembayaran yang benar-benar diterima. Draft tidak ditampilkan secara default; pilih status invoice untuk menyertakannya. Pembayaran tetap mengikuti tanggal realisasi dan alokasi cicilan.
+              Pantau proyeksi dan realisasi per cicilan. Pembayaran yang datang lebih awal tetap dicatat pada cicilan yang ditandai, sementara tanggal bayar menampilkan tanggal transfer sebenarnya. Draft tidak ditampilkan secara default; pilih status invoice untuk menyertakannya.
             </p>
           </div>
           <nav aria-label="Periode laporan" className="flex shrink-0 gap-2 text-sm">
@@ -296,10 +300,10 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             </div>
             {mode === "monthly" ? (
               <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm md:grid-cols-3">
-                <div><dt className="text-slate-500">Proyeksi jatuh tempo</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.totalProjection, summary.currency)}</dd></div>
-                <div><dt className="text-slate-500">Kas masuk periode</dt><dd className="mt-1 font-semibold text-emerald-700">{money(summary.totalRealized, summary.currency)}</dd></div>
-                <div><dt className="text-slate-500">Termasuk pembayaran dipercepat</dt><dd className="mt-1 font-semibold text-sky-800">{money(summary.totalAdvanceReceived, summary.currency)}</dd></div>
-                <div><dt className="text-slate-500">Selisih jadwal − kas masuk</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.difference, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Proyeksi periode</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.totalProjection, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Realisasi periode</dt><dd className="mt-1 font-semibold text-emerald-700">{money(summary.totalRealized, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Dibayar lebih awal (termasuk realisasi)</dt><dd className="mt-1 font-semibold text-sky-800">{money(summary.totalAdvanceReceived, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Selisih / sisa belum dibayar</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.difference, summary.currency)}</dd></div>
                 <div><dt className="text-slate-500">Belum dialokasikan</dt><dd className="mt-1 font-semibold text-violet-700">{money(summary.totalUnallocated, summary.currency)}</dd></div>
               </dl>
             ) : (
@@ -317,9 +321,9 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
-            <h2 className="font-bold text-slate-900">Rincian {mode === "monthly" ? "aktivitas invoice" : "sisa proyeksi per bulan"}</h2>
+            <h2 className="font-bold text-slate-900">Rincian {mode === "monthly" ? "realisasi per cicilan" : "sisa proyeksi per bulan"}</h2>
             <p className="mt-1 text-xs text-slate-500">{loading ? "Memuat data…" : `${filteredRows.length.toLocaleString("id-ID")} baris · ${mode === "yearly" ? "total per bulan mencakup seluruh hasil pencarian · " : ""}mata uang dihitung terpisah`}</p>
-            {mode === "monthly" ? <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">Proyeksi mengikuti tanggal jatuh tempo; kas masuk mengikuti tanggal transfer. Angka pembayaran dipercepat merupakan bagian dari kas masuk. Selisih negatif berarti kas masuk periode ini melebihi proyeksi jadwal dan dapat terjadi karena cicilan dibayar lebih awal.</p> : null}
+            {mode === "monthly" ? <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">Baris mengikuti periode cicilan yang diproyeksikan. Realisasi dicocokkan ke cicilan yang ditandai pada Record Payment, termasuk pembayaran lebih awal; tanggal bayar tetap tanggal transfer sebenarnya. Selisih menunjukkan sisa yang belum dibayar (minimal Rp0). Pembayaran tanpa alokasi ditampilkan terpisah.</p> : null}
           </div>
           <label className="block text-sm text-slate-600 sm:w-80">Cari invoice / siswa
             <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="No. invoice atau nama siswa" className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-100" />
@@ -331,7 +335,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
             {mode === "monthly" ? (
               <>
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr>{["Tgl Jatuh Tempo", "Tanggal Bayar", "Invoice", "Nama Siswa", "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Jatuh Tempo", "Kas Masuk Periode", "Pembayaran Dipercepat", "Selisih Jadwal − Kas", "Status Cicilan", ...(appliedInvoiceStatuses.length ? ["Status Invoice"] : [])].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
+                  <tr>{["Tanggal Proyeksi", "Tanggal Pembayaran", "Invoice", "Nama Siswa", "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Periode", "Realisasi Periode", "Dibayar Lebih Awal", "Selisih / Sisa Belum Dibayar", "Status Cicilan", ...(appliedInvoiceStatuses.length ? ["Status Invoice"] : [])].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {visibleRows.map((row) => <tr key={row.id} className="border-b border-slate-100 align-top hover:bg-slate-50/80">
@@ -403,7 +407,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
           </nav>
         </footer>
       </section>
-      <p className="text-xs leading-5 text-slate-500">Nilai antar mata uang tidak dijumlahkan. {mode === "monthly" ? "Status cicilan mengikuti pembayaran yang tercatat sampai tanggal laporan. Pembayaran sebelum tanggal jatuh tempo diberi penanda hari lebih awal; pembayaran dipercepat tidak ditambahkan dua kali ke kas masuk." : "Proyeksi tahunan menampilkan sisa tagihan per bulan berdasarkan pembayaran yang tercatat sampai tanggal laporan saat ini."}</p>
+      <p className="text-xs leading-5 text-slate-500">Nilai antar mata uang tidak dijumlahkan. {mode === "monthly" ? "Realisasi periode mengikuti alokasi cicilan sampai tanggal laporan; tanggal pembayaran tetap tanggal transfer. Pembayaran lebih awal sudah termasuk dalam realisasi dan tidak dihitung dua kali. Selisih adalah sisa belum dibayar." : "Proyeksi tahunan menampilkan sisa tagihan per bulan berdasarkan pembayaran yang tercatat sampai tanggal laporan saat ini."}</p>
     </main>
   );
 };

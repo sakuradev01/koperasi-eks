@@ -89,7 +89,7 @@ const paidInvoice = {
 
 const invoicesWithPaid = [...invoices, paidInvoice];
 
-test("monthly activity report separates scheduled projections, actual payment dates, and unallocated money by currency", async () => {
+test("monthly projection report assigns early allocations to the scheduled installment period", async () => {
   const buildInvoiceProjectionReport = await loadReportBuilder();
   const report = buildInvoiceProjectionReport(invoices, {
     mode: "monthly",
@@ -107,19 +107,27 @@ test("monthly activity report separates scheduled projections, actual payment da
   assert.equal(batchProjection.projectedAmount, 100);
   assert.equal(batchProjection.realizedAmount, 100);
   assert.equal(batchProjection.status, "Paid");
-  assert.ok(earlyPaymentProjection, "early payment remains visible in its actual payment month");
-  assert.equal(earlyPaymentProjection.projectedAmount, 0);
-  assert.equal(earlyPaymentProjection.realizedAmount, 150);
-  assert.equal(earlyPaymentProjection.status, "Partial");
+  assert.equal(earlyPaymentProjection, undefined, "a February installment is not included in the January projection period");
   assert.equal(unallocatedPayment.realizedAmount, 25);
   assert.equal(report.rows.some((row) => row.invoiceNumber === "DRAFT-1"), false);
   assert.deepEqual(report.summary.byCurrency, [
     { currency: "IDR", totalProjection: 50, totalRealized: 0, totalAdvanceReceived: 0, difference: 50, totalUnallocated: 0 },
-    { currency: "JPY", totalProjection: 100, totalRealized: 275, totalAdvanceReceived: 150, difference: -175, totalUnallocated: 25 },
+    { currency: "JPY", totalProjection: 100, totalRealized: 100, totalAdvanceReceived: 0, difference: 0, totalUnallocated: 25 },
   ]);
+
+  const februaryReport = buildInvoiceProjectionReport(invoices, {
+    mode: "monthly",
+    startDate: "2026-02-01",
+    endDate: "2026-02-28",
+    asOfDate: "2026-02-28T23:59:59.999Z",
+  });
+  const februaryInstallment = februaryReport.rows.find((row) => row.projectionId === "p2");
+  assert.equal(februaryInstallment.realizedAmount, 150);
+  assert.equal(februaryInstallment.difference, 50);
+  assert.deepEqual(februaryInstallment.paymentDates, ["2026-01-15"]);
 });
 
-test("monthly report groups a batched early payment by actual date and exposes each installment allocation", async () => {
+test("monthly report groups a batched early payment under due installments and exposes each allocation", async () => {
   const buildInvoiceProjectionReport = await loadReportBuilder();
   const projections = [
     { _id: "p1", description: "Cicilan 1", estimateDate: "2026-06-12T00:00:00.000Z", amount: 3_053_858 },
@@ -157,26 +165,99 @@ test("monthly report groups a batched early payment by actual date and exposes e
     ],
   }], {
     mode: "monthly",
-    startDate: "2026-08-01",
-    endDate: "2026-08-31",
+    startDate: "2026-09-01",
+    endDate: "2026-12-31",
     asOfDate: "2026-08-31T23:59:59.999Z",
   });
 
-  assert.deepEqual(report.rows.map((row) => row.projectionIndex), [3, 4, 5, 6, 7]);
-  assert.equal(report.summary.byCurrency[0].totalProjection, 3_242_857);
-  assert.equal(report.summary.byCurrency[0].totalRealized, 16_214_285);
+  assert.deepEqual(report.rows.map((row) => row.projectionIndex), [4, 5, 6, 7]);
+  assert.equal(report.summary.byCurrency[0].totalProjection, 12_971_428);
+  assert.equal(report.summary.byCurrency[0].totalRealized, 12_971_428);
   assert.equal(report.summary.byCurrency[0].totalAdvanceReceived, 12_971_428);
   assert.deepEqual(
-    report.rows.slice(1).map((row) => row.periodPaymentDetails[0].daysEarly),
+    report.rows.map((row) => row.periodPaymentDetails[0].daysEarly),
     [19, 49, 80, 110],
   );
-  assert.ok(report.rows.slice(1).every((row) => row.periodPaymentDetails[0].transferAmount === 12_971_428));
-  assert.ok(report.rows.slice(1).every((row) => row.periodPaymentDetails[0].coveredProjectionLabel === "Cicilan 4–7"));
+  assert.ok(report.rows.every((row) => row.periodPaymentDetails[0].transferAmount === 12_971_428));
+  assert.ok(report.rows.every((row) => row.periodPaymentDetails[0].coveredProjectionLabel === "Cicilan 4–7"));
   assert.equal(
-    report.rows.slice(1).reduce((sum, row) => sum + row.realizedAmount, 0),
+    report.rows.reduce((sum, row) => sum + row.realizedAmount, 0),
     12_971_428,
-    "the one transfer must still reconcile to its four allocated installments",
+    "the one transfer must still reconcile to the four projection-period allocations",
   );
+});
+
+test("monthly projection realization follows the covered installment even when paid months early", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport([{
+    _id: "invoice-hamim",
+    invoiceNumber: "DTSTG2506007",
+    customerSnapshot: { name: "HAMIM ILZAMI" },
+    currency: "IDR",
+    status: "paid",
+    total: 3_242_857,
+    totalPaid: 3_242_857,
+    projections: [
+      { _id: "installment-1", description: "Cicilan 1", estimateDate: "2026-06-12T00:00:00.000Z", amount: 3_242_857 },
+      { _id: "installment-2", description: "Cicilan 2", estimateDate: "2026-07-12T00:00:00.000Z", amount: 3_242_857 },
+      { _id: "installment-3", description: "Cicilan 3", estimateDate: "2026-08-12T00:00:00.000Z", amount: 3_242_857 },
+      { _id: "installment-4", description: "Cicilan 4", estimateDate: "2026-09-12T00:00:00.000Z", amount: 3_242_857 },
+      { _id: "installment-5", description: "Cicilan 5", estimateDate: "2026-10-12T00:00:00.000Z", amount: 3_242_857 },
+      { _id: "november-installment", description: "Cicilan 6", estimateDate: "2026-11-12T00:00:00.000Z", amount: 3_242_857 },
+    ],
+    payments: [
+      {
+        _id: "august-payment",
+        paymentDate: "2026-08-24T00:00:00.000Z",
+        amount: 3_242_857,
+        projectionIndex: 6,
+      },
+    ],
+  }], {
+    mode: "monthly",
+    startDate: "2026-11-01",
+    endDate: "2026-11-30",
+    asOfDate: "2026-11-13T00:00:00.000Z",
+  });
+
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].projectionDate, "2026-11-12");
+  assert.deepEqual(report.rows[0].paymentDates, ["2026-08-24"]);
+  assert.equal(report.rows[0].realizedAmount, 3_242_857);
+  assert.equal(report.rows[0].earlyRealizedAmount, 3_242_857);
+  assert.equal(report.rows[0].difference, 0);
+  assert.equal(report.rows[0].status, "Paid");
+  assert.equal(report.summary.byCurrency[0].totalRealized, 3_242_857);
+  assert.equal(report.summary.byCurrency[0].difference, 0);
+});
+
+test("monthly outstanding difference is never negative when an installment is overpaid", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const report = buildInvoiceProjectionReport([{
+    _id: "invoice-overpaid",
+    invoiceNumber: "OVERPAID-1",
+    customerSnapshot: { name: "Overpaid member" },
+    currency: "IDR",
+    status: "paid",
+    total: 100,
+    totalPaid: 120,
+    projections: [
+      { _id: "installment-1", description: "Cicilan 1", estimateDate: "2026-11-12T00:00:00.000Z", amount: 100 },
+    ],
+    payments: [
+      { _id: "payment-1", paymentDate: "2026-08-24T00:00:00.000Z", amount: 120, projectionIndex: 1 },
+    ],
+  }], {
+    mode: "monthly",
+    startDate: "2026-11-01",
+    endDate: "2026-11-30",
+    asOfDate: "2026-11-13T00:00:00.000Z",
+  });
+
+  assert.equal(report.rows[0].realizedAmount, 120);
+  assert.equal(report.rows[0].difference, 0);
+  assert.equal(report.rows[0].remainingAmount, 0);
+  assert.equal(report.summary.byCurrency[0].difference, 0);
 });
 
 test("monthly report safely normalizes Mongo ObjectIds without recursive _id traversal", async () => {

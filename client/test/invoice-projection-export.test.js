@@ -60,7 +60,7 @@ const yearlyReport = {
 
 const earlyBatchMonthlyReport = {
   mode: "monthly",
-  filters: { startDate: "2026-08-01", endDate: "2026-08-31" },
+  filters: { startDate: "2026-09-01", endDate: "2026-12-31" },
   rows: [4, 5, 6, 7].map((projectionIndex) => ({
     rowType: "projection",
     projectionDate: `2026-${String(projectionIndex + 5).padStart(2, "0")}-12`,
@@ -79,19 +79,19 @@ const earlyBatchMonthlyReport = {
     description: `Cicilan ${projectionIndex}`,
     currency: "IDR",
     status: "Paid",
-    projectedAmount: 0,
+    projectedAmount: 3_242_857,
     realizedAmount: 3_242_857,
     earlyRealizedAmount: 3_242_857,
-    difference: -3_242_857,
+    difference: 0,
   })),
   summary: {
     byCurrency: [
       {
         currency: "IDR",
-        totalProjection: 0,
+        totalProjection: 12_971_428,
         totalRealized: 12_971_428,
         totalAdvanceReceived: 12_971_428,
-        difference: -12_971_428,
+        difference: 0,
         totalUnallocated: 0,
       },
     ],
@@ -113,14 +113,19 @@ test("exports a valid XLSX workbook with numeric amounts and formula-like text k
   assert.doesNotMatch(sheet, /<f>/);
 });
 
-test("monthly XLSX keeps an early batch visibly grouped and separates its accelerated-payment total", async () => {
+test("monthly XLSX assigns an early batch to covered periods and shows the actual transfer date", async () => {
   const { buildInvoiceProjectionXlsx } = await loadExport();
   const files = unzipSync(buildInvoiceProjectionXlsx(earlyBatchMonthlyReport));
   const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
 
-  assert.ok(sheet.includes("Pembayaran Dipercepat"));
+  assert.ok(sheet.includes("Realisasi Periode"));
+  assert.ok(sheet.includes("Selisih / Sisa Belum Dibayar"));
+  assert.ok(sheet.includes("24 Agu 2026"));
   assert.ok(sheet.includes("Batch Cicilan 4–7"));
   assert.ok(sheet.includes("19 hari lebih awal"));
+  assert.match(sheet, /<c r="H4" s="2" t="n"><v>3242857<\/v><\/c>/);
+  assert.match(sheet, /<c r="I4" s="2" t="n"><v>3242857<\/v><\/c>/);
+  assert.match(sheet, /<c r="K4" s="2" t="n"><v>0<\/v><\/c>/);
   assert.match(sheet, /<c r="J8" s="2" t="n"><v>12971428<\/v><\/c>/);
   assert.match(sheet, /<autoFilter ref="A3:L8"\/>/);
 });
@@ -146,13 +151,25 @@ test("creates a readable multi-page PDF for yearly projection rows", async () =>
   assert.equal(pdf.internal.getNumberOfPages(), 2);
 });
 
-test("monthly PDF explains accelerated installments and the meaning of negative variance", async () => {
+test("monthly PDF explains that early payments count toward their covered installment", async () => {
   const { buildInvoiceProjectionPdf } = await loadExport();
-  const pdf = buildInvoiceProjectionPdf(earlyBatchMonthlyReport);
+  const report = {
+    ...earlyBatchMonthlyReport,
+    summary: {
+      byCurrency: earlyBatchMonthlyReport.summary.byCurrency.map((item) => ({
+        ...item,
+        totalUnallocated: 250,
+      })),
+    },
+  };
+  const pdf = buildInvoiceProjectionPdf(report);
   const content = pdf.internal.pages.flat().join("");
   const paymentInfo = pdf.lastAutoTable.body[0].cells[3].text.join(" ");
 
   assert.ok(paymentInfo.includes("Batch Cicilan 4"));
   assert.ok(paymentInfo.includes("19 hari lebih awal"));
-  assert.ok(content.includes("Selisih = proyeksi jatuh tempo - kas masuk periode"));
+  assert.ok(content.includes("Selisih adalah sisa belum dibayar"));
+  assert.ok(content.includes("tanggal pembayaran tetap tanggal transfer sebenarnya"));
+  assert.ok(content.includes("belum dialokasikan"));
+  assert.ok(content.includes("IDR 250"));
 });

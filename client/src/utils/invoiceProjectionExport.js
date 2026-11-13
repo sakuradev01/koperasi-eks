@@ -89,12 +89,12 @@ const sheetFromRows = (rows, {
 
 const monthlyXlsx = (report) => {
   const headers = [
-    "Tanggal Jatuh Tempo", "Tanggal Bayar", "Nomor Invoice", "Nama Siswa",
-    "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Jatuh Tempo",
-    "Kas Masuk Periode", "Pembayaran Dipercepat", "Selisih Jadwal - Kas", "Status Cicilan",
+    "Tanggal Proyeksi", "Tanggal Pembayaran", "Nomor Invoice", "Nama Siswa",
+    "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Periode",
+    "Realisasi Periode", "Dibayar Lebih Awal (bagian realisasi)", "Selisih / Sisa Belum Dibayar", "Status Cicilan",
   ];
   const rows = [{ values: ["PAYMENT PROJECTION INVOICE - PER BULAN"], style: 1 }];
-  rows.push({ values: [`Periode ${report.filters.startDate} s.d. ${report.filters.endDate} · Status cicilan per tanggal laporan · Selisih = proyeksi jatuh tempo - kas masuk periode; nilai negatif dapat berarti cicilan masa depan dibayar lebih awal.`] });
+  rows.push({ values: [`Periode proyeksi ${report.filters.startDate} s.d. ${report.filters.endDate} · Realisasi mengikuti cicilan yang ditandai pada Record Payment, termasuk pembayaran lebih awal; tanggal pembayaran adalah tanggal transfer sebenarnya. Selisih = sisa yang belum dibayar (minimal Rp0). Pembayaran dipercepat adalah bagian dari realisasi.`] });
   rows.push({ values: headers, style: 1 });
   report.rows.forEach((row) => rows.push({
     values: [
@@ -115,9 +115,9 @@ const monthlyXlsx = (report) => {
   }));
   report.summary.byCurrency.forEach((total) => rows.push({
     values: ["", "", "", `Ringkasan ${total.currency}`, "Total periode",
-      "Pembayaran dipercepat adalah bagian dari kas masuk", total.currency,
+      "Pembayaran dipercepat termasuk dalam realisasi; tidak dihitung dua kali", total.currency,
       total.totalProjection, total.totalRealized, total.totalAdvanceReceived || 0,
-      total.difference, `Belum dialokasikan: ${total.totalUnallocated}`],
+      total.difference, `Pembayaran belum dialokasikan: ${total.totalUnallocated}`],
     style: 2,
     numericColumns: [8, 9, 10, 11],
   }));
@@ -190,14 +190,14 @@ export function buildInvoiceProjectionPdf(report) {
     pdf.setFontSize(9);
     pdf.text(`Periode: ${report.filters.startDate} s.d. ${report.filters.endDate}`, 36, 52);
     const summaryText = report.summary.byCurrency
-      .map((item) => `${item.currency}: proyeksi ${formatAmount(item.totalProjection, item.currency)}, kas masuk ${formatAmount(item.totalRealized, item.currency)}, termasuk dipercepat ${formatAmount(item.totalAdvanceReceived || 0, item.currency)}, selisih jadwal-kas ${formatAmount(item.difference, item.currency)}`)
+      .map((item) => `${item.currency}: proyeksi periode ${formatAmount(item.totalProjection, item.currency)}, realisasi periode ${formatAmount(item.totalRealized, item.currency)}, dibayar lebih awal (bagian realisasi) ${formatAmount(item.totalAdvanceReceived || 0, item.currency)}, sisa belum dibayar ${formatAmount(item.difference, item.currency)}, belum dialokasikan ${formatAmount(item.totalUnallocated || 0, item.currency)}`)
       .join(" | ");
     if (summaryText) pdf.text(summaryText, 36, 66, { maxWidth: 1118 });
     pdf.setFontSize(8);
-    pdf.text("Status cicilan mengikuti pembayaran yang tercatat sampai tanggal laporan. Selisih = proyeksi jatuh tempo - kas masuk periode; nilai negatif dapat terjadi saat cicilan masa depan dibayar lebih awal. Pembayaran dipercepat adalah bagian dari kas masuk, bukan tambahan.", 36, 82, { maxWidth: 1118 });
+    pdf.text("Baris mengikuti periode proyeksi. Realisasi dicocokkan ke cicilan yang ditandai pada Record Payment; tanggal pembayaran tetap tanggal transfer sebenarnya, meski dibayar lebih awal. Selisih adalah sisa belum dibayar (minimal Rp0). Pembayaran dipercepat merupakan bagian dari realisasi, bukan tambahan.", 36, 82, { maxWidth: 1118 });
     autoTable(pdf, {
       startY: 96,
-      head: [["Jatuh Tempo", "Invoice / Nama Siswa", "Cicilan", "Tanggal Bayar & Penanda", "Proyeksi Jatuh Tempo", "Kas Masuk Periode", "Dipercepat", "Selisih Jadwal - Kas", "Status Cicilan"]],
+      head: [["Tanggal Proyeksi", "Invoice / Nama Siswa", "Cicilan", "Tanggal Bayar & Penanda", "Proyeksi Periode", "Realisasi Periode", "Dibayar Lebih Awal", "Sisa Belum Dibayar", "Status Cicilan"]],
       body: report.rows.map((row) => [
         row.projectionDate || "-",
         `${row.invoiceNumber}\n${row.customerName}`,

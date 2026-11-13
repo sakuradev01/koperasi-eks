@@ -249,19 +249,15 @@ function buildMonthlyReport(invoices, filters) {
         const projectedAmount = isInRange(projectionDate, startDate, endDate)
           ? money(projection.amount)
           : 0;
-        const relevantPayments = (allocation?.contributions || []).filter((item) =>
-          isInRange(item.paymentDate, startDate, endDate),
+        if (projectedAmount <= EPSILON) return;
+
+        // This is a projection-period report: a payment belongs to the installment
+        // it covers, even when the transfer arrived before that installment's due date.
+        const recognizedPayments = (allocation?.contributions || []).filter((item) =>
+          isBeforeCutoff(item.paymentDate, asOfDate),
         );
         const periodPaymentDetails = buildPaymentDetails(
-          relevantPayments,
-          paymentsById,
-          projections,
-          projection.estimateDate,
-        ).sort((left, right) => left.paymentDate.localeCompare(right.paymentDate));
-        const priorPaymentDetails = buildPaymentDetails(
-          (allocation?.contributions || []).filter((item) =>
-            dateKey(item.paymentDate) < startDate && isBeforeCutoff(item.paymentDate, asOfDate),
-          ),
+          recognizedPayments,
           paymentsById,
           projections,
           projection.estimateDate,
@@ -269,16 +265,11 @@ function buildMonthlyReport(invoices, filters) {
         const realizedAmount = money(
           periodPaymentDetails.reduce((sum, item) => sum + item.allocatedAmount, 0),
         );
-        if (projectedAmount <= EPSILON && realizedAmount <= EPSILON) return;
 
-        const paidToDate = money(
-          (allocation?.contributions || [])
-            .filter((item) => isBeforeCutoff(item.paymentDate, asOfDate))
-            .reduce((sum, item) => sum + item.amount, 0),
-        );
+        const paidToDate = realizedAmount;
         const status = projectionStatus(projection, paidToDate, asOfDate);
         if (statusFilter !== "all" && status.toLowerCase() !== statusFilter) return;
-        const difference = money(projectedAmount - realizedAmount);
+        const difference = money(Math.max(projectedAmount - realizedAmount, 0));
         const earlyRealizedAmount = money(
           periodPaymentDetails
             .filter((payment) => payment.daysEarly > 0)
@@ -299,7 +290,7 @@ function buildMonthlyReport(invoices, filters) {
         );
         totalsForCurrency.totalOutstanding = money(
           totalsForCurrency.totalOutstanding +
-            (projectedAmount > 0 ? Math.max(money(projection.amount) - paidToDate, 0) : 0),
+            difference,
         );
 
         rows.push({
@@ -315,7 +306,7 @@ function buildMonthlyReport(invoices, filters) {
           projectionDate,
           paymentDates: [...new Set(periodPaymentDetails.map((item) => item.paymentDate).filter(Boolean))],
           periodPaymentDetails,
-          priorPaymentDetails,
+          priorPaymentDetails: [],
           description: projection.description || `Cicilan ${index + 1}`,
           status,
           projectedAmount,
@@ -329,14 +320,8 @@ function buildMonthlyReport(invoices, filters) {
       unallocatedPayments.forEach((payment) => {
         if (statusFilter !== "all" && statusFilter !== "unallocated") return;
         const paymentDate = dateKey(payment.paymentDate);
-        if (!isInRange(paymentDate, startDate, endDate)) return;
+        if (!isInRange(paymentDate, startDate, endDate) || !isBeforeCutoff(paymentDate, asOfDate)) return;
         const totalsForCurrency = addCurrencyTotals(totals, currency);
-        totalsForCurrency.totalRealized = money(
-          totalsForCurrency.totalRealized + payment.amount,
-        );
-        totalsForCurrency.difference = money(
-          totalsForCurrency.difference - payment.amount,
-        );
         totalsForCurrency.totalUnallocated = money(
           totalsForCurrency.totalUnallocated + payment.amount,
         );
@@ -363,8 +348,8 @@ function buildMonthlyReport(invoices, filters) {
     });
 
   rows.sort((left, right) =>
-    (left.paymentDates?.[0] || left.projectionDate || "").localeCompare(
-      right.paymentDates?.[0] || right.projectionDate || "",
+    (left.projectionDate || left.paymentDates?.[0] || "").localeCompare(
+      right.projectionDate || right.paymentDates?.[0] || "",
     ) || left.invoiceNumber.localeCompare(right.invoiceNumber) ||
     Number(left.projectionIndex || 0) - Number(right.projectionIndex || 0),
   );
