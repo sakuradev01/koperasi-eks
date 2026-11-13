@@ -7,6 +7,10 @@ import {
   createInvoiceProjectionFilename,
 } from "../utils/invoiceProjectionExport.js";
 import { buildYearlyInvoiceMonthlyTotals } from "../utils/invoiceProjectionTotals.js";
+import {
+  formatInvoiceProjectionPaymentContext,
+  formatInvoiceProjectionPaymentDates,
+} from "../utils/invoiceProjectionPaymentDisplay.js";
 import MultiSelectFilter from "../components/MultiSelectFilter.jsx";
 import { parseMultiSelectQueryValues, withMultiSelectQueryParam } from "../utils/multiSelectQueryParams.js";
 
@@ -64,6 +68,7 @@ const buildCurrencySummary = (report, rows) => {
         currency,
         totalProjection: 0,
         totalRealized: 0,
+        totalAdvanceReceived: 0,
         difference: 0,
         totalOutstanding: 0,
         totalUnallocated: 0,
@@ -75,6 +80,7 @@ const buildCurrencySummary = (report, rows) => {
     if (report.mode === "monthly") {
       summary.totalProjection += Number(row.projectedAmount || 0);
       summary.totalRealized += Number(row.realizedAmount || 0);
+      summary.totalAdvanceReceived += Number(row.earlyRealizedAmount || 0);
       summary.difference += Number(row.difference || 0);
       if (row.rowType === "unallocated") summary.totalUnallocated += Number(row.realizedAmount || 0);
     } else {
@@ -289,10 +295,11 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
               <span className="text-xs text-slate-500">Mata uang terpisah</span>
             </div>
             {mode === "monthly" ? (
-              <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
-                <div><dt className="text-slate-500">Proyeksi</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.totalProjection, summary.currency)}</dd></div>
-                <div><dt className="text-slate-500">Realisasi</dt><dd className="mt-1 font-semibold text-emerald-700">{money(summary.totalRealized, summary.currency)}</dd></div>
-                <div><dt className="text-slate-500">Selisih</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.difference, summary.currency)}</dd></div>
+              <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm md:grid-cols-3">
+                <div><dt className="text-slate-500">Proyeksi jatuh tempo</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.totalProjection, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Kas masuk periode</dt><dd className="mt-1 font-semibold text-emerald-700">{money(summary.totalRealized, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Termasuk pembayaran dipercepat</dt><dd className="mt-1 font-semibold text-sky-800">{money(summary.totalAdvanceReceived, summary.currency)}</dd></div>
+                <div><dt className="text-slate-500">Selisih jadwal − kas masuk</dt><dd className="mt-1 font-semibold text-slate-900">{money(summary.difference, summary.currency)}</dd></div>
                 <div><dt className="text-slate-500">Belum dialokasikan</dt><dd className="mt-1 font-semibold text-violet-700">{money(summary.totalUnallocated, summary.currency)}</dd></div>
               </dl>
             ) : (
@@ -312,6 +319,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
           <div>
             <h2 className="font-bold text-slate-900">Rincian {mode === "monthly" ? "aktivitas invoice" : "sisa proyeksi per bulan"}</h2>
             <p className="mt-1 text-xs text-slate-500">{loading ? "Memuat data…" : `${filteredRows.length.toLocaleString("id-ID")} baris · ${mode === "yearly" ? "total per bulan mencakup seluruh hasil pencarian · " : ""}mata uang dihitung terpisah`}</p>
+            {mode === "monthly" ? <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">Proyeksi mengikuti tanggal jatuh tempo; kas masuk mengikuti tanggal transfer. Angka pembayaran dipercepat merupakan bagian dari kas masuk. Selisih negatif berarti kas masuk periode ini melebihi proyeksi jadwal dan dapat terjadi karena cicilan dibayar lebih awal.</p> : null}
           </div>
           <label className="block text-sm text-slate-600 sm:w-80">Cari invoice / siswa
             <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="No. invoice atau nama siswa" className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-100" />
@@ -319,22 +327,24 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
         </div>
         <div className={`relative min-h-56 overflow-auto ${mode === "yearly" ? "max-h-[70vh]" : ""}`}>
           {loading ? <div className="absolute inset-0 z-20 grid place-items-center bg-white/80 text-sm font-medium text-slate-600" role="status">Memuat proyeksi invoice…</div> : null}
-          <table className={`min-w-full border-collapse text-left text-sm ${mode === "yearly" ? "min-w-max" : "min-w-[1120px]"}`}>
+          <table className={`min-w-full border-collapse text-left text-sm ${mode === "yearly" ? "min-w-max" : "min-w-[1480px]"}`}>
             {mode === "monthly" ? (
               <>
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr>{["Tgl Proyeksi", "Tanggal Bayar", "Invoice", "Nama Siswa", "Keterangan", "Mata Uang", "Proyeksi", "Realisasi", "Selisih", "Status", ...(appliedInvoiceStatuses.length ? ["Status Invoice"] : [])].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
+                  <tr>{["Tgl Jatuh Tempo", "Tanggal Bayar", "Invoice", "Nama Siswa", "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Jatuh Tempo", "Kas Masuk Periode", "Pembayaran Dipercepat", "Selisih Jadwal − Kas", "Status Cicilan", ...(appliedInvoiceStatuses.length ? ["Status Invoice"] : [])].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-semibold">{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {visibleRows.map((row) => <tr key={row.id} className="border-b border-slate-100 align-top hover:bg-slate-50/80">
                     <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.projectionDate || "—"}</td>
-                    <td className="min-w-32 px-4 py-3 text-slate-600">{row.paymentDates?.join(", ") || "—"}</td>
+                    <td className="min-w-36 px-4 py-3 text-slate-600">{formatInvoiceProjectionPaymentDates(row)}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-semibold"><Link className="text-sky-800 hover:underline" to={`/invoice/${encodeURIComponent(row.invoiceNumber)}`}>{row.invoiceNumber}</Link></td>
                     <td className="min-w-40 px-4 py-3 text-slate-800">{row.customerName}</td>
-                    <td className="min-w-52 max-w-sm px-4 py-3 text-slate-600">{row.description}</td>
+                    <td className="min-w-36 px-4 py-3 text-slate-600">{row.description}</td>
+                    <td className="min-w-64 max-w-md px-4 py-3 text-xs leading-5 text-slate-600">{formatInvoiceProjectionPaymentContext(row)}</td>
                     <td className="px-4 py-3 text-slate-600">{row.currency}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(row.projectedAmount, row.currency)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-emerald-700 tabular-nums">{money(row.realizedAmount, row.currency)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-sky-800 tabular-nums">{money(row.earlyRealizedAmount, row.currency)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700 tabular-nums">{row.difference === null ? "—" : money(row.difference, row.currency)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyle(row.status)}`}>{row.status}</span></td>
                     {appliedInvoiceStatuses.length ? <td className="px-4 py-3"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyle(row.invoiceStatus)}`}>{invoiceStatusLabels[row.invoiceStatus] || row.invoiceStatus}</span></td> : null}
@@ -393,7 +403,7 @@ const InvoiceProjectionReport = ({ mode = "monthly" }) => {
           </nav>
         </footer>
       </section>
-      <p className="text-xs leading-5 text-slate-500">Nilai antar mata uang tidak dijumlahkan. Proyeksi tahunan menampilkan sisa tagihan per bulan berdasarkan pembayaran yang tercatat sampai tanggal laporan saat ini.</p>
+      <p className="text-xs leading-5 text-slate-500">Nilai antar mata uang tidak dijumlahkan. {mode === "monthly" ? "Status cicilan mengikuti pembayaran yang tercatat sampai tanggal laporan. Pembayaran sebelum tanggal jatuh tempo diberi penanda hari lebih awal; pembayaran dipercepat tidak ditambahkan dua kali ke kas masuk." : "Proyeksi tahunan menampilkan sisa tagihan per bulan berdasarkan pembayaran yang tercatat sampai tanggal laporan saat ini."}</p>
     </main>
   );
 };

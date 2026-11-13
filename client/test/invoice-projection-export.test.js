@@ -58,6 +58,46 @@ const yearlyReport = {
   },
 };
 
+const earlyBatchMonthlyReport = {
+  mode: "monthly",
+  filters: { startDate: "2026-08-01", endDate: "2026-08-31" },
+  rows: [4, 5, 6, 7].map((projectionIndex) => ({
+    rowType: "projection",
+    projectionDate: `2026-${String(projectionIndex + 5).padStart(2, "0")}-12`,
+    paymentDates: ["2026-08-24"],
+    periodPaymentDetails: [{
+      paymentDate: "2026-08-24",
+      allocatedAmount: 3_242_857,
+      transferAmount: 12_971_428,
+      coveredProjectionIndexes: [4, 5, 6, 7],
+      coveredProjectionLabel: "Cicilan 4–7",
+      daysEarly: [19, 49, 80, 110][projectionIndex - 4],
+    }],
+    priorPaymentDetails: [],
+    invoiceNumber: "DTSTG2506007",
+    customerName: "HAMIM ILZAMI",
+    description: `Cicilan ${projectionIndex}`,
+    currency: "IDR",
+    status: "Paid",
+    projectedAmount: 0,
+    realizedAmount: 3_242_857,
+    earlyRealizedAmount: 3_242_857,
+    difference: -3_242_857,
+  })),
+  summary: {
+    byCurrency: [
+      {
+        currency: "IDR",
+        totalProjection: 0,
+        totalRealized: 12_971_428,
+        totalAdvanceReceived: 12_971_428,
+        difference: -12_971_428,
+        totalUnallocated: 0,
+      },
+    ],
+  },
+};
+
 test("exports a valid XLSX workbook with numeric amounts and formula-like text kept inert", async () => {
   const { buildInvoiceProjectionXlsx } = await loadExport();
   const workbook = buildInvoiceProjectionXlsx(monthlyReport);
@@ -66,11 +106,23 @@ test("exports a valid XLSX workbook with numeric amounts and formula-like text k
   const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
 
   assert.match(contentTypes, /spreadsheetml\.sheet\.main\+xml/);
-  assert.match(sheet, /<c r="G[0-9]+"[^>]*><v>100<\/v><\/c>/);
+  assert.match(sheet, /<c r="H[0-9]+"[^>]*><v>100<\/v><\/c>/);
   assert.match(sheet, /<c r="C4"[^>]*t="inlineStr"/);
   assert.ok(sheet.includes("=HYPERLINK"));
-  assert.match(sheet, /<autoFilter ref="A3:J5"\/>/);
+  assert.match(sheet, /<autoFilter ref="A3:L5"\/>/);
   assert.doesNotMatch(sheet, /<f>/);
+});
+
+test("monthly XLSX keeps an early batch visibly grouped and separates its accelerated-payment total", async () => {
+  const { buildInvoiceProjectionXlsx } = await loadExport();
+  const files = unzipSync(buildInvoiceProjectionXlsx(earlyBatchMonthlyReport));
+  const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
+
+  assert.ok(sheet.includes("Pembayaran Dipercepat"));
+  assert.ok(sheet.includes("Batch Cicilan 4–7"));
+  assert.ok(sheet.includes("19 hari lebih awal"));
+  assert.match(sheet, /<c r="J8" s="2" t="n"><v>12971428<\/v><\/c>/);
+  assert.match(sheet, /<autoFilter ref="A3:L8"\/>/);
 });
 
 test("exports yearly invoice projections with the selected year columns", async () => {
@@ -92,4 +144,15 @@ test("creates a readable multi-page PDF for yearly projection rows", async () =>
   assert.equal(bytes.toString("latin1", 0, 8), "%PDF-1.3");
   assert.ok(bytes.toString("latin1").includes("PDD2610002"));
   assert.equal(pdf.internal.getNumberOfPages(), 2);
+});
+
+test("monthly PDF explains accelerated installments and the meaning of negative variance", async () => {
+  const { buildInvoiceProjectionPdf } = await loadExport();
+  const pdf = buildInvoiceProjectionPdf(earlyBatchMonthlyReport);
+  const content = pdf.internal.pages.flat().join("");
+  const paymentInfo = pdf.lastAutoTable.body[0].cells[3].text.join(" ");
+
+  assert.ok(paymentInfo.includes("Batch Cicilan 4"));
+  assert.ok(paymentInfo.includes("19 hari lebih awal"));
+  assert.ok(content.includes("Selisih = proyeksi jatuh tempo - kas masuk periode"));
 });

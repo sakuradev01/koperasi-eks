@@ -113,9 +113,69 @@ test("monthly activity report separates scheduled projections, actual payment da
   assert.equal(unallocatedPayment.realizedAmount, 25);
   assert.equal(report.rows.some((row) => row.invoiceNumber === "DRAFT-1"), false);
   assert.deepEqual(report.summary.byCurrency, [
-    { currency: "IDR", totalProjection: 50, totalRealized: 0, difference: 50, totalUnallocated: 0 },
-    { currency: "JPY", totalProjection: 100, totalRealized: 275, difference: -175, totalUnallocated: 25 },
+    { currency: "IDR", totalProjection: 50, totalRealized: 0, totalAdvanceReceived: 0, difference: 50, totalUnallocated: 0 },
+    { currency: "JPY", totalProjection: 100, totalRealized: 275, totalAdvanceReceived: 150, difference: -175, totalUnallocated: 25 },
   ]);
+});
+
+test("monthly report groups a batched early payment by actual date and exposes each installment allocation", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const projections = [
+    { _id: "p1", description: "Cicilan 1", estimateDate: "2026-06-12T00:00:00.000Z", amount: 3_053_858 },
+    { _id: "p2", description: "Cicilan 2", estimateDate: "2026-07-12T00:00:00.000Z", amount: 3_242_857 },
+    { _id: "p3", description: "Cicilan 3", estimateDate: "2026-08-12T00:00:00.000Z", amount: 3_242_857 },
+    { _id: "p4", description: "Cicilan 4", estimateDate: "2026-09-12T00:00:00.000Z", amount: 3_242_857 },
+    { _id: "p5", description: "Cicilan 5", estimateDate: "2026-10-12T00:00:00.000Z", amount: 3_242_857 },
+    { _id: "p6", description: "Cicilan 6", estimateDate: "2026-11-12T00:00:00.000Z", amount: 3_242_857 },
+    { _id: "p7", description: "Cicilan 7", estimateDate: "2026-12-12T00:00:00.000Z", amount: 3_242_857 },
+  ];
+  const report = buildInvoiceProjectionReport([{
+    _id: "invoice-batch",
+    invoiceNumber: "DTSTG2506007",
+    customerSnapshot: { name: "HAMIM ILZAMI" },
+    currency: "IDR",
+    status: "paid",
+    total: 22_511_000,
+    totalPaid: 22_511_000,
+    projections,
+    payments: [
+      { _id: "pay-1", paymentDate: "2026-06-12T00:00:00.000Z", amount: 3_053_858, projectionIndex: 1 },
+      { _id: "pay-2", paymentDate: "2026-07-12T00:00:00.000Z", amount: 3_242_857, projectionIndex: 2 },
+      { _id: "pay-3", paymentDate: "2026-08-12T00:00:00.000Z", amount: 3_242_857, projectionIndex: 3 },
+      {
+        _id: "pay-batch",
+        paymentDate: "2026-08-24T00:00:00.000Z",
+        amount: 12_971_428,
+        coveredProjectionIds: ["p4", "p5", "p6", "p7"],
+        coveredProjectionBreakdown: projections.slice(3).map((projection, index) => ({
+        projectionId: projection._id,
+        projectionIndex: index + 4,
+        amount: 3_242_857,
+      })),
+      },
+    ],
+  }], {
+    mode: "monthly",
+    startDate: "2026-08-01",
+    endDate: "2026-08-31",
+    asOfDate: "2026-08-31T23:59:59.999Z",
+  });
+
+  assert.deepEqual(report.rows.map((row) => row.projectionIndex), [3, 4, 5, 6, 7]);
+  assert.equal(report.summary.byCurrency[0].totalProjection, 3_242_857);
+  assert.equal(report.summary.byCurrency[0].totalRealized, 16_214_285);
+  assert.equal(report.summary.byCurrency[0].totalAdvanceReceived, 12_971_428);
+  assert.deepEqual(
+    report.rows.slice(1).map((row) => row.periodPaymentDetails[0].daysEarly),
+    [19, 49, 80, 110],
+  );
+  assert.ok(report.rows.slice(1).every((row) => row.periodPaymentDetails[0].transferAmount === 12_971_428));
+  assert.ok(report.rows.slice(1).every((row) => row.periodPaymentDetails[0].coveredProjectionLabel === "Cicilan 4–7"));
+  assert.equal(
+    report.rows.slice(1).reduce((sum, row) => sum + row.realizedAmount, 0),
+    12_971_428,
+    "the one transfer must still reconcile to its four allocated installments",
+  );
 });
 
 test("year matrix shows scheduled outstanding balance after cutoff and never nets different currencies", async () => {
@@ -168,7 +228,7 @@ test("monthly status filter narrows rows and summary to the selected status", as
   assert.ok(report.rows.every((row) => row.status === "Paid"));
   assert.equal(report.rows.some((row) => row.rowType === "unallocated"), false);
   assert.deepEqual(report.summary.byCurrency, [
-    { currency: "JPY", totalProjection: 100, totalRealized: 100, difference: 0, totalUnallocated: 0 },
+    { currency: "JPY", totalProjection: 100, totalRealized: 100, totalAdvanceReceived: 0, difference: 0, totalUnallocated: 0 },
   ]);
 });
 

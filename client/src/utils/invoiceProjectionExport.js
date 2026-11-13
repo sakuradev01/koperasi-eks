@@ -1,6 +1,10 @@
 import { strToU8, zipSync } from "fflate";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import {
+  formatInvoiceProjectionPaymentContext,
+  formatInvoiceProjectionPaymentDates,
+} from "./invoiceProjectionPaymentDisplay.js";
 
 const money = (value) => {
   const amount = Number(value);
@@ -85,37 +89,42 @@ const sheetFromRows = (rows, {
 
 const monthlyXlsx = (report) => {
   const headers = [
-    "Tanggal Proyeksi", "Tanggal Pembayaran", "Nomor Invoice", "Nama Siswa",
-    "Keterangan", "Mata Uang", "Proyeksi", "Realisasi Periode", "Selisih", "Status",
+    "Tanggal Jatuh Tempo", "Tanggal Bayar", "Nomor Invoice", "Nama Siswa",
+    "Cicilan", "Penanda Pembayaran", "Mata Uang", "Proyeksi Jatuh Tempo",
+    "Kas Masuk Periode", "Pembayaran Dipercepat", "Selisih Jadwal - Kas", "Status Cicilan",
   ];
   const rows = [{ values: ["PAYMENT PROJECTION INVOICE - PER BULAN"], style: 1 }];
-  rows.push({ values: [`Periode ${report.filters.startDate} s.d. ${report.filters.endDate}`] });
+  rows.push({ values: [`Periode ${report.filters.startDate} s.d. ${report.filters.endDate} · Status cicilan per tanggal laporan · Selisih = proyeksi jatuh tempo - kas masuk periode; nilai negatif dapat berarti cicilan masa depan dibayar lebih awal.`] });
   rows.push({ values: headers, style: 1 });
   report.rows.forEach((row) => rows.push({
     values: [
       row.projectionDate || "-",
-      (row.paymentDates || []).join(", ") || "-",
+      formatInvoiceProjectionPaymentDates(row),
       row.invoiceNumber,
       row.customerName,
       row.description,
-      row.currency,
+      formatInvoiceProjectionPaymentContext(row),
+      row.currency || "IDR",
       row.projectedAmount,
       row.realizedAmount,
+      row.earlyRealizedAmount || 0,
       row.difference,
       row.status,
     ],
-    numericColumns: [7, 8, 9],
+    numericColumns: [8, 9, 10, 11],
   }));
   report.summary.byCurrency.forEach((total) => rows.push({
-    values: ["", "", "", `Ringkasan ${total.currency}`, "Total periode", total.currency,
-      total.totalProjection, total.totalRealized, total.difference, `Belum dialokasikan: ${total.totalUnallocated}`],
+    values: ["", "", "", `Ringkasan ${total.currency}`, "Total periode",
+      "Pembayaran dipercepat adalah bagian dari kas masuk", total.currency,
+      total.totalProjection, total.totalRealized, total.totalAdvanceReceived || 0,
+      total.difference, `Belum dialokasikan: ${total.totalUnallocated}`],
     style: 2,
-    numericColumns: [7, 8, 9],
+    numericColumns: [8, 9, 10, 11],
   }));
   return sheetFromRows(rows, {
-    autoFilterColumn: "J",
+    autoFilterColumn: "L",
     autoFilterStartRow: 3,
-    widths: [17, 24, 22, 30, 44, 12, 18, 20, 18, 18],
+    widths: [19, 24, 22, 30, 16, 64, 12, 20, 20, 20, 22, 20],
   });
 };
 
@@ -172,7 +181,7 @@ export function buildInvoiceProjectionPdf(report) {
   const pdf = new jsPDF({
     orientation: "landscape",
     unit: "pt",
-    format: isYearly ? "a3" : "a4",
+    format: "a3",
   });
 
   if (!isYearly) {
@@ -181,27 +190,39 @@ export function buildInvoiceProjectionPdf(report) {
     pdf.setFontSize(9);
     pdf.text(`Periode: ${report.filters.startDate} s.d. ${report.filters.endDate}`, 36, 52);
     const summaryText = report.summary.byCurrency
-      .map((item) => `${item.currency}: proyeksi ${formatAmount(item.totalProjection, item.currency)}, realisasi ${formatAmount(item.totalRealized, item.currency)}`)
+      .map((item) => `${item.currency}: proyeksi ${formatAmount(item.totalProjection, item.currency)}, kas masuk ${formatAmount(item.totalRealized, item.currency)}, termasuk dipercepat ${formatAmount(item.totalAdvanceReceived || 0, item.currency)}, selisih jadwal-kas ${formatAmount(item.difference, item.currency)}`)
       .join(" | ");
-    if (summaryText) pdf.text(summaryText, 36, 66, { maxWidth: 760 });
+    if (summaryText) pdf.text(summaryText, 36, 66, { maxWidth: 1118 });
+    pdf.setFontSize(8);
+    pdf.text("Status cicilan mengikuti pembayaran yang tercatat sampai tanggal laporan. Selisih = proyeksi jatuh tempo - kas masuk periode; nilai negatif dapat terjadi saat cicilan masa depan dibayar lebih awal. Pembayaran dipercepat adalah bagian dari kas masuk, bukan tambahan.", 36, 82, { maxWidth: 1118 });
     autoTable(pdf, {
-      startY: 82,
-      head: [["Tgl Proyeksi", "Tgl Bayar", "No. Invoice", "Nama", "Keterangan", "Mata Uang", "Proyeksi", "Realisasi", "Selisih", "Status"]],
+      startY: 96,
+      head: [["Jatuh Tempo", "Invoice / Nama Siswa", "Cicilan", "Tanggal Bayar & Penanda", "Proyeksi Jatuh Tempo", "Kas Masuk Periode", "Dipercepat", "Selisih Jadwal - Kas", "Status Cicilan"]],
       body: report.rows.map((row) => [
         row.projectionDate || "-",
-        (row.paymentDates || []).join(", ") || "-",
-        row.invoiceNumber,
-        row.customerName,
+        `${row.invoiceNumber}\n${row.customerName}`,
         row.description,
-        row.currency,
+        `${formatInvoiceProjectionPaymentDates(row)}\n${formatInvoiceProjectionPaymentContext(row)}`,
         formatAmount(row.projectedAmount, row.currency),
         formatAmount(row.realizedAmount, row.currency),
+        formatAmount(row.earlyRealizedAmount || 0, row.currency),
         row.difference === null ? "-" : formatAmount(row.difference, row.currency),
         row.status,
       ]),
-      styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak" },
+      styles: { fontSize: 7, cellPadding: 3, overflow: "linebreak" },
       headStyles: { fillColor: [4, 33, 74] },
       margin: { left: 36, right: 36 },
+      columnStyles: {
+        0: { cellWidth: 70 },
+        1: { cellWidth: 140 },
+        2: { cellWidth: 52 },
+        3: { cellWidth: 371.5 },
+        4: { cellWidth: 105 },
+        5: { cellWidth: 105 },
+        6: { cellWidth: 90 },
+        7: { cellWidth: 105 },
+        8: { cellWidth: 80 },
+      },
     });
     return pdf;
   }

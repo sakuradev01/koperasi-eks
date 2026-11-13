@@ -27,6 +27,105 @@ const dateKey = (value) => {
   return date ? date.toISOString().slice(0, 10) : "";
 };
 
+const idValue = (value) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "object" && value._id) return idValue(value._id);
+  return String(value);
+};
+
+const parseIdList = (value) => {
+  if (Array.isArray(value)) return value.map(idValue).filter(Boolean);
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(idValue).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+
+const daysBetweenDates = (laterDate, earlierDate) => {
+  const laterKey = dateKey(laterDate);
+  const earlierKey = dateKey(earlierDate);
+  if (!laterKey || !earlierKey) return null;
+  return Math.round(
+    (Date.parse(`${laterKey}T00:00:00.000Z`) - Date.parse(`${earlierKey}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+};
+
+const formatInstallmentCoverage = (indexes) => {
+  const uniqueIndexes = [...new Set(indexes)].sort((left, right) => left - right);
+  if (!uniqueIndexes.length) return "";
+
+  const ranges = [];
+  let start = uniqueIndexes[0];
+  let end = start;
+  const appendRange = () => ranges.push(start === end ? String(start) : `${start}–${end}`);
+
+  uniqueIndexes.slice(1).forEach((index) => {
+    if (index === end + 1) {
+      end = index;
+      return;
+    }
+    appendRange();
+    start = index;
+    end = index;
+  });
+  appendRange();
+  return `Cicilan ${ranges.join(", ")}`;
+};
+
+const getPaymentProjectionIndexes = (payment, projections) => {
+  const indexById = new Map(
+    projections.map((projection, index) => [idValue(projection?._id), index + 1]),
+  );
+  const indexes = [];
+  const addIndex = (value) => {
+    const index = Number(value);
+    if (Number.isInteger(index) && index > 0) indexes.push(index);
+  };
+  const breakdown = Array.isArray(payment?.coveredProjectionBreakdown)
+    ? payment.coveredProjectionBreakdown
+    : [];
+
+  if (breakdown.length) {
+    breakdown.forEach((item) => {
+      addIndex(item?.projectionIndex || indexById.get(idValue(item?.projectionId)));
+    });
+  } else {
+    const coveredIds = parseIdList(payment?.coveredProjectionIds);
+    if (coveredIds.length) {
+      coveredIds.forEach((id) => addIndex(indexById.get(id)));
+    } else if (payment?.projectionId) {
+      addIndex(indexById.get(idValue(payment.projectionId)));
+    } else {
+      addIndex(payment?.projectionIndex);
+    }
+  }
+
+  return [...new Set(indexes)].sort((left, right) => left - right);
+};
+
+const buildPaymentDetails = (contributions, paymentsById, projections, projectionDate) =>
+  contributions.map((contribution) => {
+    const payment = paymentsById.get(contribution.paymentId);
+    const coveredProjectionIndexes = getPaymentProjectionIndexes(payment, projections);
+    const transferAmount = payment?.amount === undefined
+      ? money(contribution.amount)
+      : money(payment.amount);
+
+    return {
+      paymentId: contribution.paymentId,
+      paymentDate: dateKey(contribution.paymentDate),
+      allocatedAmount: money(contribution.amount),
+      transferAmount,
+      coveredProjectionIndexes,
+      coveredProjectionLabel: formatInstallmentCoverage(coveredProjectionIndexes),
+      daysEarly: daysBetweenDates(projectionDate, contribution.paymentDate),
+    };
+  });
+
 const monthKey = (value) => dateKey(value).slice(0, 7);
 
 const monthLabel = (value) => {
@@ -65,6 +164,7 @@ const addCurrencyTotals = (totals, currency) => {
       currency: key,
       totalProjection: 0,
       totalRealized: 0,
+      totalAdvanceReceived: 0,
       difference: 0,
       totalOutstanding: 0,
       totalUnallocated: 0,
@@ -134,6 +234,10 @@ function buildMonthlyReport(invoices, filters) {
         allocateInvoicePaymentsToProjections(projections, payments);
       const currency = String(invoice.currency || "IDR").toUpperCase();
       const invoiceId = invoiceKey(invoice);
+      const paymentsById = new Map(payments.map((payment, index) => [
+        idValue(payment?._id) || `payment:${index + 1}`,
+        payment,
+      ]));
 
       projections.forEach((projection, index) => {
         const id = projectionId(projection, index);
@@ -145,8 +249,22 @@ function buildMonthlyReport(invoices, filters) {
         const relevantPayments = (allocation?.contributions || []).filter((item) =>
           isInRange(item.paymentDate, startDate, endDate),
         );
+        const periodPaymentDetails = buildPaymentDetails(
+          relevantPayments,
+          paymentsById,
+          projections,
+          projection.estimateDate,
+        ).sort((left, right) => left.paymentDate.localeCompare(right.paymentDate));
+        const priorPaymentDetails = buildPaymentDetails(
+          (allocation?.contributions || []).filter((item) =>
+            dateKey(item.paymentDate) < startDate && isBeforeCutoff(item.paymentDate, asOfDate),
+          ),
+          paymentsById,
+          projections,
+          projection.estimateDate,
+        ).sort((left, right) => left.paymentDate.localeCompare(right.paymentDate));
         const realizedAmount = money(
-          relevantPayments.reduce((sum, item) => sum + item.amount, 0),
+          periodPaymentDetails.reduce((sum, item) => sum + item.allocatedAmount, 0),
         );
         if (projectedAmount <= EPSILON && realizedAmount <= EPSILON) return;
 
@@ -158,12 +276,20 @@ function buildMonthlyReport(invoices, filters) {
         const status = projectionStatus(projection, paidToDate, asOfDate);
         if (statusFilter !== "all" && status.toLowerCase() !== statusFilter) return;
         const difference = money(projectedAmount - realizedAmount);
+        const earlyRealizedAmount = money(
+          periodPaymentDetails
+            .filter((payment) => payment.daysEarly > 0)
+            .reduce((sum, payment) => sum + payment.allocatedAmount, 0),
+        );
         const totalsForCurrency = addCurrencyTotals(totals, currency);
         totalsForCurrency.totalProjection = money(
           totalsForCurrency.totalProjection + projectedAmount,
         );
         totalsForCurrency.totalRealized = money(
           totalsForCurrency.totalRealized + realizedAmount,
+        );
+        totalsForCurrency.totalAdvanceReceived = money(
+          totalsForCurrency.totalAdvanceReceived + earlyRealizedAmount,
         );
         totalsForCurrency.difference = money(
           totalsForCurrency.difference + difference,
@@ -184,11 +310,14 @@ function buildMonthlyReport(invoices, filters) {
           projectionId: id,
           projectionIndex: index + 1,
           projectionDate,
-          paymentDates: [...new Set(relevantPayments.map((item) => dateKey(item.paymentDate)).filter(Boolean))],
+          paymentDates: [...new Set(periodPaymentDetails.map((item) => item.paymentDate).filter(Boolean))],
+          periodPaymentDetails,
+          priorPaymentDetails,
           description: projection.description || `Cicilan ${index + 1}`,
           status,
           projectedAmount,
           realizedAmount,
+          earlyRealizedAmount,
           difference,
           remainingAmount: Math.max(money(projection.amount) - paidToDate, 0),
         });
@@ -231,9 +360,10 @@ function buildMonthlyReport(invoices, filters) {
     });
 
   rows.sort((left, right) =>
-    (left.projectionDate || left.paymentDates[0] || "").localeCompare(
-      right.projectionDate || right.paymentDates[0] || "",
-    ) || left.invoiceNumber.localeCompare(right.invoiceNumber),
+    (left.paymentDates?.[0] || left.projectionDate || "").localeCompare(
+      right.paymentDates?.[0] || right.projectionDate || "",
+    ) || left.invoiceNumber.localeCompare(right.invoiceNumber) ||
+    Number(left.projectionIndex || 0) - Number(right.projectionIndex || 0),
   );
 
   return {
@@ -244,7 +374,7 @@ function buildMonthlyReport(invoices, filters) {
       rowCount: rows.length,
       invoiceCount: new Set(rows.map((row) => row.invoiceId)).size,
       byCurrency: sortedCurrencyTotals(totals, [
-        "currency", "totalProjection", "totalRealized", "difference", "totalUnallocated",
+        "currency", "totalProjection", "totalRealized", "totalAdvanceReceived", "difference", "totalUnallocated",
       ]),
     },
   };
