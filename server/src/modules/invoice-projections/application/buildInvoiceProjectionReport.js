@@ -29,7 +29,10 @@ const dateKey = (value) => {
 
 const idValue = (value) => {
   if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "object" && value._id) return idValue(value._id);
+  if (typeof value === "object") {
+    const nestedId = value._id;
+    if (nestedId && nestedId !== value) return String(nestedId);
+  }
   return String(value);
 };
 

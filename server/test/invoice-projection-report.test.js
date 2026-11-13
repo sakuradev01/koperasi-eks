@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import mongoose from "mongoose";
 
 const loadReportBuilder = async () => {
   const module = await import(
@@ -176,6 +177,41 @@ test("monthly report groups a batched early payment by actual date and exposes e
     12_971_428,
     "the one transfer must still reconcile to its four allocated installments",
   );
+});
+
+test("monthly report safely normalizes Mongo ObjectIds without recursive _id traversal", async () => {
+  const buildInvoiceProjectionReport = await loadReportBuilder();
+  const projectionId = new mongoose.Types.ObjectId();
+  const report = buildInvoiceProjectionReport([{
+    _id: new mongoose.Types.ObjectId(),
+    invoiceNumber: "OBJECT-ID-1",
+    customerSnapshot: { name: "Object ID member" },
+    currency: "IDR",
+    status: "sent",
+    total: 100,
+    totalPaid: 100,
+    projections: [{
+      _id: projectionId,
+      estimateDate: "2026-08-12T00:00:00.000Z",
+      amount: 100,
+    }],
+    payments: [{
+      _id: new mongoose.Types.ObjectId(),
+      paymentDate: "2026-08-12T00:00:00.000Z",
+      amount: 100,
+      projectionId,
+      projectionIndex: 1,
+    }],
+  }], {
+    mode: "monthly",
+    startDate: "2026-08-01",
+    endDate: "2026-08-31",
+    asOfDate: "2026-08-31T23:59:59.999Z",
+  });
+
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].invoiceNumber, "OBJECT-ID-1");
+  assert.equal(report.rows[0].realizedAmount, 100);
 });
 
 test("year matrix shows scheduled outstanding balance after cutoff and never nets different currencies", async () => {
