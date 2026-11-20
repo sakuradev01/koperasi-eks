@@ -5,10 +5,10 @@ import {
   calculateRunningBalancesFromMovements,
 } from "../src/utils/runningBalance.js";
 
-test("calculates the balance after each transaction from complete account history", () => {
+test("calculates the balance after each transaction from ledger-derived account totals", () => {
   const balances = calculateRunningBalances({
-    accountBalances: [
-      { _id: "cash-account", balance: 1000 },
+    ledgerBalances: [
+      { _id: "cash-account", balance: 300 },
     ],
     historyRows: [
       {
@@ -30,15 +30,42 @@ test("calculates the balance after each transaction from complete account histor
     ],
   });
 
-  assert.equal(balances.get("new-withdrawal"), 1000);
-  assert.equal(balances.get("old-deposit"), 1200);
+  assert.equal(balances.get("new-withdrawal"), 300);
+  assert.equal(balances.get("old-deposit"), 500);
+});
+
+test("shows the opening deposit even when the persisted account balance is stale", () => {
+  const balances = calculateRunningBalances({
+    ledgerBalances: [{ _id: "bank-account", balance: 925_000 }],
+    historyRows: [
+      {
+        _id: "opening-deposit",
+        accountId: "bank-account",
+        transactionDate: "2025-08-15",
+        createdAt: "2025-08-15T08:00:00.000Z",
+        transactionType: "Deposit",
+        amount: 1_000_000,
+      },
+      {
+        _id: "opening-day-fee",
+        accountId: "bank-account",
+        transactionDate: "2025-08-15",
+        createdAt: "2025-08-15T09:00:00.000Z",
+        transactionType: "Withdrawal",
+        amount: 75_000,
+      },
+    ],
+  });
+
+  assert.equal(balances.get("opening-deposit"), 1_000_000);
+  assert.equal(balances.get("opening-day-fee"), 925_000);
 });
 
 test("keeps running balances isolated per account and stable for same-date rows", () => {
   const balances = calculateRunningBalances({
-    accountBalances: [
-      { _id: "cash-account", balance: 900 },
-      { _id: "bank-account", balance: 400 },
+    ledgerBalances: [
+      { _id: "cash-account", balance: -200 },
+      { _id: "bank-account", balance: -50 },
     ],
     historyRows: [
       {
@@ -68,9 +95,9 @@ test("keeps running balances isolated per account and stable for same-date rows"
     ],
   });
 
-  assert.equal(balances.get("cash-later"), 900);
-  assert.equal(balances.get("cash-earlier"), 800);
-  assert.equal(balances.get("bank-only"), 400);
+  assert.equal(balances.get("cash-later"), -200);
+  assert.equal(balances.get("cash-earlier"), -300);
+  assert.equal(balances.get("bank-only"), -50);
 });
 
 test("calculates a report-account balance from selected category movements", () => {

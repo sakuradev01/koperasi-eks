@@ -28,6 +28,7 @@ import {
 } from "../../utils/transactionExport";
 import { buildTransactionPdf } from "../../utils/transactionPdfExport";
 import { buildTransactionAccountOptions } from "../../utils/transactionAccountOptions.js";
+import { applyReportBalancesToAccountGroups } from "../../utils/accountBalances.js";
 
 // ==================== UTILITY FUNCTIONS ====================
 function formatNumber(num) {
@@ -421,7 +422,7 @@ export default function Transactions() {
         getSalesTaxes("active"),
         getMembers(),
       ]);
-      if (assetsRes.success) setAssetsAccounts(assetsRes.data || {});
+      if (assetsRes.success) setAssetsAccounts(applyReportBalancesToAccountGroups(assetsRes.data || {}));
       if (catRes.success) setCategories(catRes.data || []);
       if (taxRes.success) setSalesTaxes(taxRes.data || []);
       if (membersRes.success) {

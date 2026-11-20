@@ -64,14 +64,15 @@ function calculateLedgerRunningBalances({ accountBalances = [], ledgerRows = [] 
 }
 
 /**
- * Calculate the balance after each transaction, starting from each account's
- * current balance and walking the complete history backwards. The caller can
- * pass only the account IDs represented on the current page; historyRows must
- * contain all transactions for those accounts, not only the visible page.
+ * Calculate the balance after each transaction by walking from the
+ * ledger-derived account total backwards. The caller can pass only the account
+ * IDs represented on the current page; ledgerBalances must reflect every
+ * transaction for those accounts, while historyRows must include all rows
+ * from the oldest visible transaction through the latest transaction.
  */
-export function calculateRunningBalances({ accountBalances = [], historyRows = [] } = {}) {
+export function calculateRunningBalances({ ledgerBalances = [], historyRows = [] } = {}) {
   return calculateLedgerRunningBalances({
-    accountBalances,
+    accountBalances: ledgerBalances,
     ledgerRows: historyRows.map((row) => ({
       ...row,
       transactionId: row?._id ?? row?.id,

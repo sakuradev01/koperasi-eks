@@ -781,6 +781,38 @@ export const getAssetsAccounts = async (req, res) => {
           isActive: true,
         }).lean()
       : [];
+    const cashSubmenuIds = submenus
+      .filter((submenu) => ["Cash and Bank", "Cash on Hand", "Bank Accounts", "Money in Transit"]
+        .includes(submenu.submenuName))
+      .map((submenu) => submenu._id);
+    const cashAccountIds = allAccounts
+      .filter((account) => cashSubmenuIds.some((submenuId) => String(submenuId) === String(account.submenuId)))
+      .map((account) => account._id);
+    const cashBalances = cashAccountIds.length
+      ? await AccountingTransaction.aggregate([
+          { $match: { accountId: { $in: cashAccountIds } } },
+          {
+            $group: {
+              _id: "$accountId",
+              balance: {
+                $sum: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$transactionType", "Deposit"] }, then: { $abs: "$amount" } },
+                      { case: { $eq: ["$transactionType", "Withdrawal"] }, then: { $multiply: [-1, { $abs: "$amount" }] } },
+                    ],
+                    default: 0,
+                  },
+                },
+              },
+              transactionCount: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+    const cashBalanceByAccountId = new Map(
+      cashBalances.map((row) => [String(row._id), row]),
+    );
     const accsBySub = new Map();
     for (const acc of allAccounts) {
       const key = String(acc.submenuId);
@@ -789,9 +821,15 @@ export const getAssetsAccounts = async (req, res) => {
     }
     const grouped = {};
     for (const sub of submenus) {
-      grouped[sub.submenuName] = sortAccountsByCode(
-        accsBySub.get(String(sub._id)) || [],
-      );
+      grouped[sub.submenuName] = sortAccountsByCode(accsBySub.get(String(sub._id)) || [])
+        .map((account) => {
+          const ledgerBalance = cashBalanceByAccountId.get(String(account._id));
+          return {
+            ...account,
+            reportBalance: ledgerBalance?.balance ?? Number(account.balance || 0),
+            transactionCount: ledgerBalance?.transactionCount || 0,
+          };
+        });
     }
 
     res.status(200).json({ success: true, data: grouped });
