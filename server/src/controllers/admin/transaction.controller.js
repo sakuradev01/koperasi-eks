@@ -338,6 +338,9 @@ export const getTransactions = async (req, res) => {
     const runningBalanceHistoryFilter = categoryAccountIds.length
       ? null
       : buildRunningBalanceHistoryFilter(displayAccountIds, transactions);
+    const ledgerAccountIds = (categoryAccountIds.length ? [] : displayAccountIds)
+      .filter((accountId) => mongoose.Types.ObjectId.isValid(accountId))
+      .map((accountId) => new mongoose.Types.ObjectId(accountId));
 
     const [
       allSplits,
@@ -345,7 +348,7 @@ export const getTransactions = async (req, res) => {
       masters,
       submenus,
       accounts,
-      accountBalances,
+      ledgerBalances,
       historyRows,
       categoryDirectHistory,
       categorySplitParents,
@@ -367,8 +370,32 @@ export const getTransactions = async (req, res) => {
       CoaMaster.find({}).select("_id masterName").lean(),
       CoaSubmenu.find({}).select("_id submenuName masterId").lean(),
       CoaAccount.find({}).select("_id accountName submenuId").lean(),
-      displayAccountIds.length
-        ? CoaAccount.find({ _id: { $in: displayAccountIds } }).select("_id balance").lean()
+      ledgerAccountIds.length
+        ? AccountingTransaction.aggregate([
+            { $match: { accountId: { $in: ledgerAccountIds } } },
+            {
+              $group: {
+                _id: "$accountId",
+                balance: {
+                  $sum: {
+                    $switch: {
+                      branches: [
+                        {
+                          case: { $eq: ["$transactionType", "Deposit"] },
+                          then: { $abs: "$amount" },
+                        },
+                        {
+                          case: { $eq: ["$transactionType", "Withdrawal"] },
+                          then: { $multiply: [-1, { $abs: "$amount" }] },
+                        },
+                      ],
+                      default: 0,
+                    },
+                  },
+                },
+              },
+            },
+          ])
         : [],
       runningBalanceHistoryFilter
         ? AccountingTransaction.find(runningBalanceHistoryFilter)
@@ -402,7 +429,7 @@ export const getTransactions = async (req, res) => {
         : [],
     ]);
 
-    const runningBalances = calculateRunningBalances({ accountBalances, historyRows });
+    const runningBalances = calculateRunningBalances({ ledgerBalances, historyRows });
 
     const masterMap = new Map(masters.map((m) => [String(m._id), m.masterName]));
     const submenuMap = new Map(submenus.map((s) => [String(s._id), s.submenuName]));

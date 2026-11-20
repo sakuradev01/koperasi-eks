@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getAccountsByType } from "../src/controllers/admin/coa.controller.js";
+import { getAccountsByType, getAssetsAccounts } from "../src/controllers/admin/coa.controller.js";
 import { AccountingTransaction } from "../src/models/accountingTransaction.model.js";
 import { CoaAccount } from "../src/models/coaAccount.model.js";
 import { CoaMaster } from "../src/models/coaMaster.model.js";
@@ -62,4 +62,29 @@ test("COA endpoint returns derived balances and transaction counts without chang
   assert.equal(res.body.accountsBySubtype["Accounts Receivable"].accounts[0].transactionCount, 2);
   assert.ok(transactionFilter.$or.some((clause) => clause.accountId?.$in?.includes("a-bank")));
   assert.ok(transactionFilter.$or.some((clause) => clause.categoryId?.$in?.includes("a-ar")));
+});
+
+test("assets dropdown exposes a ledger balance separately from the stored COA balance", async (t) => {
+  let aggregation;
+  mockMethod(t, CoaMaster, "findOne", async () => masters[0]);
+  mockMethod(t, CoaSubmenu, "find", () => query([submenus[0]]));
+  mockMethod(t, CoaAccount, "find", () => query([accounts[0]]));
+  mockMethod(t, AccountingTransaction, "aggregate", async (pipeline) => {
+    aggregation = pipeline;
+    return [{ _id: "a-bank", balance: 1_655_288_371, transactionCount: 1075 }];
+  });
+
+  const res = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    json(value) { this.body = value; return this; },
+  };
+  await getAssetsAccounts({ params: {}, query: {}, body: {} }, res);
+
+  const bank = res.body.data["Cash and Bank"][0];
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(bank.balance, 0);
+  assert.equal(bank.reportBalance, 1_655_288_371);
+  assert.equal(bank.transactionCount, 1075);
+  assert.ok(aggregation[0].$match.accountId.$in.includes("a-bank"));
 });
